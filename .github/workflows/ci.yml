@@ -39,22 +39,27 @@ jobs:
         run: python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip
       - name: Install (runtime only)
         run: . .venv/bin/activate && pip install .
-      - name: Import smoke — runtime surface present
+      - name: Import smoke - runtime surface present
         run: |
           . .venv/bin/activate
-          python -c "import langfuse_synth_core as c; print('version', c.__version__)"
-          python -c "from langfuse_synth_core.companion import CompanionAdapter"
-          python -c "from langfuse_synth_core.derivation import DerivationHook, identity_derivation; assert identity_derivation(7, {}) == {'target_traces': 7}"
-      - name: Boundary — authoring absent without the extra
+          python - <<'PY'
+          import langfuse_synth_core as c
+          from langfuse_synth_core.companion import CompanionAdapter  # noqa: F401
+          from langfuse_synth_core.derivation import DerivationHook, identity_derivation
+          assert isinstance(c.__version__, str)
+          assert identity_derivation(7, {}) == {"target_traces": 7}
+          print("runtime surface OK; version", c.__version__)
+          PY
+      - name: Boundary - authoring absent without the extra
         run: |
           . .venv/bin/activate
           python - <<'PY'
           try:
               import langfuse_synth_core.authoring  # noqa: F401
           except ModuleNotFoundError:
-              print("OK: authoring correctly unavailable on a runtime-only install")
+              print("OK - authoring correctly unavailable on a runtime-only install")
           else:
-              raise SystemExit("FAIL: authoring imported without the [authoring] extra")
+              raise SystemExit("FAIL - authoring imported without the [authoring] extra")
           PY
 
   authoring-suite:
@@ -66,7 +71,12 @@ jobs:
         run: python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip
       - name: Install (authoring + dev)
         run: . .venv/bin/activate && pip install -e '.[authoring,dev]'
-      - name: Import smoke — authoring available with the extra
-        run: . .venv/bin/activate && python -c "import langfuse_synth_core.authoring; print('OK: authoring available')"
+      - name: Import smoke - authoring available with the extra
+        run: |
+          . .venv/bin/activate
+          python - <<'PY'
+          import langfuse_synth_core.authoring  # noqa: F401
+          print("authoring available OK")
+          PY
       - name: Pytest
         run: . .venv/bin/activate && pytest
