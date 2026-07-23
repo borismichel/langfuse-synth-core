@@ -1,0 +1,131 @@
+# usecase.yaml — schema version 1
+# AUTHORITATIVE manifest for langfuse-synth-ev. Owned by the portal contract (CTO).
+# Commit this VERBATIM to the repo root of borismichel/langfuse-synth-ev.
+# Validated against schemas/usecase.schema.json in langfuse-demo-portal.
+schema_version: 1
+slug: ev-subsidy-regression
+name: "EV Subsidy Silent Regression"
+tagline: "Catch a silent decision-quality regression and close the loop: trace → judge → dataset → prompt fix → experiment."
+vertical: "Financial Services / Consumer Lending"
+story: |
+  A subsidy rule change lands quietly and the credit-decision agent starts
+  silently disagreeing with itself: a red→green prompt flip that never threw an
+  error. This kit backfills ~4,000 backdated traces, a hosted dataset of disputed
+  rejections, an LLM-as-judge `user_disagreement` beat, and prompt v1→v2 so an SA
+  can walk the full close-the-loop story — trace to fix to experiment — in one sitting.
+
+langfuse_features:
+  - tracing
+  - prompt-management
+  - llm-as-judge
+  - datasets
+  - experiments
+  - scores
+
+assets:
+  docs:
+    - path: README.md
+      title: "Overview"
+    - path: langfuse-demo-synth-spec.md
+      title: "Full spec"
+    - path: VERIFICATION.md
+      title: "Verification checks"
+  screenshots:
+    - docs/img/playground-form.png
+
+target:
+  project_hint: "demo"
+  supports: [cloud_eu, cloud_us, self_hosted]
+  cloud_notes: "Free tier caps events. Run plan first and keep the trace estimate ≤80% of the tier cap; scale down with generation.total_traces."
+
+llm:
+  # Demo-time model calls (live playground submission + experiment task) route through
+  # the kit's provider layer (src/synth/llm.py). First provider = deploy-time default.
+  # The portal injects the selected provider's key via the LLM_API_KEY sentinel below,
+  # plus LLM_PROVIDER and (when declared here) LLM_MODEL.
+  providers: [anthropic, openai]
+  models:
+    # Anthropic intentionally omitted: with no LLM_MODEL injected, the kit keeps its
+    # built-in Anthropic model (claude-sonnet-4-6), so existing deployments are
+    # byte-for-byte unaffected. OpenAI has no built-in default worth pinning here.
+    openai: gpt-4o
+
+base_config:
+  # EV ships a single config; Cloud runs scale down via --set rather than a separate file.
+  default: config/demo.yaml
+
+config_schema:
+  # v1 contract: each property NAME is a dotted kit-config key applied as `--set name=value`.
+  type: object
+  properties:
+    generation.seed:
+      type: integer
+      default: 42
+      minimum: 0
+      title: "Generation seed"
+      description: "Deterministic RNG seed for the whole dataset. Vary it to mint a distinct trace/id set per deployment; the same seed re-seeds idempotently (upsert). The throwaway probe trace is separately nonce-salted, so it never collides regardless of this value."
+    generation.total_traces:
+      type: integer
+      default: 800
+      minimum: 100
+      maximum: 6000
+      title: "Trace volume"
+      description: "Total backdated traces. 800 is Cloud-free-tier safe; 4000 is the full self-hosted story."
+    generation.window_days:
+      type: integer
+      default: 30
+      enum: [14, 30]
+      title: "Backfill window (days)"
+    ambient_incidents.cost_spike.enabled:
+      type: boolean
+      default: true
+      title: "Cost-spike ambience"
+      description: "Adds a backdated cost-spike incident for a richer dashboard."
+  required: []
+
+pipeline:
+  - id: probe
+    run: "synth probe --config {config}"
+    when: "host_kind != self_hosted"
+    fatal: true
+  - id: plan
+    run: "synth plan --config {config}"
+    parse:
+      # EV `plan` prints state.summary as JSON; total_traces is the headline count.
+      event_count: 'regex:"total_traces":\s*(\d+)'
+    gate: "confirm"
+  - id: seed
+    run: "synth seed --config {config}"
+    resumable: "synth import-spool --config {config}"
+    timeout_minutes: 90
+  - id: verify
+    run: "synth verify --config {config}"
+    fatal: true
+
+artifacts:
+  - path: DEMO_SCRIPT.md
+    render: markdown
+    title: "Demo script"
+
+live_components:
+  - name: playground
+    description: "Live decision configurator + /analytics in-scene dashboard. Production prompt pulled live per submission."
+    command: "synth playground --config {config} --host 0.0.0.0 --port 8080"
+    port: 8080
+    requires_secrets: [LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LLM_API_KEY]
+    # One container serving the decision configurator (/) and the in-scene dashboard.
+    routes:
+      - path: /
+        title: "Decision configurator"
+      - path: /analytics
+        title: "In-scene dashboard"
+    default_ttl_hours: 168
+    max_ttl_hours: 720
+    health_path: "/"
+
+teardown:
+  note: |
+    Langfuse ingestion is append-only; teardown is project-level. Delete the Langfuse
+    project (or create a fresh one) and re-deploy. The portal only marks the deployment
+    torn down and stops any live instances. Re-seeding the same project is safe (deterministic
+    upsert), but changing coverage requires a fresh project.

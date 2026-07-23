@@ -22,6 +22,16 @@ dev = [
     "ruff>=0.5,<1",
 ]
 
+[project.scripts]
+# The `synth` authoring CLI (#27 ships `synth validate`; #28/#11 add `freeze`/`new`).
+# INTEGRATION RISK: the dispatcher lives under `langfuse_synth_core.authoring`, so it
+# needs the [authoring] extra to run — but a console script installs regardless of
+# extras, so on a runtime-only kit image `synth` resolves here and errors with the
+# boundary ModuleNotFoundError unless the extra is present. Kits also define their OWN
+# `synth` console script (synth probe|plan|seed|verify|...); in a shared environment the
+# two names collide. Both are tracked as integration risks for #28/#11 / review.
+synth = "langfuse_synth_core.authoring.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -29,6 +39,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["langfuse_synth_core*"]
+
+[tool.setuptools.package-data]
+# Ship the one versioned copy of the Contract schema as package data so `load_schema()`
+# resolves it via importlib.resources on any install (source, wheel, or editable).
+"langfuse_synth_core.authoring" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
