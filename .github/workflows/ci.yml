@@ -1,13 +1,14 @@
 # CI for langfuse-synth-core.
 #
-# Runner policy (refines the portal's "no third-party infra touches secrets" directive):
-# these jobs touch NO secrets — they are lint + import smoke only. So they run on a
-# PINNED GitHub-hosted image (ubuntu-24.04, never the moving `ubuntu-latest`), which
-# keeps CI reproducible without waiting on a self-hosted runner. The directive still
-# binds anything that DOES touch secrets or the private registry: the private-install /
-# build-secret path (docs/INSTALL.md) is exercised by the kits' own builds, and the
-# secret-touching image-build jobs added in Ring 1/2 MUST run on [self-hosted, linux,
-# demo-depot]. Do not route a secret-bearing job onto a hosted runner.
+# Runner policy (mirrors the portal's "no third-party infra touches secrets" directive):
+# ALL jobs run on the SELF-HOSTED runner. This repo needs a runner registered with the
+# labels below for Actions to run — see infra/host/runner-setup.sh in the portal repo
+# (labels: self-hosted, linux, demo-depot). Until then, runs will not schedule.
+#
+# These jobs touch NO secrets (lint + import smoke); the private-install / build-secret
+# path (docs/INSTALL.md) is exercised by the kits' own builds, and the secret-touching
+# image-build jobs added in Ring 1/2 also run here. Never route a job onto a hosted
+# runner (hosted minutes are unavailable for this private repo, and the directive binds).
 
 name: CI
 
@@ -22,7 +23,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, demo-depot]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -34,7 +35,7 @@ jobs:
 
   runtime-smoke:
     # A BARE runtime install must import cleanly AND carry none of the authoring deps.
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, demo-depot]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -61,7 +62,7 @@ jobs:
 
   authoring-suite:
     # With the extra present, the authoring subpackage imports and the suite runs.
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, demo-depot]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
