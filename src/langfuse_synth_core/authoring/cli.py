@@ -1,14 +1,18 @@
-"""The ``synth`` authoring CLI — minimal dispatcher (#28 adds only ``freeze``).
+"""The ``synth`` authoring CLI — a subcommand dispatcher (Spec A).
 
-INTEGRATION RISK: this file and the ``[project.scripts] synth`` entry are shared CLI
-surface. #27 (``synth validate``) and #11 (``synth new``) also register subcommands
-here. The dispatcher is a plain ``argparse`` with subparsers so each ticket adds one
-additive ``_add_*`` block plus one ``subparsers.add_parser`` registration — keep merges
-mechanical and avoid reflowing the shared parts.
+Ships ``synth validate`` (#27, the offline Contract lint) and ``synth freeze`` (#28, the
+determinism golden gate). ``synth new`` (#11) registers alongside them here. The
+dispatcher is plain ``argparse`` with subparsers, each command adding one ``_add_*``
+block plus a ``set_defaults(func=...)`` — so later tickets bolt on mechanically without
+reshaping the shared parts.
 
-``synth freeze`` blesses/updates the determinism golden snapshot in one intentional step
-(see :mod:`langfuse_synth_core.authoring.golden`). It runs the kit's ``seed`` under the
-deny-LLM egress block and writes the byte-identical Spool as the blessed golden.
+The CLI lives under ``langfuse_synth_core.authoring`` and so requires the ``[authoring]``
+extra — importing this module without it raises the boundary ``ModuleNotFoundError``
+(see ``authoring/__init__.py``). It is authoring tooling, never part of the runtime image.
+
+INTEGRATION NOTE: the ``synth`` name also names the kits' OWN runtime console script
+(``synth probe|plan|seed|verify|...``); in a shared environment the two collide. That
+collision is deferred to Ring 2 (#33/#34), where the kit images change anyway.
 """
 
 from __future__ import annotations
@@ -18,9 +22,28 @@ import json
 import sys
 from pathlib import Path
 
+from langfuse_synth_core.authoring import validate as _validate
 from langfuse_synth_core.authoring.golden import GoldenSpec, freeze
 
 
+# ── synth validate (#27) ──────────────────────────────────────────────────────
+def _cmd_validate(args: argparse.Namespace) -> int:
+    return _validate.run(args.paths)
+
+
+def _add_validate(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "validate",
+        help="offline static Contract lint of one or more usecase.yaml manifests",
+    )
+    parser.add_argument(
+        "paths", nargs="+", metavar="usecase.yaml",
+        help="path(s) to the manifest(s) to validate",
+    )
+    parser.set_defaults(func=_cmd_validate)
+
+
+# ── synth freeze (#28) ────────────────────────────────────────────────────────
 def _parse_params(raw: str | None) -> dict:
     if not raw:
         return {}
@@ -69,16 +92,25 @@ def _add_freeze(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=_cmd_freeze)
 
 
+# ── dispatcher ────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="synth", description="Demo Depot authoring SDK.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="synth",
+        description="Demo Depot kit authoring toolchain (langfuse-synth-core).",
+    )
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+    _add_validate(subparsers)
     _add_freeze(subparsers)
-    # #27 registers `validate`, #11 registers `new` here.
+    # #11 registers `new` here.
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if not hasattr(args, "func"):  # no subcommand given
+        parser.print_help()
+        return 2
     return args.func(args)
 
 

@@ -9,13 +9,6 @@ requires-python = ">=3.11"
 # provable: a bare runtime install must carry NONE of the authoring toolchain's deps.
 dependencies = []
 
-[project.scripts]
-# The `synth` authoring CLI. #28 wires only `freeze`; #27 (`validate`) and #11 (`new`)
-# add their subcommands to the same dispatcher (authoring/cli.py). The entry point
-# imports langfuse_synth_core.authoring, so it is usable only on an [authoring] install
-# — consistent with the runtime-vs-[authoring] boundary.
-synth = "langfuse_synth_core.authoring.cli:main"
-
 [project.optional-dependencies]
 # The authoring toolchain (synth new/validate/freeze + kit-dev skills, #27/#28/#11).
 # The runtime (deployed-kit / portal) install must NEVER pull these — the boundary
@@ -29,6 +22,16 @@ dev = [
     "ruff>=0.5,<1",
 ]
 
+[project.scripts]
+# The `synth` authoring CLI (#27 ships `synth validate`; #28/#11 add `freeze`/`new`).
+# INTEGRATION RISK: the dispatcher lives under `langfuse_synth_core.authoring`, so it
+# needs the [authoring] extra to run — but a console script installs regardless of
+# extras, so on a runtime-only kit image `synth` resolves here and errors with the
+# boundary ModuleNotFoundError unless the extra is present. Kits also define their OWN
+# `synth` console script (synth probe|plan|seed|verify|...); in a shared environment the
+# two names collide. Both are tracked as integration risks for #28/#11 / review.
+synth = "langfuse_synth_core.authoring.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -36,6 +39,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["langfuse_synth_core*"]
+
+[tool.setuptools.package-data]
+# Ship the one versioned copy of the Contract schema as package data so `load_schema()`
+# resolves it via importlib.resources on any install (source, wheel, or editable).
+"langfuse_synth_core.authoring" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

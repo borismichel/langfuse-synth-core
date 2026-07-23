@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/borismichel/langfuse-demo-portal/schemas/usecase.schema.json",
+  "title": "Demo Depot use-case manifest",
+  "description": "Schema version 1 of usecase.yaml — the ONLY integration surface between a demo kit and the Demo Depot portal. Adding use case #3..N must require zero portal code changes: everything the portal needs is declared here. Top-level additionalProperties:false catches typos (PLAN.md Appendix B).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "slug", "name", "tagline", "target", "pipeline"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest schema version. Portal pins the schema it validates against."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Stable kebab-case identifier. Used as the image name and DB key. NEVER special-cased in portal code."
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "tagline": { "type": "string", "minLength": 1 },
+    "vertical": { "type": "string" },
+    "story": {
+      "type": "string",
+      "description": "Markdown. Rendered on the catalog detail page."
+    },
+    "langfuse_features": {
+      "type": "array",
+      "description": "Drives catalog feature filters. Free-form tags; portal renders them as chips.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "video_url": { "type": "string", "format": "uri" },
+        "docs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "title"],
+            "properties": {
+              "path": { "type": "string", "description": "Repo-relative path, rendered in-portal." },
+              "title": { "type": "string" }
+            }
+          }
+        },
+        "screenshots": {
+          "type": "array",
+          "items": { "type": "string", "description": "Repo-relative image path." }
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_hint", "supports"],
+      "properties": {
+        "project_hint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Portal HARD-BLOCKS deploy unless environment.project_name contains this substring, BEFORE any container starts (PLAN.md §5.2)."
+        },
+        "supports": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["cloud_eu", "cloud_us", "cloud_hipaa", "self_hosted"] },
+          "uniqueItems": true
+        },
+        "cloud_notes": { "type": "string" }
+      }
+    },
+    "base_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which kit config file the portal writes as --config per host kind. v1: no YAML templating in the portal — overrides ride --set on top of the chosen base (PLAN.md §4).",
+      "required": ["default"],
+      "properties": {
+        "default": { "type": "string", "description": "Repo-relative config path used when no host-kind-specific entry matches." },
+        "cloud_eu": { "type": "string" },
+        "cloud_us": { "type": "string" },
+        "cloud_hipaa": { "type": "string" },
+        "self_hosted": { "type": "string" }
+      }
+    },
+    "config_schema": {
+      "type": "object",
+      "description": "JSON Schema. The deploy wizard renders a form from this. v1 CONTRACT: each property NAME is a dotted kit-config key passed verbatim as `--set <name>=<value>` — no portal-side mapping table, preserving the zero-code invariant.",
+      "properties": {
+        "type": { "const": "object" },
+        "properties": { "type": "object" },
+        "required": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "pipeline": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered steps. Each step becomes one Job. Missing built-in steps (e.g. no probe) simply aren't listed — the portal never assumes a command exists.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "run"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "description": "Free step identifier. Maps to jobs.kind: ids probe|plan|seed|verify|resume|teardown map to that kind; any other id (e.g. evaluators, memo) maps to kind=custom_step (PLAN.md §4)."
+          },
+          "run": {
+            "type": "string",
+            "description": "Container command. {config} is substituted with the resolved --config path; --set flags are appended by the portal."
+          },
+          "when": {
+            "type": "string",
+            "description": "Simple guard expression over host_kind and config.* (e.g. \"host_kind != self_hosted\"). Absent = always run."
+          },
+          "fatal": { "type": "boolean", "default": false, "description": "Failure aborts the pipeline." },
+          "gate": {
+            "type": "string",
+            "enum": ["confirm"],
+            "description": "Pause after this step for explicit user confirmation (e.g. plan event-count vs tier cap)."
+          },
+          "parse": {
+            "type": "object",
+            "description": "Optional structured extraction from stdout. Value form: 'regex:<pattern with one capture group>'.",
+            "additionalProperties": { "type": "string" }
+          },
+          "resumable": {
+            "type": "string",
+            "description": "Command to re-run this step safely after failure (spool on shared volume + deterministic upsert IDs)."
+          },
+          "timeout_minutes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Files the worker collects from /app/out/ after the producing step exits (PLAN.md §5.1.6).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "description": "Path relative to the container artifact dir (/app/out/)." },
+          "render": { "enum": ["markdown", "html", "json", "raw"], "default": "raw" },
+          "title": { "type": "string" }
+        }
+      }
+    },
+    "live_components": {
+      "type": "array",
+      "description": "Ephemeral live surfaces the portal can start as containers with a wildcard subdomain + TTL (PLAN.md §6).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "command", "port", "requires_secrets"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "description": { "type": "string" },
+          "command": { "type": "string", "description": "Must bind 0.0.0.0 and the declared port; the portal never port-publishes directly." },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "requires_secrets": {
+            "type": "array",
+            "items": { "enum": ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "ANTHROPIC_API_KEY", "LANGFUSE_BASE_URL", "LLM_API_KEY"] },
+            "description": "The portal injects ONLY these into the live container (least privilege, PLAN.md §9.3). Sentinel LLM_API_KEY = inject the deployment's selected provider key under that provider's canonical env name (requires a top-level `llm` block; may not be mixed with ANTHROPIC_API_KEY — LAN-378)."
+          },
+          "alpha": { "type": "boolean", "default": false, "description": "Flags an experimental surface; portal renders an 'alpha' badge and may gate it." },
+          "routes": {
+            "type": "array",
+            "description": "In-app routes this one container serves (a route is NOT a separate container). Rendered on the catalog detail page; an alpha route gets its own 'alpha' badge and may be gated independently of the component.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "title"],
+              "properties": {
+                "path": { "type": "string", "pattern": "^/", "description": "Route path served by this component, e.g. \"/\" or \"/workbench\"." },
+                "title": { "type": "string", "minLength": 1 },
+                "alpha": { "type": "boolean", "default": false, "description": "Flags this route experimental even when the component is GA." }
+              }
+            }
+          },
+          "default_ttl_hours": { "type": "integer", "minimum": 1, "default": 168 },
+          "max_ttl_hours": { "type": "integer", "minimum": 1, "default": 720 },
+          "health_path": { "type": "string", "default": "/" }
+        }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providers"],
+      "description": "Optional LLM-provider contract (LAN-378, additive — schema_version stays 1). Declares which LLM providers this use case supports; the portal injects the deployment's SELECTED provider key wherever a live component's requires_secrets lists the LLM_API_KEY sentinel. Manifests with a bare ANTHROPIC_API_KEY and no `llm` block stay valid and behave as an implicit `providers: [anthropic]` (back-compat). Provider id → env-var mapping lives ONLY in the portal provider table (api/app/providers.py), never here.",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Ordered list of supported provider ids; the FIRST entry is the deploy-time default. The set of valid ids mirrors the portal provider table (a drift test pins them together).",
+          "items": { "enum": ["anthropic", "openai"] }
+        },
+        "models": {
+          "type": "object",
+          "description": "Optional per-provider model id, passed to the kit as the LLM_MODEL env var. Keys MUST be a subset of `providers` (validator-enforced, 422 otherwise).",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "teardown": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "note": { "type": "string", "description": "Rendered in the teardown UX (ingestion is append-only; teardown is project-level)." }
+      }
+    }
+  }
+}
