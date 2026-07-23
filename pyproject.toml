@@ -1,0 +1,38 @@
+[project]
+name = "langfuse-synth-core"
+version = "0.0.0"
+description = "Shared synthesis library + Authoring SDK for Demo Depot kits (Spec A, #19)."
+requires-python = ">=3.11"
+# Runtime dependencies are intentionally empty at the scaffold stage. The library's
+# real runtime deps (the Langfuse client, ingestion, pricing, RNG) arrive with the
+# Ring 1 extraction (#31/#32). Keeping this empty now makes the [authoring] boundary
+# provable: a bare runtime install must carry NONE of the authoring toolchain's deps.
+dependencies = []
+
+[project.optional-dependencies]
+# The authoring toolchain (synth new/validate/freeze + kit-dev skills, #27/#28/#11).
+# The runtime (deployed-kit / portal) install must NEVER pull these — the boundary
+# test asserts `import langfuse_synth_core.authoring` fails without this extra.
+authoring = [
+    "jsonschema>=4.18,<5",
+    "PyYAML>=6,<7",
+]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.5,<1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["langfuse_synth_core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100

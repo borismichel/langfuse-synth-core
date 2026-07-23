@@ -1,0 +1,73 @@
+# CI for langfuse-synth-core.
+#
+# House directive (mirrors langfuse-demo-portal): Demo Depot CI runs on the SELF-HOSTED
+# runner only — no third-party build infra touches secrets or the private registry.
+# This repo must have a runner registered with these labels for Actions to run; see
+# infra/host/runner-setup.sh in the portal repo (labels: self-hosted, linux, demo-depot).
+#
+# These jobs touch NO secrets (lint + import smoke); the private-install/build-secret
+# path is exercised by the kits' own builds, documented in docs/INSTALL.md.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: [self-hosted, linux, demo-depot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        run: python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip
+      - name: Install (dev)
+        run: . .venv/bin/activate && pip install -e '.[dev]'
+      - name: Ruff
+        run: . .venv/bin/activate && ruff check .
+
+  runtime-smoke:
+    # A BARE runtime install must import cleanly AND carry none of the authoring deps.
+    runs-on: [self-hosted, linux, demo-depot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        run: python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip
+      - name: Install (runtime only)
+        run: . .venv/bin/activate && pip install .
+      - name: Import smoke — runtime surface present
+        run: |
+          . .venv/bin/activate
+          python -c "import langfuse_synth_core as c; print('version', c.__version__)"
+          python -c "from langfuse_synth_core.companion import CompanionAdapter"
+          python -c "from langfuse_synth_core.derivation import DerivationHook, identity_derivation; assert identity_derivation(7, {}) == {'target_traces': 7}"
+      - name: Boundary — authoring absent without the extra
+        run: |
+          . .venv/bin/activate
+          python - <<'PY'
+          try:
+              import langfuse_synth_core.authoring  # noqa: F401
+          except ModuleNotFoundError:
+              print("OK: authoring correctly unavailable on a runtime-only install")
+          else:
+              raise SystemExit("FAIL: authoring imported without the [authoring] extra")
+          PY
+
+  authoring-suite:
+    # With the extra present, the authoring subpackage imports and the suite runs.
+    runs-on: [self-hosted, linux, demo-depot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        run: python3 -m venv .venv && . .venv/bin/activate && pip install --upgrade pip
+      - name: Install (authoring + dev)
+        run: . .venv/bin/activate && pip install -e '.[authoring,dev]'
+      - name: Import smoke — authoring available with the extra
+        run: . .venv/bin/activate && python -c "import langfuse_synth_core.authoring; print('OK: authoring available')"
+      - name: Pytest
+        run: . .venv/bin/activate && pytest
