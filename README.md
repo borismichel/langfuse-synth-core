@@ -23,8 +23,9 @@ pip install langfuse-synth-core
 pip install 'langfuse-synth-core[authoring]'
 ```
 
-Kits pin it as a **git dependency** by tag/SHA and install it in Docker via a **build
-secret** — see [`docs/INSTALL.md`](docs/INSTALL.md) and
+Kits pin it as a **git dependency** by tag/SHA. The repo is **public** (consistent with
+the public kits it is the shared DNA of), so kits install it with a plain `pip install` —
+no build secret — see [`docs/INSTALL.md`](docs/INSTALL.md) and
 [`examples/kit.Dockerfile`](examples/kit.Dockerfile).
 
 ## Layout

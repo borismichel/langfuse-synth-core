@@ -1,7 +1,8 @@
-# Installing `langfuse-synth-core` (private git dependency)
+# Installing `langfuse-synth-core`
 
-The library is a **private** repo consumed as a **git-pinned dependency**. Kits pin it to
-a tag/SHA in their own `pyproject.toml` and upgrade deliberately.
+The library is a **public** repo (consistent with the public kits it is the shared DNA
+of) consumed as a **git-pinned dependency**. Kits pin it to a tag/SHA in their own
+`pyproject.toml` and upgrade deliberately — no build-time auth needed.
 
 ## Pin it in a kit
 
@@ -15,11 +16,32 @@ dependencies = [
 Pin to a **tag or a full SHA** — never a moving branch — so a kit's vendor-approved
 output can never be silently rewritten by a lib change.
 
-## Build-time auth via a Docker build secret (no credential in any layer)
+## Install in a kit's Docker image
 
-The private install needs a token at build time only. Use a **BuildKit build secret** so
-the token is mounted for one `RUN` and never written into an image layer. The infra
-already runs Infisical to supply the token; see `examples/kit.Dockerfile`.
+Because the repo is public, the install is a plain `pip install` with no secret — see
+`examples/kit.Dockerfile`:
+
+```dockerfile
+WORKDIR /app
+COPY . .
+RUN pip install --no-cache-dir -e '.[playground]'
+```
+
+The pinned lib is fetched over HTTPS from the public git URL during the build; nothing
+to authenticate.
+
+## Runtime vs authoring install
+
+- **Runtime** (deployed kit / portal): `pip install langfuse-synth-core` (or the git pin
+  above). Carries none of the authoring toolchain's dependencies.
+- **Authoring** (a kit author's dev box): `pip install 'langfuse-synth-core[authoring]'`
+  to get `synth new / validate / freeze` and the kit-dev skills.
+
+## If the lib is ever made private again
+
+A private git dependency needs build-time auth. Use a **BuildKit build secret** so the
+token is mounted for one `RUN` and never written into an image layer (the infra runs
+Infisical to supply it):
 
 ```dockerfile
 # syntax=docker/dockerfile:1.7
@@ -29,23 +51,5 @@ RUN --mount=type=secret,id=git_token \
       "langfuse-synth-core @ git+https://x-access-token:${GIT_TOKEN}@github.com/borismichel/langfuse-synth-core@v0.1.0"
 ```
 
-Build it:
-
-```bash
-DOCKER_BUILDKIT=1 docker build \
-  --secret id=git_token,src=<(infisical run -- printenv GIT_TOKEN) \
-  -t my-kit:dev .
-```
-
-Verify no leak (the token must not appear in any layer):
-
-```bash
-docker history --no-trunc my-kit:dev | grep -i token   # expect: no match
-```
-
-## Runtime vs authoring install
-
-- **Runtime** (deployed kit / portal): `pip install langfuse-synth-core` (or the git pin
-  above). Carries none of the authoring toolchain's dependencies.
-- **Authoring** (a kit author's dev box): `pip install 'langfuse-synth-core[authoring]'`
-  to get `synth new / validate / freeze` and the kit-dev skills.
+This path is **not needed while the repo is public** and is documented only so a future
+privacy change has a known-good pattern.
