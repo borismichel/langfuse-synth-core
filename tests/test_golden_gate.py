@@ -1,4 +1,4 @@
-"""Determinism golden gate + ``synth freeze`` + deny-LLM egress (#28).
+"""Determinism golden gate + ``synth-authoring freeze`` + deny-LLM egress (#28).
 
 Mirrors the ticket's acceptance criteria against a small in-lib fixture kit
 (``tests/fixtures/tiny_kit.py``), which materializes a tiny deterministic Spool. These
@@ -100,7 +100,7 @@ def test_gate_reports_missing_golden(tmp_path):
         assert_golden(_spec(tmp_path / "never-frozen.golden"))
 
 
-# --- AC: synth freeze blesses/updates in one step; a re-bless greens an intended change
+# --- AC: synth-authoring freeze blesses/updates in one step; a re-bless greens an intended change
 def test_freeze_reblesses_an_intentionally_changed_pool(tmp_path):
     """A deliberate pool change is one intentional re-bless, never a hand-edit."""
     from langfuse_synth_core.authoring.golden import (

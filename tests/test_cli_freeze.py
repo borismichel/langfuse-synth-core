@@ -1,4 +1,4 @@
-"""`synth freeze` CLI — blesses the golden in one intentional step (#28).
+"""`synth-authoring freeze` CLI — blesses the golden in one intentional step (#28).
 
 INTEGRATION RISK: the `synth` console script and `authoring/cli.py` dispatcher are
 shared CLI surface (#27 `validate`, #11 `new`). These tests pin only the `freeze`

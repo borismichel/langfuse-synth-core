@@ -5,7 +5,7 @@ Pins the relocated Contract against the two vendor-approved gold manifests
 `tests/fixtures/manifests/`. If a future schema or validator edit stops accepting either
 gold manifest, this fails — that is the drift guard.
 
-`synth validate` on a gold manifest must be **green by construction** (it is the same
+`synth-authoring validate` on a gold manifest must be **green by construction** (it is the same
 code + schema the portal runs), which is what makes "passes locally" ≡ "passes sync".
 """
 

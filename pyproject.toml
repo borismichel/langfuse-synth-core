@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-# The authoring toolchain (synth new/validate/freeze + kit-dev skills, #27/#28/#11).
+# The authoring toolchain (synth-authoring new/validate/freeze + kit-dev skills, #27/#28/#11).
 # The runtime (deployed-kit / portal) install must NEVER pull these — the boundary
 # test asserts `import langfuse_synth_core.authoring` fails without this extra.
 authoring = [
@@ -23,14 +23,17 @@ dev = [
 ]
 
 [project.scripts]
-# The `synth` authoring CLI (#27 ships `synth validate`; #28/#11 add `freeze`/`new`).
-# INTEGRATION RISK: the dispatcher lives under `langfuse_synth_core.authoring`, so it
-# needs the [authoring] extra to run — but a console script installs regardless of
-# extras, so on a runtime-only kit image `synth` resolves here and errors with the
-# boundary ModuleNotFoundError unless the extra is present. Kits also define their OWN
-# `synth` console script (synth probe|plan|seed|verify|...); in a shared environment the
-# two names collide. Both are tracked as integration risks for #28/#11 / review.
-synth = "langfuse_synth_core.authoring.cli:main"
+# The authoring CLI (#27 ships `synth-authoring validate`; #28/#11 add `freeze`/`new`).
+# It is namespaced `synth-authoring`, NOT `synth`, on purpose: the bare `synth` name is
+# the KIT runtime console script (synth probe|plan|seed|verify|...), the portal
+# integration surface (CONTRACT.md reserved-verb table; every manifest pipeline runs
+# `synth <verb> --config {config}`). A console script installs regardless of extras, so
+# registering `synth` here would put a competing entry point on PATH the moment a kit
+# installs the lib (Ring 1, #31) and shadow the kit's pipeline. Namespacing sidesteps the
+# collision entirely and keeps a clean split: `synth` runs a kit, `synth-authoring`
+# authors one. (Running `synth-authoring` on a runtime-only install still raises the
+# boundary ModuleNotFoundError from authoring/__init__ — but it no longer shadows `synth`.)
+synth-authoring = "langfuse_synth_core.authoring.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

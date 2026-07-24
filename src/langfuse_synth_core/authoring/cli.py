@@ -1,18 +1,20 @@
-"""The ``synth`` authoring CLI — a subcommand dispatcher (Spec A).
+"""The ``synth-authoring`` CLI — a subcommand dispatcher (Spec A).
 
-Ships ``synth validate`` (#27, the offline Contract lint) and ``synth freeze`` (#28, the
-determinism golden gate). ``synth new`` (#11) registers alongside them here. The
-dispatcher is plain ``argparse`` with subparsers, each command adding one ``_add_*``
-block plus a ``set_defaults(func=...)`` — so later tickets bolt on mechanically without
-reshaping the shared parts.
+Ships ``synth-authoring validate`` (#27, the offline Contract lint) and
+``synth-authoring freeze`` (#28, the determinism golden gate). ``synth-authoring new``
+(#11) registers alongside them here. The dispatcher is plain ``argparse`` with
+subparsers, each command adding one ``_add_*`` block plus a ``set_defaults(func=...)`` —
+so later tickets bolt on mechanically without reshaping the shared parts.
 
 The CLI lives under ``langfuse_synth_core.authoring`` and so requires the ``[authoring]``
 extra — importing this module without it raises the boundary ``ModuleNotFoundError``
 (see ``authoring/__init__.py``). It is authoring tooling, never part of the runtime image.
 
-INTEGRATION NOTE: the ``synth`` name also names the kits' OWN runtime console script
-(``synth probe|plan|seed|verify|...``); in a shared environment the two collide. That
-collision is deferred to Ring 2 (#33/#34), where the kit images change anyway.
+NAMING: this console script is ``synth-authoring``, NOT ``synth``. The bare ``synth``
+name is the kits' OWN runtime console script (``synth probe|plan|seed|verify|...``) and
+the portal integration surface (CONTRACT.md reserved-verb table). Namespacing the
+authoring CLI is what keeps the two from colliding when a kit installs the lib as a
+dependency (Ring 1, #31). See ``[project.scripts]`` in pyproject.toml.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from langfuse_synth_core.authoring import validate as _validate
 from langfuse_synth_core.authoring.golden import GoldenSpec, freeze
 
 
-# ── synth validate (#27) ──────────────────────────────────────────────────────
+# ── synth-authoring validate (#27) ──────────────────────────────────────────────────────
 def _cmd_validate(args: argparse.Namespace) -> int:
     return _validate.run(args.paths)
 
@@ -43,7 +45,7 @@ def _add_validate(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=_cmd_validate)
 
 
-# ── synth freeze (#28) ────────────────────────────────────────────────────────
+# ── synth-authoring freeze (#28) ────────────────────────────────────────────────────────
 def _parse_params(raw: str | None) -> dict:
     if not raw:
         return {}
@@ -95,7 +97,7 @@ def _add_freeze(subparsers: argparse._SubParsersAction) -> None:
 # ── dispatcher ────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="synth",
+        prog="synth-authoring",
         description="Demo Depot kit authoring toolchain (langfuse-synth-core).",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")

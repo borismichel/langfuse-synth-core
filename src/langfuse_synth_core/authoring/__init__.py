@@ -5,9 +5,10 @@ raises a clear ``ModuleNotFoundError``. This is the mechanical proof of the
 distribution boundary: the lean *runtime* image (deployed kit / portal) carries NONE
 of the authoring deps, so this import MUST fail there.
 
-The toolchain lands here across tickets: ``synth validate`` (#27, shipped), the
-determinism golden gate + ``synth freeze`` (#28), ``synth new`` (#11-scaffold), and the
-kit-dev skills. The ``target_traces`` derivation HOOK is the one authoring-adjacent piece
+The toolchain lands here across tickets: ``synth-authoring validate`` (#27, shipped),
+the determinism golden gate + ``synth-authoring freeze`` (#28), ``synth-authoring new``
+(#11-scaffold), and the kit-dev skills. The ``target_traces`` derivation HOOK is the one
+authoring-adjacent piece
 that does NOT live here — it runs at seed time and ships in the runtime library
 (``langfuse_synth_core.derivation``, #29). The author-time knob **injector** for that
 same volume knob (``inject_target_traces``) does live here: it needs ``jsonschema`` to
@@ -25,7 +26,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover — exercised by the boun
 
 # The Contract validator's importable API — a strict superset of the portal's historical
 # tools/validate_manifest.py (#27). The portal's POST /use-cases/sync imports this in
-# Spec B; kit authors reach the same code offline through `synth validate`.
+# Spec B; kit authors reach the same code offline through `synth-authoring validate`.
 from langfuse_synth_core.authoring.validate import (  # noqa: E402
     ManifestValidationError,
     authoring_errors,

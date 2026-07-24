@@ -1,4 +1,4 @@
-"""The `synth validate` CLI surface + the importable validator API (#27).
+"""The `synth-authoring validate` CLI surface + the importable validator API (#27).
 
 Exercises the console dispatcher (`langfuse_synth_core.authoring.cli:main`, wired to the
 `synth` entry point) end to end and asserts the downstream-importable API the portal's
