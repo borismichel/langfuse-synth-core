@@ -3,11 +3,15 @@ name = "langfuse-synth-core"
 version = "0.0.0"
 description = "Shared synthesis library + Authoring SDK for Demo Depot kits (Spec A, #19)."
 requires-python = ">=3.11"
-# Runtime dependencies are intentionally empty at the scaffold stage. The library's
-# real runtime deps (the Langfuse client, ingestion, pricing, RNG) arrive with the
-# Ring 1 extraction (#31/#32). Keeping this empty now makes the [authoring] boundary
-# provable: a bare runtime install must carry NONE of the authoring toolchain's deps.
-dependencies = []
+# Runtime deps arrive with the Ring 1 extraction (#31). The byte-identical core is
+# pure stdlib except the Langfuse client (`lfclient`), which constructs the v4 SDK —
+# so `langfuse` is the one runtime dependency. It is imported lazily inside
+# `get_langfuse`, but declaring it here keeps a bare runtime install self-sufficient.
+# This must stay a strict subset of the [authoring] toolchain's deps so the boundary
+# test still proves a runtime install carries NONE of the authoring-only packages.
+dependencies = [
+    "langfuse>=4.0,<5",
+]
 
 [project.optional-dependencies]
 # The authoring toolchain (synth-authoring new/validate/freeze + kit-dev skills, #27/#28/#11).
@@ -62,3 +66,22 @@ line-length = 100
 # on any ruff bump. Enumerating the rules decouples the lint contract from the ruff
 # version; widen this set deliberately, not by an upgrade.
 select = ["E", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ring 1a (#31) extracted these modules from the gold-standard kits BYTE-FOR-BYTE — the
+# whole point of the ring is that a diff proves zero behaviour change, so they must NOT
+# be reformatted to the lib's 100-col rule. Waive only E501 (line length: the ROLE_PROFILES
+# pricing table and the theme CSS/font blocks are intentionally wide) on the verbatim
+# files. Every pyflakes rule (F: unused/undefined names, bad imports) still applies, so a
+# real extraction defect — e.g. an import that doesn't resolve in the lib — still fails CI.
+# Listed = the seven verbatim core files + `timegen.py` (which carries the verbatim `iso`
+# primitive). Only some exceed 100 cols today; listing all of them makes the policy —
+# "verbatim-extracted code is not reformatted" — explicit and re-bless-proof.
+"src/langfuse_synth_core/rng.py" = ["E501"]
+"src/langfuse_synth_core/pricing.py" = ["E501"]
+"src/langfuse_synth_core/distributions.py" = ["E501"]
+"src/langfuse_synth_core/lfclient.py" = ["E501"]
+"src/langfuse_synth_core/timegen.py" = ["E501"]
+"src/langfuse_synth_core/seed/events.py" = ["E501"]
+"src/langfuse_synth_core/live/theme.py" = ["E501"]
+"src/langfuse_synth_core/live/paths.py" = ["E501"]
