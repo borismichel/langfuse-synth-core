@@ -54,3 +54,11 @@ addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+# Pin the rule set explicitly to pyflakes + pycodestyle (E/F) — the rules this code was
+# written and reviewed against. Ruff's *default* select shifts as new rule families are
+# stabilized, so relying on it (with a floating `ruff>=0.5,<1` pin) silently reddens CI
+# on any ruff bump. Enumerating the rules decouples the lint contract from the ruff
+# version; widen this set deliberately, not by an upgrade.
+select = ["E", "F"]
