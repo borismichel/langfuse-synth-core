@@ -34,9 +34,9 @@ runtime/authoring boundary test is unaffected.
 
 **No EV file was forced back to the kit.** Every EV candidate is scenario-agnostic — none
 imports EV scenario code (`agent` / `content` / `models`), and the two `verify` halves split
-cleanly at the read/assert seam. The tie-break's *fall-back* cases are anticipated on the
-**Lender** side and are #34's call, recorded here so the lib's EV-born surface stays
-additive rather than being retrofitted:
+cleanly at the read/assert seam. The tie-break's *fall-back* cases were anticipated on the
+**Lender** side and are now **ratified in #34** (see *Ring 2 — Lender (#34)* below); they are
+recorded here so the lib's EV-born surface stays additive rather than being retrofitted:
 
 - **`timegen` (Lender).** Lender samples **sessions-per-day × log-normal turns** (volume is
   *derived*, not a forced count) via `sample_session_times`, and its `hour_weight` carries a
@@ -68,6 +68,60 @@ Proven: the full-payload golden gate is byte-identical when `target_traces` is t
 the hook (the golden adapter routes the real `--set` → hook → internal path); the split
 `verify` yields identical assertions against a canned seeded env; and no EV scenario logic
 changed.
+
+# Ring 2 — Lender (#34): ratified outcomes
+
+Lender is the harder kit — it has genuine extra phases EV lacks (certification suite,
+seeded experiment runs, the review queue, a live `certify`, the workbench) — so it is the
+real test of whether the EV-born surface refuses to force scenario logic. It does. Moving
+Lender onto the Ring 2 surface, **each candidate resolved exactly as the tie-break predicted**,
+proven byte-for-byte against Lender's Step-0 oracle:
+
+## Movers (Lender now consumes the lib)
+
+| File (lib module) | Outcome | Proof |
+| --- | --- | --- |
+| `config.load_config` / `apply_overrides` | **Moved.** Lender deletes its local loader and passes `Config.model_validate` as the `model_factory`; its pydantic schema stays in the kit. | Golden byte-identical; `--set` coercion test green. |
+| `seed.ingest` (`Ingestor`, `assert_demo_project`, `ensure_score_config`) | **Moved.** Lender's local copy deleted; the four import sites repoint to the lib. The lib's Cloud-hardened `Ingestor` is a strict superset — its **spool serialization is byte-identical** (`json.dumps(…, separators=(",", ":"))`), only the network `_post_chunk` gained Retry-After handling. | Golden gate (`dry_run`, no network) byte-identical; the write path the golden exercises is unchanged. |
+| `lfread` + `http.request_retry` (the `verify` read-client) | **Moved.** `verify._auth/_get/_get_scores` rebind to `auth_from_env` / `get_json` / `get_all_scores`; `run_verify` assertions are byte-unchanged. The one raw-response existence helper (`_get_resp`, tolerate-404) stays kit-side but rides the shared `request_retry`. | `test_verify_split` proves the split yields identical assertions on a canned seeded env. |
+
+## Fall-backs (stayed in the kit — the seam refused to force logic)
+
+- **`timegen` (whole module) — falls back.** The tie-break called `sample_session_times` a
+  *different algorithm*; migration confirmed the entanglement runs deeper: Lender's
+  `hour_weight` carries a Berlin timezone offset **and a Friday-afternoon `×0.5` decline**, and
+  its `sample_timestamps` / `sample_in_range` *close over that `hour_weight`*. So even the
+  helpers that are line-for-line identical to the lib's would silently change the sampled
+  timestamps if swapped (they'd bind the lib's plain `DIURNAL[dt.hour]` curve). The module is
+  scenario-entwined as a unit; extracting the four incidental generic helpers to dedup them
+  would fragment it for a line-count saving the SEAM's T2 verdict (flexibility > deduplication)
+  explicitly declines. **The golden gate is the proof:** it stays byte-identical precisely
+  because `timegen` did not move.
+- **`probe` (Lender) — falls back.** Unchanged from the anticipation: Lender's probe builds its
+  trace from scenario substance (`build_trace_events` + `flagged_cases`), so routing it through
+  a shared probe would drag scenario content across the seam. Its one `seed.ingest` import
+  repoints to the lib; the probe body stays in the kit.
+
+## The canonical `target_traces` knob (Lender: derive-scale)
+
+Lender's bespoke `generation.volume.scale` **operator** knob is replaced by the canonical
+`generation.target_traces` (the shape `inject_target_traces(minimum=1000, maximum=15000,
+default=5000)` emits). `volume.scale` survives as an **internal** config field only. Unlike
+EV's identity direct-count, Lender has **no absolute trace-count knob** — total traces are
+session-*derived* — so its kit-side **derive-scale** hook (`config.derive_scale_derivation`,
+`target_traces -> {"volume.scale": target_traces / 10111}`) divides by the reference yield
+(~10,111 traces at `scale = 1.0`, seed 47) and runs at config-load (`resolve_target_traces`).
+`target_traces` is therefore an **advisory** volume dial (monotone, floor-bound by per-weekday
+session rounding), never an exact count — consistent with "traces are DERIVED, not forced".
+Crucially, `volume.scale` drives **only** ambient session volume: the certification suite,
+seeded experiment runs, and review queue are config-sized and stay **unscaled**.
+
+Proven: the full-payload golden gate is byte-identical when `target_traces=150` is turned
+through the hook (the golden adapter routes the real `--set generation.target_traces=` → hook
+→ `volume.scale` path, replacing the Step-0 stub's bespoke assignment); the split `verify`
+yields identical assertions against a canned seeded env; and no Lender scenario logic changed
+(the certification/`cert_runs`/`certify` phases and the entire `workbench/` framework were
+**not** extracted — extracting a framework from a single example is speculative generality).
 
 ## The `synth` CLI-name collision (resolved)
 
