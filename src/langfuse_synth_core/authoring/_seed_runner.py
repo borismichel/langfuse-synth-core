@@ -21,6 +21,7 @@ import importlib
 import json
 import sys
 import traceback
+from pathlib import Path
 
 # Install the egress guard FIRST — before importing the kit — so a planted LLM call in
 # kit-owned generation code is denied.
@@ -47,7 +48,7 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: _seed_runner <config.json>", file=sys.stderr)
         return 1
-    config = json.loads(open(argv[1], encoding="utf-8").read())
+    config = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
 
     # Kit search paths (e.g. an author's kit dir) go on sys.path BEFORE importing it.
     for path in config.get("search_paths", []):

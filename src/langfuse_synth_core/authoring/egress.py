@@ -19,6 +19,15 @@ Two layers, both real:
    An LLM SDK that honours ``HTTPS_PROXY`` / ``ANTHROPIC_BASE_URL`` is steered at an
    unroutable address, which the socket guard then denies.
 
+Trust boundary (accepted by design): the guard covers the TCP/DNS entry points every
+real LLM SDK uses — ``getaddrinfo`` / ``create_connection`` / ``socket.connect[_ex]``. It
+does not chase UDP datagrams, a subprocess that shells out (e.g. ``curl``), or code that
+reaches the raw C ``_socket`` object directly. Those still FAIL the gate — the
+proxy/base-url env points every known lever at an unroutable sink, so such a call errors
+— but as a generic failure rather than a typed :class:`EgressBlockedError`. The goal is a
+binding, deterministic block on the model-call path, not a sandbox; defeating it takes
+deliberate effort that a kit's generation code has no reason to make.
+
 This module holds the guard and the env posture; :mod:`langfuse_synth_core.authoring.golden`
 drives the subprocess and compares the materialized Spool against the blessed golden.
 """
@@ -83,6 +92,26 @@ def _is_loopback(host: object) -> bool:
     return host in _LOOPBACK_HOSTS or host.startswith("127.")
 
 
+def _addr_host(address: object) -> object:
+    """The host portion of a socket address (a ``(host, port, ...)`` tuple or bare host)."""
+    if isinstance(address, tuple) and address:
+        return address[0]
+    return address
+
+
+def _deny_non_loopback(host: object, action: str) -> None:
+    """Raise :class:`EgressBlockedError` unless ``host`` is loopback.
+
+    The single deny path shared by every socket guard, so the loopback rule and the error
+    shape live in one place instead of being repeated per entry point.
+    """
+    if not _is_loopback(host):
+        raise EgressBlockedError(
+            f"seed egress blocked: {action} for {host!r} denied under the deny-LLM "
+            "egress block (seed runtime must be model-free and offline)"
+        )
+
+
 def install_guard() -> None:
     """Install the socket-level egress guard in the current process (idempotent).
 
@@ -100,46 +129,21 @@ def install_guard() -> None:
     _real_connect_ex = socket.socket.connect_ex
 
     def _guarded_getaddrinfo(host, *args, **kwargs):
-        # Block name resolution for non-loopback hosts up front, so a planted call
-        # fails fast and deterministically with EgressBlockedError rather than hanging
-        # on DNS or depending on whether the CI runner happens to be online.
-        if not _is_loopback(host):
-            raise EgressBlockedError(
-                f"seed egress blocked: DNS lookup for {host!r} denied under the "
-                "deny-LLM egress block (seed runtime must be model-free and offline)"
-            )
+        # Block name resolution up front, so a planted call fails fast and
+        # deterministically rather than hanging on DNS or depending on connectivity.
+        _deny_non_loopback(host, "DNS lookup")
         return _real_getaddrinfo(host, *args, **kwargs)
 
     def _guarded_create_connection(address, *args, **kwargs):
-        host = address[0] if isinstance(address, tuple) else address
-        if not _is_loopback(host):
-            raise EgressBlockedError(
-                f"seed egress blocked: connection to {host!r} denied under the "
-                "deny-LLM egress block"
-            )
+        _deny_non_loopback(_addr_host(address), "connection")
         return _real_create_connection(address, *args, **kwargs)
 
-    def _addr_host(address: object) -> object:
-        if isinstance(address, tuple) and address:
-            return address[0]
-        return address
-
     def _guarded_connect(self, address):
-        host = _addr_host(address)
-        if not _is_loopback(host):
-            raise EgressBlockedError(
-                f"seed egress blocked: socket connect to {host!r} denied under the "
-                "deny-LLM egress block"
-            )
+        _deny_non_loopback(_addr_host(address), "socket connect")
         return _real_connect(self, address)
 
     def _guarded_connect_ex(self, address):
-        host = _addr_host(address)
-        if not _is_loopback(host):
-            raise EgressBlockedError(
-                f"seed egress blocked: socket connect_ex to {host!r} denied under the "
-                "deny-LLM egress block"
-            )
+        _deny_non_loopback(_addr_host(address), "socket connect_ex")
         return _real_connect_ex(self, address)
 
     socket.getaddrinfo = _guarded_getaddrinfo
