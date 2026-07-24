@@ -1,4 +1,4 @@
-"""``synth validate`` — the offline, static Contract lint (Spec A, #27).
+"""``synth-authoring validate`` — the offline, static Contract lint (Spec A, #27).
 
 This is the relocated, single-version home of the Demo Depot **Contract validator**.
 It is an *importable strict superset* of the portal's historical
@@ -7,7 +7,7 @@ LLM-provider ``semantic_errors`` rules the portal enforced, then adds the new
 kit-authoring checks (:func:`authoring_errors`).
 
 Because it is literally the same code and schema a kit author runs offline and the
-portal imports at sync time, "passes ``synth validate`` locally" ≡ "passes portal sync"
+portal imports at sync time, "passes ``synth-authoring validate`` locally" ≡ "passes portal sync"
 **by construction**. Wiring ``POST /use-cases/sync`` to import this and retiring the
 portal's own copy is Spec B — out of scope here; this module only makes the validator
 importable and a strict superset.
@@ -285,9 +285,9 @@ def validate_path(path: str | Path) -> list[str]:
 
 
 def run(paths: list[str]) -> int:
-    """``synth validate <path>...`` — readable red/green per manifest. 0 = all valid."""
+    """``synth-authoring validate <path>...`` — readable red/green per manifest. 0 = all valid."""
     if not paths:
-        print("usage: synth validate <path/to/usecase.yaml> [more.yaml ...]")
+        print("usage: synth-authoring validate <path/to/usecase.yaml> [more.yaml ...]")
         return 2
     validator = Draft7Validator(load_schema())
     ok = True
@@ -306,7 +306,7 @@ def run(paths: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point used when ``synth validate`` is dispatched from the CLI."""
+    """Entry point used when ``synth-authoring validate`` is dispatched from the CLI."""
     args = list(sys.argv[1:] if argv is None else argv)
     return run(args)
 

@@ -1,4 +1,4 @@
-"""Determinism golden gate + ``synth freeze`` (#28) — the load-bearing oracle.
+"""Determinism golden gate + ``synth-authoring freeze`` (#28) — the load-bearing oracle.
 
 The defining test of ``langfuse-synth-core``: ``seed + target_traces + declared params
 -> byte-identical Spool``, proven **offline, before ingestion**, on the FULL materialized
@@ -10,7 +10,7 @@ Two capabilities, one machine:
 
 * :func:`assert_golden` — the gate. Materializes the Spool under the deny-LLM egress
   block and asserts byte-identity against the blessed golden.
-* :func:`freeze` — ``synth freeze``. Materializes the Spool under the same block and
+* :func:`freeze` — ``synth-authoring freeze``. Materializes the Spool under the same block and
   writes it as the blessed golden, so a *deliberate* pool change (including refreshing an
   author-time LLM-generated fixture) is one intentional re-bless — never a hand-edit.
 
@@ -48,14 +48,14 @@ class GoldenError(AssertionError):
 
 
 class GoldenMissing(GoldenError):
-    """The blessed golden does not exist yet — run ``synth freeze`` to bless it."""
+    """The blessed golden does not exist yet — run ``synth-authoring freeze`` to bless it."""
 
 
 class GoldenMismatch(GoldenError):
     """A freshly materialized Spool differs from the blessed golden.
 
     Either a refactor perturbed the deterministic pool (fix the code) or the pool was
-    changed on purpose (re-bless with ``synth freeze``).
+    changed on purpose (re-bless with ``synth-authoring freeze``).
     """
 
 
@@ -103,10 +103,19 @@ def materialize_spool(spec: GoldenSpec) -> bytes:
             encoding="utf-8",
         )
 
+        # Pin the hash seed so a kit careless about set/dict ordering cannot perturb the
+        # Spool bytes across runs. Python salts str/bytes hashing per process, so an
+        # unpinned seed subprocess would iterate a set in a run-dependent order and
+        # materialize different bytes each time — a false GoldenMismatch. Pinning here
+        # makes `seed + target_traces + params -> byte-identical Spool` hold by the
+        # gate's construction, not by the kit author's vigilance.
+        env = egress_block_env(os.environ)
+        env["PYTHONHASHSEED"] = "0"
+
         result = subprocess.run(
             [sys.executable, "-m", "langfuse_synth_core.authoring._seed_runner",
              str(config_path)],
-            env=egress_block_env(os.environ),
+            env=env,
             capture_output=True,
             text=True,
         )
@@ -133,7 +142,7 @@ def assert_golden(spec: GoldenSpec) -> None:
     """
     if not spec.golden_path.exists():
         raise GoldenMissing(
-            f"no blessed golden at {spec.golden_path} — run `synth freeze` to bless the "
+            f"no blessed golden at {spec.golden_path} — run `synth-authoring freeze` to bless the "
             "oracle for this seed + target_traces + params."
         )
     fresh = materialize_spool(spec)
@@ -145,12 +154,12 @@ def assert_golden(spec: GoldenSpec) -> None:
             f"byte-identical to the blessed golden at {spec.golden_path} "
             f"({len(fresh)} vs {len(blessed)} bytes). Either a refactor perturbed the "
             "deterministic pool, or the pool changed on purpose — re-bless with "
-            "`synth freeze`."
+            "`synth-authoring freeze`."
         )
 
 
 def freeze(spec: GoldenSpec) -> Path:
-    """``synth freeze``: materialize under the egress block and bless as the golden.
+    """``synth-authoring freeze``: materialize under the egress block and bless as the golden.
 
     One intentional step. Returns the golden path written. Creates parent dirs.
     """

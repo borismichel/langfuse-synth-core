@@ -10,7 +10,7 @@ The Contract has three parts, all versioned together in this repo:
 
 1. **The JSON Schema** — the machine-checkable shape of `usecase.yaml` (schema version 1).
 2. **The validator** — `langfuse_synth_core.authoring.validate`, exposed offline as
-   `synth validate <path>` and importable by the portal's `POST /use-cases/sync`. It is a
+   `synth-authoring validate <path>` and importable by the portal's `POST /use-cases/sync`. It is a
    **strict superset** of the portal's historical `tools/validate_manifest.py`: it
    reproduces every Draft7 schema error and every LLM-provider semantic rule, then adds
    the kit-authoring checks below.
@@ -18,7 +18,7 @@ The Contract has three parts, all versioned together in this repo:
    policy rather than shape, lifted out of the schema's `description` strings so they have
    one readable home.
 
-> "Passes `synth validate` locally" ≡ "passes portal sync" **by construction** — the
+> "Passes `synth-authoring validate` locally" ≡ "passes portal sync" **by construction** — the
 > author's offline lint and the portal's admission gate run the same code and the same
 > schema.
 
@@ -91,7 +91,7 @@ zero-code: it passes `--set generation.target_traces=N` verbatim.
 - Bespoke operator knobs (`generation.total_traces`, `generation.volume.scale`) are
   superseded by the canonical knob and become kit-**internal** params only.
 
-Validator rule (`synth validate`): when `generation.target_traces` is exposed it must be
+Validator rule (`synth-authoring validate`): when `generation.target_traces` is exposed it must be
 an integer, and it must be the **sole** operator volume control — a manifest may not
 expose the canonical knob alongside a bespoke one. The two gold manifests still ship a
 bespoke knob pending their Ring 2 migration (#33/#34) to the canonical knob, so a manifest

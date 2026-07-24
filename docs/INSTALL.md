@@ -35,7 +35,7 @@ to authenticate.
 - **Runtime** (deployed kit / portal): `pip install langfuse-synth-core` (or the git pin
   above). Carries none of the authoring toolchain's dependencies.
 - **Authoring** (a kit author's dev box): `pip install 'langfuse-synth-core[authoring]'`
-  to get `synth new / validate / freeze` and the kit-dev skills.
+  to get `synth-authoring new / validate / freeze` and the kit-dev skills.
 
 ## If the lib is ever made private again
 
