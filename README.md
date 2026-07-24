@@ -68,3 +68,6 @@ pytest
 `0.0.0` = pre-Ring-1 scaffold. **`v0.1.0`** is tagged only when the byte-identical core is
 extracted and **both** kits are golden-green (Ring 1b, #32); **`v1.0.0`** after Ring 2
 (#34). Kits upgrade deliberately by bumping their pin.
+
+Cutting a version is not done until **every consuming kit is re-pinned to it** — follow
+the checklist in [`RELEASING.md`](RELEASING.md), which lists the kits that must be bumped.

@@ -1,6 +1,6 @@
 [project]
 name = "langfuse-synth-core"
-version = "0.0.0"
+version = "0.1.0"
 description = "Shared synthesis library + Authoring SDK for Demo Depot kits (Spec A, #19)."
 requires-python = ">=3.11"
 # Runtime deps arrive with the Ring 1 extraction (#31). The byte-identical core is
