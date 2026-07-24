@@ -35,14 +35,17 @@ Ring 2 (#33)** — each is now a lib module parametrized by explicit values (a `
 for the loader, weight curves for time generation, target + cosmetics for the probe, …), so
 the lib never depends on a kit's config *shape*. **Tie-break:** if a "delta" turns out to be
 *logic* (a different algorithm) or *scenario substance* during migration, the file falls back
-to the kit. No EV file fell back; the anticipated Lender fall-backs (its session-driven
-sampler, its scenario-entwined probe) are #34's call. Full ledger: [`RING2.md`](RING2.md).
+to the kit. No EV file fell back; the anticipated Lender fall-backs are **ratified in #34** —
+its `timegen` (a Berlin/Friday `hour_weight` its samplers close over) and its scenario-entwined
+`probe` both stayed in the kit, while its config loader, ingest, and `verify` read-client moved.
+The library was cut **`v1.0.0`** on that ratification, both kits golden-green. Full ledger:
+[`RING2.md`](RING2.md).
 
-### `verify` is split — **done (Ring 2, #33)**
+### `verify` is split — **done (Ring 2, #33 EV · #34 Lender)**
 Read-helpers (auth, paginated GET of scores / traces across the Langfuse REST API) →
 library read-client (`langfuse_synth_core.lfread`). The `run_verify` body (scenario
 assertions, golden-path) → kit. The split is proven assertion-identical to the pre-split
-`verify` against a seeded env.
+`verify` against a seeded env, on **both** kits.
 
 ## Distribution
 
