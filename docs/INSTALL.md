@@ -28,7 +28,9 @@ RUN pip install --no-cache-dir -e '.[playground]'
 ```
 
 The pinned lib is fetched over HTTPS from the public git URL during the build; nothing
-to authenticate.
+to authenticate. Note that `pip` needs the `git` binary to resolve a `git+https://`
+dependency, and the `python:*-slim` base images don't ship it — install it first
+(`apt-get install -y --no-install-recommends git`), as `examples/kit.Dockerfile` does.
 
 ## Runtime vs authoring install
 

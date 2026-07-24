@@ -8,6 +8,12 @@
 
 FROM python:3.12-slim
 
+# git: python:*-slim ships without it, but pip needs it to fetch the git-pinned lib.
+# The repo is public, so this is a plain HTTPS fetch — no build secret required.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
 # Non-root user (uid/gid 10001) — job & live containers never run as root.
 RUN groupadd --gid 10001 synth \
  && useradd --uid 10001 --gid synth --create-home --home-dir /home/synth synth

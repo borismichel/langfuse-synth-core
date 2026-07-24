@@ -46,6 +46,10 @@ jobs:
           import langfuse_synth_core as c
           from langfuse_synth_core.companion import CompanionAdapter  # noqa: F401
           from langfuse_synth_core.derivation import DerivationHook, identity_derivation
+          # Ring 1a (#31): the byte-identical core must import on the lean runtime.
+          from langfuse_synth_core import rng, pricing, distributions, lfclient, config, timegen  # noqa: F401
+          from langfuse_synth_core.seed import events  # noqa: F401
+          from langfuse_synth_core.live import theme, paths  # noqa: F401
           assert isinstance(c.__version__, str)
           assert identity_derivation(7, {}) == {"target_traces": 7}
           print("runtime surface OK; version", c.__version__)

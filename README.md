@@ -7,10 +7,14 @@ bidirectionally — plus an optional authoring toolchain behind the `[authoring]
 is a **toolbox the kit calls, not an inversion-of-control framework** (T2 verdict:
 flexibility > deduplication). See [`docs/SEAM.md`](docs/SEAM.md) for the hand-off rule.
 
-> **Status: scaffold (#26).** This repo currently establishes the distribution spine, the
-> runtime-vs-`[authoring]` boundary, and the runtime seams (companion adapter shell,
-> `target_traces` derivation hook). The synthesis machinery is extracted from the two
-> gold-standard kits in the Ring 1 / Ring 2 migration (#31–#34). Tracked under
+> **Status: Ring 1a landed (#31).** On top of the scaffold (#26) — the distribution spine,
+> the runtime-vs-`[authoring]` boundary, and the runtime seams (companion adapter shell,
+> `target_traces` derivation hook) — the **byte-identical core** is now extracted from the
+> gold-standard kits: RNG/ID substreams, token pricing, statistical distributions, the
+> Langfuse client, event emission, and the scenario-agnostic UI primitives (theme / paths).
+> EV consumes it and reproduces its Step 0 golden byte-for-byte. Lender is wired in Ring 1b
+> (#32), where `v0.1.0` is tagged; the config loader / time sampling / ingest / probe
+> ("library-with-parameters" middle field) follow in Ring 2 (#33–#34). Tracked under
 > [Spec A · #19](https://github.com/borismichel/langfuse-demo-depot/issues/19).
 
 ## Install
@@ -35,6 +39,15 @@ src/langfuse_synth_core/
   __init__.py       public surface + version
   companion.py      Companion Adapter shell contract seam (runtime; Spec G implements)
   derivation.py     target_traces derivation hook home (runtime; #29 completes)
+  rng.py            single-seed deterministic RNG + W3C-format ID substreams (#31)
+  pricing.py        token counts x per-model pricing -> usage/cost details (#31)
+  distributions.py  log-normal latency + model-appropriate token sampling (#31)
+  lfclient.py       Langfuse v4 SDK client construction (#31)
+  config.py         structural Protocols (Config/Model/Target) the core reads against (#31)
+  timegen.py        the ISO-8601 formatting primitive event bodies need (#31)
+  seed/events.py    batch-ingestion event-envelope builders (#31)
+  live/theme.py     Langfuse design tokens + page shell (#31)
+  live/paths.py     prefix-aware internal paths (LIVE_BASE_PATH) (#31)
   authoring/        authoring toolchain — import fails without the [authoring] extra
 docs/SEAM.md        the library/kit hand-off rule + the "not a framework" verdict
 docs/INSTALL.md     git-pinned private install + build-secret pattern
