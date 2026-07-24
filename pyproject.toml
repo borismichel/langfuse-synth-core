@@ -3,23 +3,25 @@ name = "langfuse-synth-core"
 version = "0.1.0"
 description = "Shared synthesis library + Authoring SDK for Demo Depot kits (Spec A, #19)."
 requires-python = ">=3.11"
-# Runtime deps arrive with the Ring 1 extraction (#31). The byte-identical core is
-# pure stdlib except the Langfuse client (`lfclient`), which constructs the v4 SDK —
-# so `langfuse` is the one runtime dependency. It is imported lazily inside
-# `get_langfuse`, but declaring it here keeps a bare runtime install self-sufficient.
-# This must stay a strict subset of the [authoring] toolchain's deps so the boundary
-# test still proves a runtime install carries NONE of the authoring-only packages.
+# Runtime deps. Ring 1 (#31) extracted a byte-identical core that is pure stdlib except
+# the Langfuse client (`lfclient`, the v4 SDK). Ring 2 (#33) moved the data-model middle
+# field — the config loader (`config.load_config`), which parses YAML at seed/plan/verify
+# time — so `PyYAML` is now a genuine RUNTIME dep too. Both SDK deps are imported lazily,
+# but declaring them keeps a bare runtime install self-sufficient.
+# `jsonschema` (the schema validator) stays authoring-ONLY: it is the boundary marker the
+# runtime-only job asserts is absent, so it must NEVER leak into this runtime list.
 dependencies = [
     "langfuse>=4.0,<5",
+    "PyYAML>=6,<7",
 ]
 
 [project.optional-dependencies]
 # The authoring toolchain (synth-authoring new/validate/freeze + kit-dev skills, #27/#28/#11).
-# The runtime (deployed-kit / portal) install must NEVER pull these — the boundary
-# test asserts `import langfuse_synth_core.authoring` fails without this extra.
+# The runtime (deployed-kit / portal) install must NEVER pull `jsonschema` — the boundary
+# test asserts `import langfuse_synth_core.authoring` fails without this extra. (PyYAML is a
+# runtime dep since Ring 2, so the validator inherits it — jsonschema is the sole marker.)
 authoring = [
     "jsonschema>=4.18,<5",
-    "PyYAML>=6,<7",
 ]
 dev = [
     "pytest>=8,<9",

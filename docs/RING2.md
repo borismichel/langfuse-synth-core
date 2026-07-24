@@ -1,0 +1,79 @@
+# Ring 2 — the data-model middle field (EV; #33)
+
+Ring 1 extracted the **byte-identical** core (RNG/ID, pricing, distributions, the Langfuse
+client, event emission, UI primitives). Ring 2 moves the **middle field**: the
+data-model-facing files whose delta between kits is *values, not logic*. The library is
+**born from EV** (the simpler of the two gold-standard kits — no workbench/cert), so each
+mover is EV's version, parametrized by explicit args (never by EV's `Config`, so the lib
+stays decoupled from the kit's config *shape*).
+
+This is the ledger the acceptance criterion asks for: **each candidate's move-or-fall-back
+decision, with the reason.** The rule applied per file:
+
+> A file **moves** iff, after parametrization, EV and Lender would call the *same lib code*
+> differing only in *argument values*. It **falls back to the kit** iff the kits need
+> *different code paths*, or the file would have to carry *vendor-approved scenario
+> substance* across the seam.
+
+## Movers (in the lib now, parametrized)
+
+| File (lib module) | From | Parameter (the "value" delta) | Why it moved |
+| --- | --- | --- | --- |
+| `config.py` — `load_config` / `apply_overrides` / `set_dotted` | EV `synth/config.py` | a `model_factory` (`dict -> Config`) | Reading YAML + applying `--set dotted.key=value` is scenario-agnostic plumbing. The only per-kit thing is the pydantic model it validates into — passed in, so the lib never imports pydantic or knows the kit's config shape. |
+| `seed/ingest.py` — `Ingestor`, `assert_demo_project`, `ensure_score_config` | EV `synth/seed/ingest.py` | `base_url`, keys, `chunk_size`, `project_hint`, score-config bodies | Batch ingestion speaks the Langfuse ingestion API in the abstract. EV's Cloud-hardened version is a strict superset of Lender's; the lib takes the hardened one. The event *bodies* are still composed by the kit from `seed.events` primitives. |
+| `timegen.py` — `sample_timestamps` / `sample_in_range` / `hour_weight` / `window_start` / `day_anchor` / `in_window` / `now_utc` / `iso_date` | EV `synth/timegen.py` | the run inputs (`rng` / `run_date` / `window_days` / `n`) | Weighted hourly choice + intra-hour jitter is pure, scenario-agnostic time math. The diurnal/weekly weight curves are the canonical business-day priors (`DIURNAL` / `WEEKLY` module constants) — **not** threaded as per-call knobs: no kit passes an alternate, and one needing a different curve needs a different *algorithm* (see the Lender fall-back below), so a curve param would be speculative generality. |
+| `lfread.py` — `auth_from_env` / `get_json` / `scores_path` / `get_all_scores` / `parse_ts` | EV `synth/verify.py` read-helpers | `base_url`, a Cloud `throttle` | The **verify split** (docs/SEAM.md): the auth + paginated GET of scores/traces is the read direction of "the machine that speaks the Langfuse data model." The `run_verify` **assertion body** stays in the kit. |
+| `probe.py` — `run_backdate_probe`, `probe_ids` | EV `synth/probe.py` | target (`base_url`/`project_hint`/`seed`), `window_days`, cosmetic trace fields | The probe *flow* (ingest one backdated trace → poll it back → assert the timestamp survived) is scenario-agnostic; the probe trace is a throwaway diagnostic, not scenario substance. EV keeps a thin `synth/probe.py` adapter that maps its `Config` onto these params. |
+| `http.py` — `request_retry` | EV `synth/http.py` | `throttle_s` (Cloud spacing) | Retry-After-aware REST resilience — a supporting primitive the ingest + read-client movers both need. Scenario-agnostic; retrying the machine's own REST calls is part of the machine. |
+
+`PyYAML` became a **runtime** dependency of the lib (the config loader parses YAML at
+seed/plan/verify time). `jsonschema` remains the sole `[authoring]`-only marker, so the
+runtime/authoring boundary test is unaffected.
+
+## Tie-break outcomes (fall-backs)
+
+**No EV file was forced back to the kit.** Every EV candidate is scenario-agnostic — none
+imports EV scenario code (`agent` / `content` / `models`), and the two `verify` halves split
+cleanly at the read/assert seam. The tie-break's *fall-back* cases are anticipated on the
+**Lender** side and are #34's call, recorded here so the lib's EV-born surface stays
+additive rather than being retrofitted:
+
+- **`timegen` (Lender).** Lender samples **sessions-per-day × log-normal turns** (volume is
+  *derived*, not a forced count) via `sample_session_times`, and its `hour_weight` carries a
+  timezone offset + a Friday-afternoon decline. That is a *different algorithm*, not a
+  re-parametrization of EV's draw-N-over-a-window sampler. Under the toolbox model it becomes
+  an **additional** lib function in #34 (or stays in Lender) — it does not re-shape the EV
+  mover.
+- **`probe` (Lender).** Lender's probe builds its trace with its **scenario** trace-builder
+  (`build_trace_events` + `flagged_cases` + `answer_deterministic`) — vendor-approved
+  scenario substance. Routing that through a shared probe would drag scenario content across
+  the seam, so Lender's probe **falls back to the kit** in #34. EV's probe (generic
+  diagnostic trace) moved cleanly.
+- **`verify` read-client (Lender).** Lender's read helpers do the same auth + paginated GET
+  but with a different inline retry loop (no shared `request_retry`, no Cloud throttle). The
+  *pagination shape* is the same, so #34 can adopt `lfread` (a benign retry upgrade) — a
+  re-parametrization, not a fall-back — but that is #34's decision to ratify against Lender's
+  Step-0 oracle.
+
+## The canonical `target_traces` knob (EV)
+
+EV's bespoke `generation.total_traces` **operator** knob is replaced by the canonical
+`generation.target_traces` (the shape `inject_target_traces(minimum=100, maximum=6000,
+default=800)` emits). `total_traces` survives as an **internal** config field only. EV's
+kit-side **direct-count** derivation hook (`config.direct_count_derivation`,
+`target_traces -> {"total_traces": N}`) runs at config-load (`resolve_target_traces`), so the
+portal stays zero-code: it passes `--set generation.target_traces=N` verbatim.
+
+Proven: the full-payload golden gate is byte-identical when `target_traces` is turned through
+the hook (the golden adapter routes the real `--set` → hook → internal path); the split
+`verify` yields identical assertions against a canned seeded env; and no EV scenario logic
+changed.
+
+## The `synth` CLI-name collision (resolved)
+
+A kit installs `langfuse-synth-core`, so both console scripts land on the same PATH. There is
+**no collision**: the lib's authoring CLI is namespaced **`synth-authoring`** (not `synth`),
+while the kit's runtime CLI keeps the bare **`synth`** (the portal integration surface —
+every manifest pipeline runs `synth <verb> --config {config}`). Wiring EV to the lib in #33
+confirmed the two entry points coexist; the spec's "one unified command" option was not
+needed because the namespacing already keeps them apart.

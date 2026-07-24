@@ -30,12 +30,19 @@ The deterministic answer-engine · the content corpus · the scenario generator 
 *is* the scenario.
 
 ### Library-with-parameters (middle field, data-model-facing; delta is values, not logic)
-Ingest · time generation · probe · the config loader. **Tie-break:** if a "delta" turns
-out to be *logic* during migration, the file falls back to the kit.
+Ingest · time generation · probe · the config loader · HTTP resilience. **Landed for EV in
+Ring 2 (#33)** — each is now a lib module parametrized by explicit values (a `model_factory`
+for the loader, weight curves for time generation, target + cosmetics for the probe, …), so
+the lib never depends on a kit's config *shape*. **Tie-break:** if a "delta" turns out to be
+*logic* (a different algorithm) or *scenario substance* during migration, the file falls back
+to the kit. No EV file fell back; the anticipated Lender fall-backs (its session-driven
+sampler, its scenario-entwined probe) are #34's call. Full ledger: [`RING2.md`](RING2.md).
 
-### `verify` is split
+### `verify` is split — **done (Ring 2, #33)**
 Read-helpers (auth, paginated GET of scores / traces across the Langfuse REST API) →
-library read-client. The `run_verify` body (scenario assertions, golden-path) → kit.
+library read-client (`langfuse_synth_core.lfread`). The `run_verify` body (scenario
+assertions, golden-path) → kit. The split is proven assertion-identical to the pre-split
+`verify` against a seeded env.
 
 ## Distribution
 

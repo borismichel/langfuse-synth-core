@@ -36,7 +36,7 @@ assets:
 target:
   project_hint: "demo"
   supports: [cloud_eu, cloud_us, self_hosted]
-  cloud_notes: "Free tier caps events. Run plan first and keep the trace estimate ≤80% of the tier cap; scale down with generation.total_traces."
+  cloud_notes: "Free tier caps events. Run plan first and keep the trace estimate ≤80% of the tier cap; scale down with generation.target_traces."
 
 llm:
   # Demo-time model calls (live playground submission + experiment task) route through
@@ -64,13 +64,18 @@ config_schema:
       minimum: 0
       title: "Generation seed"
       description: "Deterministic RNG seed for the whole dataset. Vary it to mint a distinct trace/id set per deployment; the same seed re-seeds idempotently (upsert). The throwaway probe trace is separately nonce-salted, so it never collides regardless of this value."
-    generation.total_traces:
+    generation.target_traces:
+      # The CANONICAL, cross-kit operator volume knob (Ring 2, #33). Replaces EV's bespoke
+      # generation.total_traces operator knob (now internal only). Shape is exactly what
+      # langfuse_synth_core.authoring.inject_target_traces(minimum=100, maximum=6000,
+      # default=800) emits; EV's direct-count derivation hook maps it 1:1 to the internal
+      # generation.total_traces at seed time (identity / direct count).
       type: integer
-      default: 800
       minimum: 100
       maximum: 6000
-      title: "Trace volume"
-      description: "Total backdated traces. 800 is Cloud-free-tier safe; 4000 is the full self-hosted story."
+      default: 800
+      title: "Target traces"
+      description: "Total number of backdated traces to generate — the single, uniform volume knob for this demo. 800 is Cloud-free-tier safe; 4000 is the full self-hosted story. The kit deterministically derives its internal generation params from it (EV: direct count)."
     generation.window_days:
       type: integer
       default: 30
