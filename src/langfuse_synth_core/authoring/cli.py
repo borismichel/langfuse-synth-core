@@ -1,10 +1,11 @@
 """The ``synth-authoring`` CLI — a subcommand dispatcher (Spec A).
 
-Ships ``synth-authoring validate`` (#27, the offline Contract lint) and
-``synth-authoring freeze`` (#28, the determinism golden gate). ``synth-authoring new``
-(#11) registers alongside them here. The dispatcher is plain ``argparse`` with
-subparsers, each command adding one ``_add_*`` block plus a ``set_defaults(func=...)`` —
-so later tickets bolt on mechanically without reshaping the shared parts.
+Ships ``synth-authoring validate`` (#27, the offline Contract lint),
+``synth-authoring freeze`` (#28, the determinism golden gate), and
+``synth-authoring new`` (#36, the walking-skeleton scaffold generator). The dispatcher
+is plain ``argparse`` with subparsers, each command adding one ``_add_*`` block plus a
+``set_defaults(func=...)`` — so later tickets bolt on mechanically without reshaping the
+shared parts.
 
 The CLI lives under ``langfuse_synth_core.authoring`` and so requires the ``[authoring]``
 extra — importing this module without it raises the boundary ``ModuleNotFoundError``
@@ -26,6 +27,11 @@ from pathlib import Path
 
 from langfuse_synth_core.authoring import validate as _validate
 from langfuse_synth_core.authoring.golden import GoldenSpec, freeze
+from langfuse_synth_core.authoring.scaffold import (
+    DEFAULT_CORE_REF,
+    ScaffoldError,
+    scaffold_kit,
+)
 
 
 # ── synth-authoring validate (#27) ──────────────────────────────────────────────────────
@@ -94,6 +100,53 @@ def _add_freeze(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=_cmd_freeze)
 
 
+# ── synth-authoring new (#36) ───────────────────────────────────────────────────────────
+def _cmd_new(args: argparse.Namespace) -> int:
+    dest = Path(args.dir) / args.slug
+    try:
+        result = scaffold_kit(
+            args.slug,
+            dest,
+            with_companion=args.companion,
+            core_ref=args.core_ref,
+            force=args.force,
+        )
+    except ScaffoldError as exc:
+        print(f"✗ synth-authoring new: {exc}", file=sys.stderr)
+        return 2
+    print(f"✓ scaffolded kit {result.slug!r} at {result.dest} ({len(result.files)} files)")
+    print(f"  blessed determinism golden: {result.golden_path}")
+    print("  next: cd into it, `pip install -e '.[dev]'`, then `pytest` (green from the start).")
+    return 0
+
+
+def _add_new(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "new",
+        help="scaffold a runnable-green walking-skeleton kit (passes validate + the golden gate)",
+    )
+    parser.add_argument(
+        "slug", help="kebab-case kit slug (also the manifest slug + image name)"
+    )
+    parser.add_argument(
+        "--dir", default=".",
+        help="parent directory to create the kit in (default: cwd); the kit lands at <dir>/<slug>",
+    )
+    parser.add_argument(
+        "--companion", action="store_true",
+        help="also emit the companion-app stub (full companion authoring is Spec G)",
+    )
+    parser.add_argument(
+        "--core-ref", default=DEFAULT_CORE_REF,
+        help=f"langfuse-synth-core git ref the kit pins to (default: {DEFAULT_CORE_REF})",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="write into <dir>/<slug> even if it exists and is non-empty",
+    )
+    parser.set_defaults(func=_cmd_new)
+
+
 # ── dispatcher ────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -103,7 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     _add_validate(subparsers)
     _add_freeze(subparsers)
-    # #11 registers `new` here.
+    _add_new(subparsers)
     return parser
 
 

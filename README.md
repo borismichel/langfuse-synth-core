@@ -48,11 +48,40 @@ src/langfuse_synth_core/
   seed/events.py    batch-ingestion event-envelope builders (#31)
   live/theme.py     Langfuse design tokens + page shell (#31)
   live/paths.py     prefix-aware internal paths (LIVE_BASE_PATH) (#31)
-  authoring/        authoring toolchain — import fails without the [authoring] extra
+  authoring/        authoring CLI (synth-authoring validate/freeze/new) + scaffold
+                    templates — import fails without the [authoring] extra
 docs/SEAM.md        the library/kit hand-off rule + the "not a framework" verdict
 docs/INSTALL.md     git-pinned private install + build-secret pattern
 CONTRACT.md         reserved home for the relocated Contract (#27)
 ```
+
+## Authoring CLI
+
+The `[authoring]` extra installs the `synth-authoring` console script — the kit authoring
+toolchain (namespaced `synth-authoring`, never `synth`, so it can't shadow a kit's own
+`synth` runtime entry point):
+
+```bash
+# Scaffold a new kit — a runnable-green walking skeleton (#36). Emits the full file floor
+# (schema-valid usecase.yaml with the canonical generation.target_traces knob, seed+verify
+# wired through the library, the identity derivation hook, a render:markdown Presenter
+# Runbook, the reference non-root Dockerfile), then blesses the initial determinism golden
+# so the fresh kit passes `synth-authoring validate` AND the golden gate on first generation.
+synth-authoring new my-kit                 # -> ./my-kit/
+synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
+synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
+synth-authoring new my-kit --core-ref v1.0.0   # lib git ref the kit pins to (a tag)
+
+# Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
+synth-authoring validate path/to/usecase.yaml
+
+# Bless / re-bless the determinism golden for a seed (#28) — runs seed under the deny-LLM
+# egress block, so a deliberate pool change is one intentional re-bless, never a hand-edit.
+synth-authoring freeze module:seed --golden tests/golden/spool.ndjson --target-traces 300
+```
+
+A freshly scaffolded kit is green from its first commit: `cd my-kit && pip install -e
+'.[dev]' && pytest`.
 
 ## Develop
 
