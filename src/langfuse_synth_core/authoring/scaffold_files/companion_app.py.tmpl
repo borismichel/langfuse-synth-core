@@ -1,0 +1,20 @@
+"""Companion-app stub — full companion authoring is Spec G.
+
+The shared library exposes the companion adapter seam
+(`langfuse_synth_core.companion.CompanionAdapter`); wiring a real live surface (e.g. a
+FastAPI app with routes, a health path, and a `live_components` entry in `usecase.yaml`)
+is Spec G, out of scope for the walking skeleton. This stub exists only so the seam is
+present when requested.
+"""
+from __future__ import annotations
+
+
+def main() -> int:
+    raise SystemExit(
+        "companion app is a scaffolded stub — full companion authoring is Spec G. Wire a "
+        "real live surface here and declare it under `live_components` in usecase.yaml."
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -29,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-# The authoring CLI (#27 ships `synth-authoring validate`; #28/#11 add `freeze`/`new`).
+# The authoring CLI (#27 ships `synth-authoring validate`; #28/#36 add `freeze`/`new`).
 # It is namespaced `synth-authoring`, NOT `synth`, on purpose: the bare `synth` name is
 # the KIT runtime console script (synth probe|plan|seed|verify|...), the portal
 # integration surface (CONTRACT.md reserved-verb table; every manifest pipeline runs
@@ -51,8 +51,10 @@ include = ["langfuse_synth_core*"]
 
 [tool.setuptools.package-data]
 # Ship the one versioned copy of the Contract schema as package data so `load_schema()`
-# resolves it via importlib.resources on any install (source, wheel, or editable).
-"langfuse_synth_core.authoring" = ["*.json"]
+# resolves it via importlib.resources on any install (source, wheel, or editable). Also
+# ship the `synth-authoring new` scaffold templates (#36) the same way — they carry a
+# `.tmpl` suffix so neither ruff nor pytest ever collect the emitted-kit source they hold.
+"langfuse_synth_core.authoring" = ["*.json", "scaffold_files/*.tmpl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

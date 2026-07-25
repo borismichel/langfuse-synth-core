@@ -1,0 +1,24 @@
+# __SLUG__
+
+A Demo Depot synth kit — a **runnable-green walking skeleton** scaffolded by
+`synth-authoring new`. The determinism plumbing (backdated ingestion through the shared
+library, spool determinism, non-root uid 10001) is proven before any story logic lands.
+
+## Layout
+
+- `usecase.yaml` — the portal integration manifest (passes `synth-authoring validate`).
+- `src/synth/` — the runtime `synth` CLI: `seed` (generate + ingest through the library)
+  and `verify` (read back through the library).
+- `src/synth/materialize.py` — deterministic, model-free generation; the single volume
+  knob `generation.target_traces` flows through the identity derivation hook in `config.py`.
+- `tests/` — the determinism golden gate (green from the first commit) + manifest validity.
+- `Dockerfile` — the reference non-root image.
+- `DEMO_SCRIPT.md` — the Presenter Runbook stub (the `render: markdown` artifact).
+
+## Grow it
+
+1. `pip install -e '.[dev]'`
+2. `pytest` — the golden gate + manifest checks stay green.
+3. Replace the identity derivation hook and grow `materialize.py` into the real story,
+   keeping the gate green. Re-bless a deliberate pool change with `synth-authoring freeze`
+   (never hand-edit the golden).
