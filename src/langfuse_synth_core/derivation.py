@@ -59,3 +59,57 @@ def identity_derivation(target_traces: TargetTraces, declared: DeclaredParams) -
     derive-scale) in its Ring 2 migration (#33/#34) — out of scope here.
     """
     return {"target_traces": target_traces}
+
+
+# ---------------------------------------------------------------------------
+# Advisory density override (#35): the optional kit-declared units_per_trace.
+# ---------------------------------------------------------------------------
+# A kit may declare, up front, roughly how many billable units one trace expands into, so
+# the deploy wizard can show an ADVISORY estimate (target_traces x units_per_trace) before
+# a run. The default ~11 = 10 observations + 1 sampled score per trace.
+#
+# This is ADVISORY ONLY and never binds: the measured Spool count
+# (:func:`langfuse_synth_core.seed.count.count_spool`) is what the cap gate reads, so an
+# inaccurate units_per_trace is harmless. Kept next to target_traces because it is the same
+# kind of piece — a runtime-safe, kit-declared knob key that ships without the [authoring]
+# extra (the estimate is computed at deploy time wherever the lib runs). The author-time,
+# jsonschema-validated field builder lives in ``langfuse_synth_core.authoring.knob``.
+UNITS_PER_TRACE_KEY = "generation.units_per_trace"
+DEFAULT_UNITS_PER_TRACE = 11
+
+
+def _validate_units_per_trace(value: Any) -> int:
+    """Coerce/guard a units_per_trace value: a positive int (bool rejected)."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"units_per_trace must be an int, got {value!r}")
+    if value < 1:
+        raise ValueError(f"units_per_trace must be >= 1, got {value}")
+    return value
+
+
+def resolve_units_per_trace(declared: DeclaredParams | None) -> int:
+    """Read the kit-declared ``generation.units_per_trace`` from declared params.
+
+    Falls back to :data:`DEFAULT_UNITS_PER_TRACE` when the key is absent (or ``declared``
+    is ``None``). Raises ``ValueError`` if a declared value is not a positive int.
+    """
+    if not declared or UNITS_PER_TRACE_KEY not in declared:
+        return DEFAULT_UNITS_PER_TRACE
+    return _validate_units_per_trace(declared[UNITS_PER_TRACE_KEY])
+
+
+def advisory_estimate(target_traces: TargetTraces, units_per_trace: int | None = None) -> int:
+    """The operator's advisory volume estimate: ``target_traces x units_per_trace``.
+
+    ``units_per_trace`` defaults to :data:`DEFAULT_UNITS_PER_TRACE`. Advisory only — never
+    a binding count. Raises ``ValueError`` on a non-positive/bool input.
+    """
+    if not isinstance(target_traces, int) or isinstance(target_traces, bool):
+        raise ValueError(f"target_traces must be an int, got {target_traces!r}")
+    if target_traces < 0:
+        raise ValueError(f"target_traces must be >= 0, got {target_traces}")
+    if units_per_trace is None:
+        units_per_trace = DEFAULT_UNITS_PER_TRACE
+    else:
+        units_per_trace = _validate_units_per_trace(units_per_trace)
+    return target_traces * units_per_trace

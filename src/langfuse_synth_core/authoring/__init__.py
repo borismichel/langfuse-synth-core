@@ -45,6 +45,7 @@ from langfuse_synth_core.authoring.validate import (  # noqa: E402
 from langfuse_synth_core.authoring.knob import (  # noqa: E402
     inject_target_traces,
     target_traces_knob,
+    units_per_trace_field,
 )
 
 __all__ = [
@@ -57,4 +58,5 @@ __all__ = [
     "validate_path",
     "inject_target_traces",
     "target_traces_knob",
+    "units_per_trace_field",
 ]

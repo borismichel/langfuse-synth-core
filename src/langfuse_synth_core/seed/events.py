@@ -13,6 +13,23 @@ from datetime import datetime
 from ..timegen import iso
 
 
+# The metered/billable envelope types, grouped by Langfuse's line items (traces,
+# observations, scores). These are exactly the event types this module emits, so they are
+# the single source of truth for the Spool-count primitive (#35). Note ``observation-create``
+# only ships when ``RICH_OBSERVATION_TYPES`` is on (see below), but it stays in the
+# observation set so the count is correct the moment that flag flips.
+#
+# Dataset items and experiment (dataset-run) items are deliberately absent: they are NOT
+# metered as line items and are created through the separate ``/api/public/datasets`` and
+# ``/api/public/dataset-run-items`` REST endpoints, never as ingestion envelopes. Counting
+# by this whitelist therefore excludes them by construction.
+TRACE_EVENT_TYPES = frozenset({"trace-create"})
+OBSERVATION_EVENT_TYPES = frozenset(
+    {"span-create", "generation-create", "event-create", "observation-create"}
+)
+SCORE_EVENT_TYPES = frozenset({"score-create"})
+
+
 def _envelope_id(obj_id: str, etype: str) -> str:
     return hashlib.blake2b(f"{etype}:{obj_id}".encode(), digest_size=16).hexdigest()
 
