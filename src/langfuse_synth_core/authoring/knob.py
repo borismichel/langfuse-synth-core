@@ -23,7 +23,7 @@ from typing import Any, Mapping
 
 import jsonschema
 
-from langfuse_synth_core.derivation import TARGET_TRACES_KEY
+from langfuse_synth_core.derivation import DEFAULT_UNITS_PER_TRACE, TARGET_TRACES_KEY
 
 # Canonical defaults for the knob's bounds/default. An author may override any of them,
 # but the shape (integer, bounded, defaulted, titled, described) is fixed.
@@ -119,3 +119,46 @@ def inject_target_traces(
     # The whole config_schema must remain a legal JSON Schema after injection.
     jsonschema.Draft7Validator.check_schema(result)
     return result
+
+
+# The kit-declared advisory density field (#35). Default and semantics live in the runtime
+# module; this author-time helper only adds jsonschema validation of the emitted fragment.
+UNITS_PER_TRACE_TITLE = "Units per trace"
+UNITS_PER_TRACE_DESCRIPTION = (
+    "Advisory: roughly how many billable units (observations + sampled scores) one trace "
+    "expands into, used only to estimate volume (target_traces x units_per_trace) before a "
+    "run. Kit-declared, not operator-tuned; the measured Spool count is what binds."
+)
+
+
+def units_per_trace_field(
+    default: int = DEFAULT_UNITS_PER_TRACE,
+    *,
+    title: str = UNITS_PER_TRACE_TITLE,
+    description: str = UNITS_PER_TRACE_DESCRIPTION,
+) -> dict[str, Any]:
+    """Build the schema-valid fragment for the kit-declared ``units_per_trace`` advisory.
+
+    Returns a Draft-7 integer field (``>= 1``, defaulted, titled, described). This is a
+    *kit-declared* field, not an operator ``config_schema`` knob, so it is returned on its
+    own rather than injected into a schema. Raises ``ValueError`` if ``default`` is not a
+    positive int.
+    """
+    if not isinstance(default, int) or isinstance(default, bool):
+        raise ValueError("default must be an int")
+    if default < 1:
+        raise ValueError(f"default ({default}) must be >= 1")
+
+    field: dict[str, Any] = {
+        "type": "integer",
+        "minimum": 1,
+        "default": default,
+        "title": title,
+        "description": description,
+    }
+
+    # Prove schema-validity rather than asserting it by construction.
+    validator_cls = jsonschema.Draft7Validator
+    validator_cls.check_schema(field)
+    validator_cls(field).validate(default)
+    return field
