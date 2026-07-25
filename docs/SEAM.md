@@ -61,5 +61,6 @@ assertions, golden-path) → kit. The split is proven assertion-identical to the
 
 The **runtime** install carries only the library (plus the companion adapter shell and
 the `target_traces` derivation hook, both of which run where the lib runs). The
-**`[authoring]`** extra carries the authoring toolchain (`synth-authoring new / validate / freeze`
-and the kit-dev skills), kept out of the lean runtime image a deployed kit ships.
+**`[authoring]`** extra carries the authoring toolchain (`synth-authoring new / validate /
+freeze / skills` and the kit-dev skills the last command installs), kept out of the lean
+runtime image a deployed kit ships.

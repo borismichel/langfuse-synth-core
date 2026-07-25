@@ -1,8 +1,9 @@
 """The ``synth-authoring`` CLI — a subcommand dispatcher (Spec A).
 
 Ships ``synth-authoring validate`` (#27, the offline Contract lint),
-``synth-authoring freeze`` (#28, the determinism golden gate), and
-``synth-authoring new`` (#36, the walking-skeleton scaffold generator). The dispatcher
+``synth-authoring freeze`` (#28, the determinism golden gate),
+``synth-authoring new`` (#36, the walking-skeleton scaffold generator), and
+``synth-authoring skills`` (#37, locate/install the shipped kit-dev skills). The dispatcher
 is plain ``argparse`` with subparsers, each command adding one ``_add_*`` block plus a
 ``set_defaults(func=...)`` — so later tickets bolt on mechanically without reshaping the
 shared parts.
@@ -25,6 +26,7 @@ import json
 import sys
 from pathlib import Path
 
+from langfuse_synth_core.authoring import skills as _skills
 from langfuse_synth_core.authoring import validate as _validate
 from langfuse_synth_core.authoring.golden import GoldenSpec, freeze
 from langfuse_synth_core.authoring.scaffold import (
@@ -147,6 +149,57 @@ def _add_new(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=_cmd_new)
 
 
+# ── synth-authoring skills (#37) ────────────────────────────────────────────────────────
+# Default target for `--install`: the directory Claude Code discovers project skills in.
+DEFAULT_SKILLS_DEST = ".claude/skills"
+
+
+def _cmd_skills(args: argparse.Namespace) -> int:
+    names = _skills.list_skills()
+    if args.install:
+        dest = Path(args.dest)
+        try:
+            written = _skills.install_skills(dest, force=args.force)
+        except FileExistsError as exc:
+            print(f"✗ synth-authoring skills: {exc}", file=sys.stderr)
+            return 2
+        for path in written:
+            print(f"✓ installed skill {path.name!r} -> {path}")
+        print(f"  {len(written)} skill(s) now discoverable under {dest}")
+        return 0
+    # Locate mode: name every shipped skill and its triggering description.
+    if not names:
+        print("no kit-dev skills ship in this build.")
+        return 0
+    print("kit-dev skills shipped in langfuse-synth-core[authoring]:")
+    for name in names:
+        meta = _skills.skill_frontmatter(name)
+        print(f"  {name} — {meta.get('description', '').strip()}")
+    print("\ninstall them into a skills dir (default .claude/skills) with:")
+    print("  synth-authoring skills --install")
+    return 0
+
+
+def _add_skills(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "skills",
+        help="locate or install the shipped kit-dev skills (the agent pack)",
+    )
+    parser.add_argument(
+        "--install", action="store_true",
+        help="copy the skills into --dest (default: .claude/skills) so an agent discovers them",
+    )
+    parser.add_argument(
+        "--dest", default=DEFAULT_SKILLS_DEST,
+        help=f"skills directory to install into (default: {DEFAULT_SKILLS_DEST})",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="overwrite an existing skill dir in --dest (replaces an edited copy)",
+    )
+    parser.set_defaults(func=_cmd_skills)
+
+
 # ── dispatcher ────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -157,6 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_validate(subparsers)
     _add_freeze(subparsers)
     _add_new(subparsers)
+    _add_skills(subparsers)
     return parser
 
 
