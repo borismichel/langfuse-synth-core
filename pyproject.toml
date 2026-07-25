@@ -54,7 +54,15 @@ include = ["langfuse_synth_core*"]
 # resolves it via importlib.resources on any install (source, wheel, or editable). Also
 # ship the `synth-authoring new` scaffold templates (#36) the same way — they carry a
 # `.tmpl` suffix so neither ruff nor pytest ever collect the emitted-kit source they hold.
-"langfuse_synth_core.authoring" = ["*.json", "scaffold_files/*.tmpl"]
+# The kit-dev skills (#37) ride the same package-data channel — one version with the lib,
+# so Contract, validator, and the skills that teach them can never drift. Markdown only, so
+# nothing under skills/ is ever collected as test/lint source.
+"langfuse_synth_core.authoring" = [
+    "*.json",
+    "scaffold_files/*.tmpl",
+    "skills/*/SKILL.md",
+    "skills/*/references/*.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

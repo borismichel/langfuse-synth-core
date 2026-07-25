@@ -7,8 +7,9 @@ of the authoring deps, so this import MUST fail there.
 
 The toolchain lands here across tickets: ``synth-authoring validate`` (#27, shipped),
 the determinism golden gate + ``synth-authoring freeze`` (#28), ``synth-authoring new``
-(#36, shipped), and the kit-dev skills. The ``target_traces`` derivation HOOK is the one
-authoring-adjacent piece
+(#36, shipped), and the kit-dev skills + ``synth-authoring skills`` locate/install surface
+(#37, shipped — the agent pack rides as package data under ``skills/``, one version with
+the lib). The ``target_traces`` derivation HOOK is the one authoring-adjacent piece
 that does NOT live here — it runs at seed time and ships in the runtime library
 (``langfuse_synth_core.derivation``, #29). The author-time knob **injector** for that
 same volume knob (``inject_target_traces``) does live here: it needs ``jsonschema`` to

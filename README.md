@@ -48,8 +48,8 @@ src/langfuse_synth_core/
   seed/events.py    batch-ingestion event-envelope builders (#31)
   live/theme.py     Langfuse design tokens + page shell (#31)
   live/paths.py     prefix-aware internal paths (LIVE_BASE_PATH) (#31)
-  authoring/        authoring CLI (synth-authoring validate/freeze/new) + scaffold
-                    templates — import fails without the [authoring] extra
+  authoring/        authoring CLI (synth-authoring validate/freeze/new/skills) + scaffold
+                    templates + kit-dev skills — import fails without the [authoring] extra
 docs/SEAM.md        the library/kit hand-off rule + the "not a framework" verdict
 docs/INSTALL.md     git-pinned private install + build-secret pattern
 CONTRACT.md         reserved home for the relocated Contract (#27)
@@ -78,10 +78,28 @@ synth-authoring validate path/to/usecase.yaml
 # Bless / re-bless the determinism golden for a seed (#28) — runs seed under the deny-LLM
 # egress block, so a deliberate pool change is one intentional re-bless, never a hand-edit.
 synth-authoring freeze module:seed --golden tests/golden/spool.ndjson --target-traces 300
+
+# Locate / install the kit-dev skills — the agent pack shipped and versioned with the lib
+# (#37). `authoring-a-demo-kit` walks a coding agent scaffold -> trace tree -> derivation ->
+# runbook -> gates, and delegates Langfuse craft to the existing `langfuse` skill.
+synth-authoring skills                 # list the shipped skills + their descriptions
+synth-authoring skills --install       # copy them into .claude/skills/ so an agent finds them
 ```
 
 A freshly scaffolded kit is green from its first commit: `cd my-kit && pip install -e
 '.[dev]' && pytest`.
+
+## Kit-dev skills (the agent pack)
+
+The Authoring SDK is **agent-first** — a coding agent authors ~99% of new demos — so the
+`[authoring]` extra ships **kit-dev skills** versioned with the library (so the Contract,
+its validator, and the skills that teach them can never drift). The orchestrator skill
+[`authoring-a-demo-kit`](src/langfuse_synth_core/authoring/skills/authoring-a-demo-kit/SKILL.md)
+walks scaffold → model the trace tree → wire the `target_traces` derivation → runbook → run
+the gates; it enforces the **model-free-seed** law (with the author-time-LLM-frozen-fixture
+escape hatch, re-blessed via `synth-authoring freeze`) and **delegates Langfuse craft**
+(which observation type, which evaluator type) to the existing `langfuse` skill rather than
+duplicating it. `synth-authoring skills --install` copies the pack into `.claude/skills/`.
 
 ## Develop
 
