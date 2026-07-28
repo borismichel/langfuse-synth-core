@@ -40,9 +40,12 @@ from langfuse_synth_core.authoring.knob import inject_target_traces
 # usecase.yaml carries, so an invalid slug is rejected here rather than at validate time.
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-# The default lib pin the emitted kit references (a TAG, never a branch — see RELEASING.md).
-# The author bumps it as the lib releases; `synth-authoring new --core-ref` overrides it.
-DEFAULT_CORE_REF = "v1.0.0"
+# The default lib pin the emitted kit references (a TAG, never a branch — see
+# RELEASING.md) — both the runtime dependency AND the `publish.yml` -> `kit-publish.yml`
+# workflow_call ref (#102) share this one pin. The author bumps it as the lib releases;
+# `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
+# `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call.
+DEFAULT_CORE_REF = "v1.2.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted

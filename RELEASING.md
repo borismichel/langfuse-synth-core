@@ -18,6 +18,16 @@ golden-gate dev pin — and the two **must share the same ref**:
 > Add a row here whenever a new kit starts consuming the lib, so this table stays the
 > single source of truth for "who must be re-pinned."
 
+## The CI-workflow pin is independent of the runtime pin
+
+Since #102, each kit's `.github/workflows/publish.yml` also pins a ref — the
+`workflow_call` reference into this repo's `kit-publish.yml` (build+GHCR-push+cosign
+sign; see `docs/CI_SIGNING.md`). That pin is **not** one of the two runtime pins above:
+it selects CI *logic*, not library behavior, so bumping it never touches a kit's
+determinism golden and does **not** require step 4 of the checklist below. Bump it
+independently, whenever a kit wants a `kit-publish.yml` fix or policy change — no need
+to wait for (or force) a coordinated runtime re-pin across every kit.
+
 ## Release checklist
 
 1. **Bump the version** in `pyproject.toml` (`version = "X.Y.Z"`) on a release branch;
