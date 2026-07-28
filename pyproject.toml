@@ -13,6 +13,11 @@ requires-python = ">=3.11"
 dependencies = [
     "langfuse>=4.0,<5",
     "PyYAML>=6,<7",
+    # `requests` is a genuine RUNTIME dep: four runtime modules import it directly
+    # (`http`, `lfread`, `seed/ingest`, `probe`) for the raw-REST read/ingest paths. Until
+    # now it arrived only transitively (via `langfuse`); declaring it (Spec G · G2, #140)
+    # makes a bare runtime install self-sufficient and pins the dependency we actually use.
+    "requests>=2.28,<3",
 ]
 
 [project.optional-dependencies]
@@ -23,9 +28,27 @@ dependencies = [
 authoring = [
     "jsonschema>=4.18,<5",
 ]
+# The Companion Adapter's web-server deps (Spec G · G2, #140). A companion container serves
+# a live surface; these deps power the adapter's bind/health/serve shell and are the exact
+# set the two kits' own `[playground]` extras already carry — migration collapses those
+# onto `langfuse-synth-core[companion]`. They ride an EXTRA, never the base runtime install:
+# a pure-spool kit (no companion) stays lean, and the adapter module itself imports them
+# LAZILY (inside serve/mount), so `langfuse_synth_core.companion.adapter` is importable on a
+# bare runtime install — the runtime-smoke CI job proves it, mirroring how core lazy-imports
+# `langfuse`/`anthropic`/`openai`.
+companion = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "python-multipart>=0.0.9",   # FastAPI form parsing (surfaces post forms)
+]
 dev = [
     "pytest>=8,<9",
     "ruff>=0.5,<1",
+    # The companion-adapter contract suite binds a real uvicorn server and GETs its health
+    # route, so the dev/test environment carries the [companion] web-server deps. (The
+    # runtime-smoke job installs a BARE runtime and never gets these — that is the point:
+    # it proves the adapter module imports without them.)
+    "langfuse-synth-core[companion]",
 ]
 
 [project.scripts]

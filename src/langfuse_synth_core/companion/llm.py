@@ -77,6 +77,13 @@ class LLMClient:
         self.model = model
         self._impl = None  # lazily constructed SDK client
 
+    def bind(self):
+        """Construct (and cache) the provider SDK client from the resolved key WITHOUT
+        running a completion — the public "is the client bindable?" accessor. The Companion
+        Adapter's readiness probe (Spec G · G2, #140) uses it to prove the LLM binds with no
+        billable call and no token spend. Returns the underlying SDK client."""
+        return self._client()
+
     def _client(self):
         if self._impl is not None:
             return self._impl

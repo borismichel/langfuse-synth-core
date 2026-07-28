@@ -49,6 +49,17 @@ jobs:
           python - <<'PY'
           import langfuse_synth_core as c
           from langfuse_synth_core.companion import CompanionAdapter  # noqa: F401
+          # Spec G · G2 (#140): the Companion Adapter shell and its whole public surface must
+          # import on a BARE runtime install — the FastAPI/uvicorn deps ride the [companion]
+          # extra (absent here) and are imported lazily inside serve()/mount_health().
+          from langfuse_synth_core.companion import adapter as _adapter  # noqa: F401
+          from langfuse_synth_core.companion import (  # noqa: F401
+              CompanionAdapterContract, Invocation, ReadinessReport, parse_invocation,
+          )
+          assert parse_invocation(["-c", "x.yaml", "--port", "8000"]).host == "0.0.0.0"
+          import sys
+          assert not ({"fastapi", "uvicorn", "starlette"} & set(sys.modules)), \
+              "adapter pulled a [companion] dep at import time — lazy-import regression"
           from langfuse_synth_core.derivation import DerivationHook, identity_derivation
           # Ring 1a (#31): the byte-identical core must import on the lean runtime.
           from langfuse_synth_core import rng, pricing, distributions, lfclient, config, timegen  # noqa: F401
