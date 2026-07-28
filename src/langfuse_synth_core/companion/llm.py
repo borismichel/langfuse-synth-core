@@ -1,6 +1,9 @@
 """Companion LLM resolution — the kits' shared thin provider layer (Spec G · G1, #138).
 
-Extracted from the gold-standard kits' byte-identical ``synth/llm.py`` (LAN-378). A
+Extracted from the gold-standard kits' shared ``synth/llm.py`` (LAN-378), whose
+executable code is byte-identical between the kits (only docstrings differed). The
+extraction keeps that executable code verbatim; this docstring and the function
+docstrings are the rewritten, scenario-neutral parts. A
 companion surface's demo-time model calls are the only real model calls a kit makes —
 the seed path is deterministic and model-free. This module reads the provider selection
 from the environment and routes those calls through the Anthropic **or** OpenAI SDK

@@ -1,7 +1,8 @@
 """Companion LLM resolution (Spec G · G1, #138) — the kits' shared provider layer.
 
-These tests pin the contract of the extracted `synth/llm.py` the gold-standard kits
-carry byte-identically: provider routing via LLM_PROVIDER, model resolution via
+These tests pin the contract of the extracted `synth/llm.py` whose executable code the
+gold-standard kits carry byte-identically: provider routing via LLM_PROVIDER, model
+resolution via
 LLM_MODEL with per-provider defaults, the provider→env-var key mapping (the
 container-side half of the LLM_API_KEY sentinel model), lazy SDK client construction,
 and — load-bearing (D6, story 38) — the legacy fallback: with LLM_PROVIDER/LLM_MODEL
