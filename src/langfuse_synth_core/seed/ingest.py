@@ -129,6 +129,18 @@ class Ingestor:
         self.sent += len(chunk)
         log(f"  · imported {self.sent} events")
 
+    # -- write-path liveness probe ----------------------------------------
+    def write_ping(self) -> None:
+        """Exercise the write path with an EMPTY batch — proves auth + endpoint
+        reachability without emitting a single event, so the seeded pool is untouched.
+
+        The Companion Adapter's readiness surface (Spec G · G2, #140) uses this as its
+        "Langfuse write path ok" probe: a POST of ``{"batch": []}`` round-trips the real
+        ingestion endpoint with the deployment's project keys and raises on any non-2xx, so
+        a missing/wrong key or an unreachable host fails loudly — but nothing is written.
+        A no-op under ``dry_run`` (the network is intentionally not touched)."""
+        self._post_chunk([])
+
     # -- in-memory send (back-compat; the seed path uses spool/import) ----
     def flush(self) -> None:
         """Send all accumulated events in chunks; clears the buffer."""

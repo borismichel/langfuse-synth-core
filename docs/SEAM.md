@@ -57,10 +57,34 @@ assertions, golden-path) → kit. The split is proven assertion-identical to the
   contract**.
 - Kits remain **three separate repositories**; no monorepo.
 
-## Runtime vs `[authoring]`
+## Runtime vs `[authoring]` vs `[companion]`
 
 The **runtime** install carries only the library (plus the companion adapter shell and
 the `target_traces` derivation hook, both of which run where the lib runs). The
 **`[authoring]`** extra carries the authoring toolchain (`synth-authoring new / validate /
 freeze / skills` and the kit-dev skills the last command installs), kept out of the lean
 runtime image a deployed kit ships.
+
+The **`[companion]`** extra (Spec G · G2, #140) carries the Companion Adapter's web-server
+deps (FastAPI/uvicorn/python-multipart) — the exact set both kits' `[playground]` extras
+already carry, which migration collapses onto `langfuse-synth-core[companion]`. It is an
+extra, not a base runtime dep: a pure-spool kit (no companion) stays lean, and the adapter
+module imports those deps **lazily** (inside `serve`/`mount_health`), so
+`langfuse_synth_core.companion.adapter` imports on a bare runtime install — mirroring how
+core lazy-imports `langfuse`/`anthropic`/`openai`, and proven by the runtime-smoke CI job.
+
+### Deviation from Spec G · D2 — `theme`/`paths` stay in the **runtime** install
+
+Spec G · D2 places the design tokens and the `theme`/`paths` render helpers in the
+`[authoring]` extra ("author/render-time only … not shipped into the booting container").
+Demo Depot **deviates**: `live/theme.py` and `live/paths.py` remain in the **runtime**
+install. The reason is empirical — both gold-standard kits call `theme.page()` and
+`paths.local()` **per request inside the running companion container** (serve-time, not
+author-time): they render the live Surface's HTML and rewrite internal hrefs behind the
+`LIVE_BASE_PATH` prefix on every response. Moving them to `[authoring]` would strip them
+from the runtime image and break every companion at serve time. The D2 spirit — "the runtime
+adapter answers *does it plug in?*, the authoring SDK answers *is it on-brand and correct?*"
+— is preserved: the **Adapter** (this shell) is scenario/brand-free; the **tokens** are
+brand, but they are *serve-time* brand the container legitimately needs, so they ride the
+runtime alongside the adapter, not the author-time `[authoring]` extra. Decision settled with
+Boris during Spec G decomposition (2026-07-28) and recorded here per the ticket.

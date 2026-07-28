@@ -25,6 +25,41 @@ def test_from_env_requires_keys_unless_dry_run(monkeypatch):
     assert ing.base_url == "http://localhost:3000"  # trailing slash trimmed
 
 
+def test_write_ping_posts_an_empty_batch(monkeypatch):
+    # The write-path liveness probe (Spec G · G2, #140): exercises auth + the ingestion
+    # endpoint with an EMPTY batch, so nothing is emitted but a bad key / dead host fails.
+    import langfuse_synth_core.seed.ingest as ingest_mod
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {}
+
+    def fake_post(url, json=None, auth=None, headers=None, timeout=None):
+        seen.update(url=url, batch=(json or {}).get("batch"), auth=auth)
+        return _Resp()
+
+    monkeypatch.setattr(ingest_mod.requests, "post", fake_post)
+    ing = Ingestor(base_url="http://lf.local", public_key="pk", secret_key="sk")
+    ing.write_ping()
+    assert seen["url"] == "http://lf.local/api/public/ingestion"
+    assert seen["batch"] == []
+    assert seen["auth"] == ("pk", "sk")
+
+
+def test_write_ping_is_a_noop_under_dry_run(monkeypatch):
+    import langfuse_synth_core.seed.ingest as ingest_mod
+
+    def boom(*a, **k):  # network must not be touched
+        raise AssertionError("dry_run write_ping must not POST")
+
+    monkeypatch.setattr(ingest_mod.requests, "post", boom)
+    Ingestor(base_url="http://lf.local", public_key="", secret_key="", dry_run=True).write_ping()
+
+
 def test_spool_writes_ndjson_one_event_per_line(tmp_path: Path):
     spool = tmp_path / "events.ndjson"
     ing = Ingestor(base_url="http://x", public_key="p", secret_key="s", spool_path=spool)

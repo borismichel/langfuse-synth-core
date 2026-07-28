@@ -164,6 +164,27 @@ def test_client_construction_reads_selected_providers_key_env(monkeypatch):
     assert client._client() is impl
 
 
+def test_bind_constructs_client_without_completing(monkeypatch):
+    # `bind()` is the public "construct, don't complete" accessor (Spec G · G2, #140): it
+    # returns the underlying SDK client and makes no billable call.
+    created = {"completions": 0}
+
+    class FakeAnthropic:
+        def __init__(self, api_key=None):
+            created["api_key"] = api_key
+            self.messages = SimpleNamespace(
+                create=lambda **kw: created.__setitem__("completions", created["completions"] + 1)
+            )
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=FakeAnthropic))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    client = llm.LLMClient("anthropic", "claude-sonnet-4-6")
+    impl = client.bind()
+    assert isinstance(impl, FakeAnthropic)
+    assert created["completions"] == 0
+    assert client.bind() is impl  # cached, same as _client()
+
+
 def test_openai_client_construction_reads_openai_key_env(monkeypatch):
     seen = {}
 

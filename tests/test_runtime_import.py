@@ -16,13 +16,27 @@ def test_package_imports_and_is_versioned():
 
 
 def test_companion_shell_seam_is_exposed():
-    from langfuse_synth_core.companion import CompanionAdapter
+    # Spec G · G2 (#140) FINALIZED the seam Spec A shipped as a placeholder: the concrete
+    # runtime shell + its structural Protocol + the invocation/readiness value types are the
+    # public surface a deployed companion relies on. All must resolve on a BARE runtime
+    # install — the web-server deps are imported lazily and ride the [companion] extra.
+    from langfuse_synth_core.companion import (
+        CompanionAdapter,
+        CompanionAdapterContract,
+        Invocation,
+        ReadinessReport,
+        parse_invocation,
+    )
 
-    # The seam is a structural Protocol Spec G implements; here we only assert it exists
-    # and names the six-thing contract.
-    for method in ("invoke", "intake_secrets", "health", "start", "stop",
-                   "resolve_llm_credential"):
-        assert hasattr(CompanionAdapter, method)
+    # The concrete shell exposes the six-responsibility surface (+ readiness).
+    for method in ("langfuse", "ingestor", "read_json", "llm", "readiness",
+                   "mount_health", "serve", "make_server", "run"):
+        assert callable(getattr(CompanionAdapter, method))
+    # The seam stays a runtime-checkable Protocol the shell structurally satisfies.
+    assert isinstance(parse_invocation(["-c", "x.yaml", "--host", "0.0.0.0", "--port", "9"]),
+                      Invocation)
+    assert hasattr(ReadinessReport, "ok")
+    assert hasattr(CompanionAdapterContract, "readiness")
 
 
 def test_companion_llm_ships_in_runtime_without_sdks():
