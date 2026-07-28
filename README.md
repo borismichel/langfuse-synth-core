@@ -37,7 +37,7 @@ no build secret — see [`docs/INSTALL.md`](docs/INSTALL.md) and
 ```
 src/langfuse_synth_core/
   __init__.py       public surface + version
-  companion.py      Companion Adapter shell contract seam (runtime; Spec G implements)
+  companion/        Companion Adapter shell contract seam + shared LLM resolution (runtime; Spec G)
   derivation.py     target_traces derivation hook home (runtime; #29 completes)
   rng.py            single-seed deterministic RNG + W3C-format ID substreams (#31)
   pricing.py        token counts x per-model pricing -> usage/cost details (#31)
