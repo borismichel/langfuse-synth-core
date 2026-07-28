@@ -1,0 +1,75 @@
+# Shared build + GHCR push + cosign keyless-sign logic for Demo Depot synth kits
+# (Spec E · E7, #102). Kits do not duplicate this logic — they call it via
+# `workflow_call` from a ~10-line `.github/workflows/publish.yml` pinned to a core
+# ref (see scaffold_files/publish.yml.tmpl, wired into `synth-authoring new`), so a
+# fix or policy change made here reaches every kit on its next pin bump. See
+# docs/CI_SIGNING.md for the full contract (image naming, cadence decision, and the
+# verification-side identity #104 checks against).
+#
+# `github.repository` / `github.sha` / `github.ref` below resolve to the CALLING
+# kit repo's values, not this repo's — that is how `workflow_call` context works,
+# and it is what lets this file stay kit-agnostic.
+#
+# Runner: self-hosted (labels: self-hosted, linux, kit-ci). This job holds a
+# `packages: write` GHCR credential and mints a short-lived Sigstore Fulcio
+# certificate (`id-token: write`) — both are credentials, so per the standing "no
+# third-party build infra touches secrets" directive (mirrored in this repo's own
+# ci.yml comment; portal PLAN.md §9/§10) it runs on the dedicated CI host, not a
+# GitHub-hosted runner. See docs/CI_SIGNING.md for the runner-provisioning runbook.
+
+name: Kit publish (build + GHCR push + cosign sign)
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: [self-hosted, linux, kit-ci]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # 12-Factor (per the ticket): no per-deploy value is ever baked in here — the
+      # image is purely env-parameterized at container start. This step takes no
+      # build-args beyond source, on purpose.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless (OIDC) signing — no key material to manage or leak. The signature
+      # covers the immutable digest, never the mutable tag.
+      - name: Sign the published digest (keyless OIDC)
+        run: |
+          cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+
+      - name: Record the immutable digest
+        run: |
+          {
+            echo "### Published"
+            echo ""
+            echo "\`ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

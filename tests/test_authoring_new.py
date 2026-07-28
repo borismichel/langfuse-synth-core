@@ -41,6 +41,7 @@ FLOOR = (
     "tests/golden_seed.py",
     "tests/test_determinism.py",
     "tests/test_validate.py",
+    ".github/workflows/publish.yml",
 )
 
 
@@ -74,6 +75,34 @@ def test_reference_dockerfile_is_non_root_uid_10001(kit):
     dockerfile = (kit.dest / "Dockerfile").read_text()
     assert "uid 10001" in dockerfile.lower() or "--uid 10001" in dockerfile
     assert "USER synth" in dockerfile
+
+
+# --- Spec E · E7 (#102): the scaffold gets build+sign CI with no manual wiring -----------
+def test_publish_workflow_triggers_on_tag_push(kit):
+    import yaml
+
+    doc = yaml.safe_load((kit.dest / ".github" / "workflows" / "publish.yml").read_text())
+    # YAML parses the bare `on:` key as the boolean True.
+    on = doc[True] if True in doc else doc["on"]
+    assert on["push"]["tags"] == ["v*.*.*"]
+
+
+def test_publish_workflow_calls_core_kit_publish_pinned_to_the_core_ref(kit):
+    from langfuse_synth_core.authoring.scaffold import DEFAULT_CORE_REF
+
+    workflow_src = (kit.dest / ".github" / "workflows" / "publish.yml").read_text()
+    assert (
+        "uses: borismichel/langfuse-synth-core/.github/workflows/kit-publish.yml@"
+        f"{DEFAULT_CORE_REF}" in workflow_src
+    )
+
+
+def test_publish_workflow_grants_exactly_the_needed_permissions(kit):
+    import yaml
+
+    doc = yaml.safe_load((kit.dest / ".github" / "workflows" / "publish.yml").read_text())
+    perms = doc["jobs"]["publish"]["permissions"]
+    assert perms == {"contents": "read", "packages": "write", "id-token": "write"}
 
 
 # --- AC: the companion stub appears only when explicitly requested -----------------------

@@ -13,6 +13,9 @@ File floor of the emitted kit:
 * the ``target_traces`` derivation hook pre-wired to the trivial identity derivation;
 * a ``render: markdown`` Presenter Runbook stub;
 * the reference ``Dockerfile`` (non-root uid 10001);
+* a ``.github/workflows/publish.yml`` that builds, GHCR-pushes, and cosign-signs the kit
+  image on every tag push, via a ``workflow_call`` into this repo's own ``kit-publish.yml``
+  pinned to ``core_ref`` (Spec E · E7, #102 — see ``docs/CI_SIGNING.md``);
 * a companion-app stub **only on request** (full companion authoring is Spec G).
 
 As its final step the generator **blesses the initial golden** by running the emitted
@@ -63,6 +66,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
     ("golden_seed.py.tmpl", "tests/golden_seed.py"),
     ("test_determinism.py.tmpl", "tests/test_determinism.py"),
     ("test_validate.py.tmpl", "tests/test_validate.py"),
+    ("publish.yml.tmpl", ".github/workflows/publish.yml"),
 )
 
 # Emitted ONLY when `--companion` is passed (full companion authoring is Spec G).
