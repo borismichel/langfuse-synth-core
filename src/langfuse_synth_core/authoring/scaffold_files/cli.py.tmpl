@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:__COMPANION_DISPATCH__
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if not hasattr(args, "func"):  # no subcommand given

@@ -105,16 +105,247 @@ def test_publish_workflow_grants_exactly_the_needed_permissions(kit):
     assert perms == {"contents": "read", "packages": "write", "id-token": "write"}
 
 
-# --- AC: the companion stub appears only when explicitly requested -----------------------
-def test_companion_stub_only_on_request(tmp_path):
+# --- AC (#141): `--companion` emits a runnable-green companion surface -------------------
+# The G3 promise: `--companion` no longer emits a dead stub. It emits a working Surface on
+# the Companion Adapter (#140) — a manifest `live_components` + `llm` block that validates, a
+# `companion` verb in the kit CLI, the `[companion]` web deps, and an app that boots, binds
+# 0.0.0.0, and answers its health path. Without `--companion`, the base scaffold is unchanged.
+
+
+def _load_module_from_path(path, name):
+    """Import an emitted kit module by file path (the scaffolded kit is not pip-installed)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def companion_kit(tmp_path_factory):
+    """Scaffold one `--companion` kit once and reuse it (the freeze subprocess is slow)."""
     from langfuse_synth_core.authoring.scaffold import scaffold_kit
 
-    without = scaffold_kit("plain-kit", tmp_path / "plain-kit")
-    assert not (without.dest / "companion").exists()
+    dest = tmp_path_factory.mktemp("kits") / "live-demo"
+    return scaffold_kit("live-demo", dest, with_companion=True)
 
-    withcomp = scaffold_kit("live-kit", tmp_path / "live-kit", with_companion=True)
-    assert (withcomp.dest / "companion" / "app.py").is_file()
-    assert "Spec G" in (withcomp.dest / "companion" / "app.py").read_text()
+
+def test_companion_surface_lands_under_the_synth_package(companion_kit):
+    """The companion app is a subpackage of the installed `synth` kit (so `synth companion`
+    can import it in the built container), not a loose top-level dir outside `src`."""
+    assert (companion_kit.dest / "src" / "synth" / "companion" / "app.py").is_file()
+    assert (companion_kit.dest / "src" / "synth" / "companion" / "__init__.py").is_file()
+
+
+def test_companion_surface_only_on_request(tmp_path):
+    """Without `--companion` there is no companion surface at all; with it, a working app
+    (not the old raising stub) is emitted."""
+    without = scaffold_kit_at(tmp_path, "plain-kit")
+    assert not (without.dest / "src" / "synth" / "companion").exists()
+
+    app_src = (
+        scaffold_kit_at(tmp_path, "live-kit", with_companion=True).dest
+        / "src" / "synth" / "companion" / "app.py"
+    ).read_text()
+    # The old stub raised "full companion authoring is Spec G"; the surface now works.
+    assert "full companion authoring is Spec G" not in app_src
+    assert "def create_app(" in app_src
+
+
+def scaffold_kit_at(tmp_path, slug, **kw):
+    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+
+    return scaffold_kit(slug, tmp_path / slug, **kw)
+
+
+# --- AC: manifest gains a validate-passing live_components + llm block --------------------
+def test_companion_manifest_has_live_components_and_llm_and_validates(companion_kit):
+    import yaml
+
+    from langfuse_synth_core.authoring.validate import validate_path
+
+    errors = validate_path(companion_kit.dest / "usecase.yaml")
+    assert errors == [], "\n".join(errors)
+
+    doc = yaml.safe_load((companion_kit.dest / "usecase.yaml").read_text())
+    assert isinstance(doc.get("live_components"), list) and doc["live_components"]
+    assert doc["llm"]["providers"], "top-level llm block required by the LLM_API_KEY sentinel"
+
+
+def test_companion_live_component_declares_the_adapter_contract_shape(companion_kit):
+    """Command / port / health_path / requires_secrets match the gold kits' contract shape."""
+    import yaml
+
+    doc = yaml.safe_load((companion_kit.dest / "usecase.yaml").read_text())
+    comp = doc["live_components"][0]
+    assert comp["command"] == "synth companion --config {config} --host 0.0.0.0 --port 8080"
+    assert comp["port"] == 8080
+    assert comp["health_path"] == "/healthz"
+    # LLM_API_KEY sentinel + the Langfuse project keys (no ANTHROPIC_API_KEY to mix).
+    assert set(comp["requires_secrets"]) == {
+        "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY",
+    }
+
+
+def test_companion_manifest_and_app_constants_agree(companion_kit):
+    """The manifest's live_component and the emitted app's declared constants agree — no drift
+    across the manifest/app boundary. Guards BOTH the health path AND requires_secrets: the
+    manifest declares what the portal provisions, the app declares what the Adapter enforces
+    at boot, and they must be the same set."""
+    import yaml
+
+    doc = yaml.safe_load((companion_kit.dest / "usecase.yaml").read_text())
+    comp = doc["live_components"][0]
+    app_mod = _load_module_from_path(
+        companion_kit.dest / "src" / "synth" / "companion" / "app.py", "scaffold_companion_drift"
+    )
+    assert app_mod.HEALTH_PATH == comp["health_path"]
+    assert set(app_mod.REQUIRES_SECRETS) == set(comp["requires_secrets"])
+
+
+# --- AC: without --companion the base scaffold is unchanged (no block / verb / deps) ------
+def test_base_scaffold_has_no_companion_leak(kit):
+    import yaml
+
+    doc = yaml.safe_load((kit.dest / "usecase.yaml").read_text())
+    assert "live_components" not in doc
+    assert "llm" not in doc
+    assert "companion" not in (kit.dest / "src" / "synth" / "cli.py").read_text()
+    assert "[companion]" not in (kit.dest / "pyproject.toml").read_text()
+
+
+def test_base_scaffold_cli_and_pyproject_are_byte_identical_to_the_templates(kit):
+    """The non-companion CLI/pyproject render exactly the base templates — the companion
+    placeholders collapse to nothing, so today's output is untouched."""
+    from importlib import resources
+
+    from langfuse_synth_core.authoring.scaffold import DEFAULT_CORE_REF, slug_to_name
+
+    ctx = {
+        "__SLUG__": kit.slug,
+        "__SLUG_UNDER__": kit.slug.replace("-", "_"),
+        "__NAME__": slug_to_name(kit.slug),
+        "__CORE_PIN__": DEFAULT_CORE_REF,
+        "__CORE_EXTRA__": "",
+        "__COMPANION_DISPATCH__": "",
+    }
+
+    def render(tmpl):
+        text = resources.files("langfuse_synth_core.authoring").joinpath(
+            "scaffold_files", tmpl
+        ).read_text(encoding="utf-8")
+        for k, v in ctx.items():
+            text = text.replace(k, v)
+        return text
+
+    assert (kit.dest / "src" / "synth" / "cli.py").read_text() == render("cli.py.tmpl")
+    assert (kit.dest / "pyproject.toml").read_text() == render("pyproject.toml.tmpl")
+
+
+# --- AC: the kit CLI registers the companion verb through the Adapter's helper ------------
+def test_companion_cli_wires_the_verb_to_the_app(companion_kit):
+    cli_src = (companion_kit.dest / "src" / "synth" / "cli.py").read_text()
+    assert 'if _argv[:1] == ["companion"]:' in cli_src
+    assert "from .companion.app import main as companion_main" in cli_src
+
+
+def test_companion_app_parses_via_the_adapter_helper(companion_kit):
+    app_src = (companion_kit.dest / "src" / "synth" / "companion" / "app.py").read_text()
+    assert "parse_invocation" in app_src
+    assert "adapter.run(" in app_src
+
+
+# --- AC: pyproject carries the companion web deps via the core [companion] extra ----------
+def test_companion_pyproject_carries_the_web_deps(companion_kit):
+    pyproject = (companion_kit.dest / "pyproject.toml").read_text()
+    assert "langfuse-synth-core[companion]" in pyproject
+
+
+# --- AC #1: boots via its DECLARED command string, binds 0.0.0.0 on the declared port, and
+#           answers its health path < 400 — driven end to end, not by hand ------------------
+def test_companion_boots_through_the_declared_command_string(companion_kit, monkeypatch):
+    """Exercise the whole live path the portal would: the manifest's declared command string
+    -> the kit's `synth companion` verb -> the Adapter's parse_invocation -> load_config ->
+    adapter.run on the declared host/port -> a surface whose health path answers < 400.
+
+    The emitted kit is not pip-installed, so its `src` is prepended to the path (as the built
+    container's install would place it). `adapter.run` is intercepted at its seam to capture
+    the declared bind/port without blocking; the captured surface is then bound on a free port
+    (binding the literal 8080 would flake in CI) and its health path probed over HTTP.
+    """
+    import importlib
+    import shlex
+    import socket
+    import sys
+    import threading
+    import time
+
+    import requests
+    import yaml
+
+    from langfuse_synth_core.companion import CompanionAdapter
+
+    # Put the emitted kit on the path and import ITS `synth` package fresh (not core's).
+    monkeypatch.syspath_prepend(str(companion_kit.dest / "src"))
+    for name in [m for m in list(sys.modules) if m == "synth" or m.startswith("synth.")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    cli = importlib.import_module("synth.cli")
+
+    # Drive the DECLARED command string verbatim, substituting only the {config} the portal
+    # templates. Everything else — `synth companion --host 0.0.0.0 --port 8080` — is as shipped.
+    doc = yaml.safe_load((companion_kit.dest / "usecase.yaml").read_text())
+    comp = doc["live_components"][0]
+    config_path = str(companion_kit.dest / "config" / "demo.yaml")
+    tokens = shlex.split(comp["command"].replace("{config}", config_path))
+    assert tokens[:2] == ["synth", "companion"]
+
+    captured: dict = {}
+
+    def capture_run(self, app_factory, *, host, port):
+        app = app_factory(self)
+        self.mount_health(app)  # adapter.run does this via serve(); do it here for the probe
+        captured.update(adapter=self, app=app, host=host, port=port)
+
+    monkeypatch.setattr(CompanionAdapter, "run", capture_run)
+
+    assert cli.main(tokens[1:]) == 0  # `synth` is argv[0]; the CLI dispatches `companion`
+    # Booted on the DECLARED bind + port from the command string (0.0.0.0 : 8080).
+    assert captured["host"] == "0.0.0.0" and captured["port"] == comp["port"] == 8080
+
+    # The booted surface answers its health path < 400 over HTTP (bound on a free port).
+    sock = socket.socket()
+    sock.bind(("0.0.0.0", 0))
+    free_port = sock.getsockname()[1]
+    sock.close()
+    server = captured["adapter"].make_server(captured["app"], host="0.0.0.0", port=free_port)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.time() + 10
+        while not getattr(server, "started", False) and time.time() < deadline:
+            time.sleep(0.02)
+        assert server.started, "companion surface never bound 0.0.0.0"
+        assert server.config.host == "0.0.0.0"  # bind-all, never port-published
+
+        health = requests.get(f"http://127.0.0.1:{free_port}{comp['health_path']}", timeout=5)
+        assert health.status_code < 400  # liveness the portal probes
+        root = requests.get(f"http://127.0.0.1:{free_port}/", timeout=5)
+        assert root.status_code == 200 and "<html" in root.text.lower()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+    assert not thread.is_alive(), "companion surface did not shut down gracefully"
+
+
+# --- AC #3: the surface handles zero raw secrets (ready clients only, via the adapter) ----
+def test_companion_app_has_zero_raw_secret_handling(companion_kit):
+    app_src = (companion_kit.dest / "src" / "synth" / "companion" / "app.py").read_text()
+    # The Surface reads no raw secret material: the Adapter does secret intake and hands out
+    # ready clients only. (Secret NAMES in REQUIRES_SECRETS are fine — they are not values.)
+    assert "os.environ" not in app_src
+    assert "os.getenv" not in app_src
+    assert "getenv" not in app_src
 
 
 # --- AC: the scaffold's usecase.yaml passes validate with no edits -----------------------

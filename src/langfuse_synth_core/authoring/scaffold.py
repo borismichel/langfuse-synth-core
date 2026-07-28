@@ -16,7 +16,11 @@ File floor of the emitted kit:
 * a ``.github/workflows/publish.yml`` that builds, GHCR-pushes, and cosign-signs the kit
   image on every tag push, via a ``workflow_call`` into this repo's own ``kit-publish.yml``
   pinned to ``core_ref`` (Spec E · E7, #102 — see ``docs/CI_SIGNING.md``);
-* a companion-app stub **only on request** (full companion authoring is Spec G).
+* a runnable-green **companion surface only on request** (Spec G · G3, #141): with
+  ``--companion`` the manifest gains a validate-passing ``live_components`` + ``llm`` block,
+  the kit CLI gains the ``synth companion`` verb, the pyproject pulls the core ``[companion]``
+  web deps, and ``src/synth/companion/app.py`` is a minimal working Surface on the Companion
+  Adapter (boots, binds, answers its health path). Without it the scaffold is unchanged.
 
 As its final step the generator **blesses the initial golden** by running the emitted
 seed through the determinism golden gate under the deny-LLM egress block — so the freshly
@@ -72,10 +76,41 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
     ("publish.yml.tmpl", ".github/workflows/publish.yml"),
 )
 
-# Emitted ONLY when `--companion` is passed (full companion authoring is Spec G).
+# Emitted ONLY when `--companion` is passed (Spec G · G3, #141). A subpackage of the kit's
+# installed `synth` package (NOT a loose top-level dir) so `synth companion` can import it in
+# the built container, where `pip install .` only ships what setuptools finds under `src`.
 COMPANION_FILES: tuple[tuple[str, str], ...] = (
-    ("companion__init__.py.tmpl", "companion/__init__.py"),
-    ("companion_app.py.tmpl", "companion/app.py"),
+    ("companion__init__.py.tmpl", "src/synth/companion/__init__.py"),
+    ("companion_app.py.tmpl", "src/synth/companion/app.py"),
+)
+
+# The live_components port + health path the emitted `--companion` manifest declares. The
+# health path is the Adapter's default and MUST differ from the surface's own `/` route (the
+# adapter mounts readiness at the health path). The emitted app.py mirrors these constants —
+# `test_companion_manifest_command_health_match_the_app` pins them together against drift.
+COMPANION_PORT = 8080
+COMPANION_HEALTH_PATH = "/healthz"
+# LLM_API_KEY is the provider-agnostic sentinel (needs the top-level `llm` block below and may
+# not be mixed with ANTHROPIC_API_KEY — LAN-378); plus the two Langfuse project keys.
+COMPANION_REQUIRES_SECRETS = ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY"]
+
+
+# Injected into `cli.py`'s `main()` under `--companion` (replaces the `__COMPANION_DISPATCH__`
+# token). `synth companion` is the live surface: it takes the Adapter's fixed
+# --config/--host/--port invocation (never a pipeline `--set`), so it bypasses the seed/verify
+# argparse and hands straight to the companion app, which parses with the Adapter's helper.
+# Leads with a newline and no trailing one — the template supplies "\n    parser" after the
+# token, so in the base scaffold (token -> "") `cli.py` stays byte-identical to today.
+_COMPANION_CLI_DISPATCH = (
+    "\n    # `synth companion` is the live surface (Spec G): the Adapter's fixed"
+    "\n    # --config/--host/--port invocation, never a pipeline --set, so it skips the"
+    "\n    # seed/verify argparse and dispatches to the companion app (which parses via the"
+    "\n    # Adapter's parse_invocation helper)."
+    "\n    _argv = sys.argv[1:] if argv is None else argv"
+    '\n    if _argv[:1] == ["companion"]:'
+    "\n        from .companion.app import main as companion_main"
+    "\n"
+    "\n        return companion_main(_argv[1:])"
 )
 
 
@@ -108,10 +143,46 @@ def _render(text: str, ctx: dict[str, str]) -> str:
     return text
 
 
-def build_manifest(slug: str) -> dict:
+def _companion_manifest_blocks(slug: str) -> dict:
+    """The additive ``llm`` + ``live_components`` blocks a ``--companion`` manifest carries.
+
+    Shaped to the gold kits' contract (command binds ``0.0.0.0`` + the declared port, the
+    ``LLM_API_KEY`` sentinel with a matching top-level ``llm`` block) so it passes
+    ``synth-authoring validate`` — including the LLM-provider parity rules — by construction.
+    """
+    return {
+        # Optional LLM-provider contract (LAN-378): the LLM_API_KEY sentinel below requires
+        # it. First provider = the deploy-time default; no `models` pin, so each provider
+        # keeps the kit's built-in model. The portal owns the id -> env-var mapping.
+        "llm": {"providers": ["anthropic", "openai"]},
+        "live_components": [
+            {
+                "name": "companion",
+                "description": (
+                    "Scaffolded live companion surface — a placeholder page served on the "
+                    "Companion Adapter. Replace it with the kit's live scene (routes, forms, "
+                    "an in-scene view)."
+                ),
+                # Binds 0.0.0.0 + the declared port; `synth companion` is wired in src/synth/cli.py.
+                "command": (
+                    f"synth companion --config {{config}} --host 0.0.0.0 --port {COMPANION_PORT}"
+                ),
+                "port": COMPANION_PORT,
+                "requires_secrets": list(COMPANION_REQUIRES_SECRETS),
+                "routes": [{"path": "/", "title": slug_to_name(slug)}],
+                "health_path": COMPANION_HEALTH_PATH,
+            }
+        ],
+    }
+
+
+def build_manifest(slug: str, *, with_companion: bool = False) -> dict:
     """Build the schema-valid ``usecase.yaml`` document for ``slug`` (dumped to YAML by
     :func:`scaffold_kit`). The canonical volume knob is injected via the authoring SDK so
     the emitted ``config_schema.generation.target_traces`` is schema-valid by construction.
+
+    With ``with_companion`` the document also carries the additive ``llm`` + ``live_components``
+    blocks that declare the runnable-green companion surface (Spec G · G3, #141).
     """
     config_schema = inject_target_traces(
         {
@@ -132,7 +203,7 @@ def build_manifest(slug: str) -> dict:
             "required": [],
         }
     )
-    return {
+    manifest = {
         "schema_version": 1,
         "slug": slug,
         "name": slug_to_name(slug),
@@ -155,6 +226,9 @@ def build_manifest(slug: str) -> dict:
             {"path": "DEMO_SCRIPT.md", "render": "markdown", "title": "Presenter Runbook"},
         ],
     }
+    if with_companion:
+        manifest.update(_companion_manifest_blocks(slug))
+    return manifest
 
 
 _MANIFEST_HEADER = (
@@ -164,9 +238,11 @@ _MANIFEST_HEADER = (
 )
 
 
-def render_manifest(slug: str) -> str:
+def render_manifest(slug: str, *, with_companion: bool = False) -> str:
     """The full ``usecase.yaml`` text (header comment + dumped, schema-valid document)."""
-    body = yaml.safe_dump(build_manifest(slug), sort_keys=False, allow_unicode=True)
+    body = yaml.safe_dump(
+        build_manifest(slug, with_companion=with_companion), sort_keys=False, allow_unicode=True
+    )
     return _MANIFEST_HEADER + body
 
 
@@ -211,6 +287,12 @@ def scaffold_kit(
         "__NAME__": slug_to_name(slug),
         "__CORE_PIN__": core_ref,
         "__GOLDEN_TT__": str(GOLDEN_TARGET_TRACES),
+        # Companion placeholders: empty in the base scaffold (so cli.py / pyproject.toml are
+        # byte-identical to today), filled only under `--companion`. `__CORE_EXTRA__` pulls
+        # the core web-server deps via the `[companion]` extra; `__COMPANION_DISPATCH__`
+        # injects the `synth companion` verb into the kit CLI's `main`.
+        "__CORE_EXTRA__": "[companion]" if with_companion else "",
+        "__COMPANION_DISPATCH__": _COMPANION_CLI_DISPATCH if with_companion else "",
     }
 
     result = ScaffoldResult(slug=slug, dest=dest)
@@ -224,7 +306,7 @@ def scaffold_kit(
 
     # The manifest is generated (not templated) so the canonical knob is injected via the
     # authoring SDK and proven schema-valid by construction.
-    _write(dest / "usecase.yaml", render_manifest(slug))
+    _write(dest / "usecase.yaml", render_manifest(slug, with_companion=with_companion))
     result.files.append("usecase.yaml")
 
     # Bless the initial golden: run the just-emitted seed through the determinism golden
