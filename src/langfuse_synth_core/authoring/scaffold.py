@@ -13,6 +13,9 @@ File floor of the emitted kit:
 * the ``target_traces`` derivation hook pre-wired to the trivial identity derivation;
 * a ``render: markdown`` Presenter Runbook stub;
 * the reference ``Dockerfile`` (non-root uid 10001);
+* a ``.github/workflows/publish.yml`` that builds, GHCR-pushes, and cosign-signs the kit
+  image on every tag push, via a ``workflow_call`` into this repo's own ``kit-publish.yml``
+  pinned to ``core_ref`` (Spec E · E7, #102 — see ``docs/CI_SIGNING.md``);
 * a companion-app stub **only on request** (full companion authoring is Spec G).
 
 As its final step the generator **blesses the initial golden** by running the emitted
@@ -37,9 +40,12 @@ from langfuse_synth_core.authoring.knob import inject_target_traces
 # usecase.yaml carries, so an invalid slug is rejected here rather than at validate time.
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-# The default lib pin the emitted kit references (a TAG, never a branch — see RELEASING.md).
-# The author bumps it as the lib releases; `synth-authoring new --core-ref` overrides it.
-DEFAULT_CORE_REF = "v1.0.0"
+# The default lib pin the emitted kit references (a TAG, never a branch — see
+# RELEASING.md) — both the runtime dependency AND the `publish.yml` -> `kit-publish.yml`
+# workflow_call ref (#102) share this one pin. The author bumps it as the lib releases;
+# `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
+# `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call.
+DEFAULT_CORE_REF = "v1.2.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted
@@ -63,6 +69,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
     ("golden_seed.py.tmpl", "tests/golden_seed.py"),
     ("test_determinism.py.tmpl", "tests/test_determinism.py"),
     ("test_validate.py.tmpl", "tests/test_validate.py"),
+    ("publish.yml.tmpl", ".github/workflows/publish.yml"),
 )
 
 # Emitted ONLY when `--companion` is passed (full companion authoring is Spec G).
