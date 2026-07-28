@@ -3,9 +3,13 @@
 # Runner policy: this repo is PUBLIC (consistent with the public kits it is the shared
 # DNA of), so GitHub-hosted minutes are free and unlimited. Jobs run on a PINNED hosted
 # image (ubuntu-24.04, never the moving `ubuntu-latest`) for reproducibility. These jobs
-# touch NO secrets — lint + import smoke only. The portal's "no third-party infra touches
-# secrets" directive still binds any FUTURE job that handles secrets or the private
-# registry; add such a job on a self-hosted runner, not here.
+# touch NO secrets — lint + import smoke only. Per the CLAUDE.md infrastructure policy
+# (2026-07-28) and its application here (Spec E · E7b, #113), a FUTURE job in this repo
+# that needs credentials still belongs on GitHub-hosted infrastructure, not self-hosted —
+# GitHub-minted credentials (GITHUB_TOKEN, OIDC id-token) are out of scope of the "no
+# third-party infra touches secrets" directive (portal PLAN.md §9/§10), which binds
+# *project* secrets only. See kit-publish.yml for the worked example: it holds a
+# `packages: write` GHCR token + `id-token: write` OIDC and still runs GitHub-hosted.
 
 name: CI
 
