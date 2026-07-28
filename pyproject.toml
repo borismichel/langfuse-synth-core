@@ -97,3 +97,7 @@ select = ["E", "F"]
 "src/langfuse_synth_core/seed/events.py" = ["E501"]
 "src/langfuse_synth_core/live/theme.py" = ["E501"]
 "src/langfuse_synth_core/live/paths.py" = ["E501"]
+# Spec G · G1 (#138) extracted the kits' shared llm.py under the same regime for its
+# EXECUTABLE code (docstrings were rewritten scenario-neutral; the code is AST-identical
+# to both kits), so it joins the list even though every line fits 100 cols today.
+"src/langfuse_synth_core/companion/llm.py" = ["E501"]

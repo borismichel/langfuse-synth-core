@@ -25,6 +25,16 @@ def test_companion_shell_seam_is_exposed():
         assert hasattr(CompanionAdapter, method)
 
 
+def test_companion_llm_ships_in_runtime_without_sdks():
+    # G1 (#138): the extracted LLM-resolution module must be importable on a bare
+    # runtime install — the anthropic/openai SDKs are imported lazily at client
+    # construction and ride the [companion] extra (G2), never the runtime dep list.
+    from langfuse_synth_core.companion import llm
+
+    for name in ("resolve_provider", "resolve_model", "get_llm", "LLMClient", "ChatResult"):
+        assert hasattr(llm, name)
+
+
 def test_derivation_hook_ships_in_runtime():
     # The hook runs at seed time, so it MUST be importable from the runtime lib — never
     # gated behind [authoring].
