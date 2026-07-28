@@ -1,6 +1,0 @@
-self-hosted-runner:
-  # kit-ci: the dedicated CI host's runner label for kit build+push+sign jobs
-  # (Spec E · E7, #102 — docs/CI_SIGNING.md §3). Deliberately distinct from the
-  # portal's own `demo-depot` label so a kit-repo runner can never pick up a portal job.
-  labels:
-    - kit-ci

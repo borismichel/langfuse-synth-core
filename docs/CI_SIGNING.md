@@ -26,46 +26,33 @@ The publish workflow triggers on `push: tags: ["v*.*.*"]`, not on every push to 
 Images are immutable release artifacts, not CI-per-commit churn — this mirrors the
 already-established kit release rhythm (a kit repo cuts a semver tag; see each kit's own
 release notes). Building on every push would flood GHCR with untagged intermediate
-images and burn CI time on the shared self-hosted host for no reader of that image.
+images and burn CI minutes for no reader of that image.
 
-### 3. Runner: self-hosted, not GitHub-hosted
+### 3. Runner: GitHub-hosted, not self-hosted
 
-The publish job holds a `packages: write` GHCR credential and mints a short-lived
-Sigstore Fulcio certificate (`id-token: write`) — both are credentials in the sense the
-project's standing directive cares about ("no third-party build infra touches secrets" —
-portal `PLAN.md` §9/§10, mirrored in this repo's own `ci.yml` comment, which explicitly
-called out that a *future* job handling secrets or a registry belongs on self-hosted, not
-here). The lint/test jobs in `ci.yml` stay on GitHub-hosted `ubuntu-24.04` — they touch
-no credentials and this repo is public, so those minutes are free. Only the
-build+push+sign job moves to self-hosted.
+**Reversed by Spec E · E7b (#113, 2026-07-28).** #102 originally put this job on a
+self-hosted runner (see the old runbook this section used to carry, now deleted). That
+decision is reversed: the publish job runs on a GitHub-hosted `ubuntu-24.04` runner, same
+as the lint/test jobs in `ci.yml`.
 
-Runner labels: `self-hosted, linux, kit-ci` — deliberately **not** the portal's own
-`demo-depot` label, so a kit-repo runner can never pick up a portal job or vice versa.
+This follows directly from the CLAUDE.md infrastructure policy (2026-07-28): while
+running, Demo Depot's total infrastructure footprint is the dedicated depot host plus
+GitHub, nothing else. Core and both kits are public repos, so **all public-repo CI/CD
+uses GitHub-hosted infrastructure** — GitHub-hosted runners, GHCR for images, GitHub OIDC
+for keyless signing. The job's credentials (`packages: write` GHCR token, `id-token:
+write` OIDC for cosign) are both minted by GitHub for the run, not *project* secrets
+(Infisical values, LLM keys, anything from the portal secret store) — the policy places
+those GitHub-minted credentials explicitly out of scope of the "no third-party build
+infra touches secrets" directive (portal `PLAN.md` §9/§10), so nothing about this job
+requires the dedicated host.
 
-**Provisioning a kit-repo runner** (one-time, per kit repo, on the same dedicated CI
-host that already runs the portal's runner): reuse the portal's existing, already
-generic `infra/host/runner-setup.sh` (no portal code change needed — it already takes
-`GH_REPO` / `RUNNER_DIR` / `RUNNER_LABELS` as env vars):
-
-```bash
-sudo -u ci env \
-  GH_ORG=borismichel \
-  GH_REPO=langfuse-synth-ev \
-  GH_RUNNER_TOKEN=<token from Settings -> Actions -> Runners -> New runner, on that kit repo> \
-  RUNNER_DIR=/opt/github-runner-langfuse-synth-ev \
-  RUNNER_LABELS=self-hosted,linux,kit-ci \
-  bash infra/host/runner-setup.sh
-```
-
-Then install as its own systemd service (`sudo $RUNNER_DIR/svc.sh install ci && ...
-start`), same as the portal runbook's Step 2d. GitHub self-hosted runners are
-repo-scoped for a personal account (no org-level runner available here), so each kit
-repo gets its own runner *instance* — but they can all live on the one physical host.
-This is an operator/runbook step, not portal or infra **code** — the acceptance
-criterion "zero per-kit portal/infra work" is about the workflow itself needing no
-hand-authored YAML per kit (it doesn't — see §4), not about runner registration, which
-is inherently a one-time per-repo GitHub administration action (the portal's own runner
-was provisioned the same way).
+It is also the safer shape on its own terms: fork PRs make a repo-scoped self-hosted
+runner on a public repo a code-execution risk, and ephemeral GitHub-hosted runners
+strengthen the keyless-signing trust story (the Fulcio certificate is bound to a
+short-lived, GitHub-attested identity rather than a long-lived host). No runner
+provisioning step remains for this workflow — a freshly scaffolded kit's `publish.yml`
+(§4) works the moment its first `v*` tag is pushed, no per-kit-repo GitHub
+administration required.
 
 ### 4. Kit #3..N inherit the workflow for free
 
@@ -127,6 +114,6 @@ future, with no per-kit allowlist entry to maintain in #104.
 - Signature verification policy: recorded above, identical for #104.
 - New kits inherit build+sign without manual wiring: `synth-authoring new` emits the
   caller (§4).
-- Cadence decision recorded: §2 (build-on-tag) + §3 (self-hosted).
-- No portal code change: none made; the runner runbook in §3 reuses the portal's
-  existing generic script by invocation, not by editing it.
+- Cadence decision recorded: §2 (build-on-tag) + §3 (GitHub-hosted).
+- No portal code change: none made; §3's move to GitHub-hosted runners removes the
+  runner-provisioning step entirely rather than touching portal or infra code.

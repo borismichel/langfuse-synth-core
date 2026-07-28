@@ -10,12 +10,14 @@
 # kit repo's values, not this repo's — that is how `workflow_call` context works,
 # and it is what lets this file stay kit-agnostic.
 #
-# Runner: self-hosted (labels: self-hosted, linux, kit-ci). This job holds a
-# `packages: write` GHCR credential and mints a short-lived Sigstore Fulcio
-# certificate (`id-token: write`) — both are credentials, so per the standing "no
-# third-party build infra touches secrets" directive (mirrored in this repo's own
-# ci.yml comment; portal PLAN.md §9/§10) it runs on the dedicated CI host, not a
-# GitHub-hosted runner. See docs/CI_SIGNING.md for the runner-provisioning runbook.
+# Runner: GitHub-hosted (Spec E · E7b, #113 — reverses #102's self-hosted decision).
+# Core and both kits are public repos, so per the CLAUDE.md infrastructure policy
+# (2026-07-28) their CI/CD runs entirely on GitHub-hosted infrastructure — the depot's
+# footprint is the depot host + GitHub, nothing else. This job's credentials
+# (`packages: write` GHCR token, `id-token: write` OIDC for keyless cosign signing) are
+# both GitHub-minted for the run, not *project* secrets, so the "no third-party build
+# infra touches secrets" directive (portal PLAN.md §9/§10) does not place them out of
+# scope here. See docs/CI_SIGNING.md §3 for the full rationale.
 
 name: Kit publish (build + GHCR push + cosign sign)
 
@@ -29,7 +31,7 @@ permissions:
 
 jobs:
   publish:
-    runs-on: [self-hosted, linux, kit-ci]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
