@@ -7,13 +7,17 @@ of the release, not a follow-up.
 
 ## Consuming kits (re-pin ALL of them on every version bump)
 
-Each kit pins the lib **twice** — a runtime dependency **and** the `[authoring]`
-golden-gate dev pin — and the two **must share the same ref**:
+Each kit pins the lib **three times** — a runtime dependency, the `[companion]` extra its
+live Surface serves through, **and** the `[authoring]` golden-gate dev pin — and all three
+**must share the same ref**. (It was two until the Companion Adapter migrations, Spec G
+G4/G5: each kit's `[playground]` extra collapsed onto `langfuse-synth-core[companion]`, so
+the web-server deps became a third core ref. Miss it and a re-pin half-lands — the kit runs
+the new core but serves through the old one.)
 
 | Kit repo | File | Pins to bump |
 | --- | --- | --- |
-| `langfuse-synth-ev` | `pyproject.toml` | `langfuse-synth-core @ …@<ref>` (runtime) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
-| `langfuse-synth-lender` | `pyproject.toml` | same two pins |
+| `langfuse-synth-ev` | `pyproject.toml` | `langfuse-synth-core @ …@<ref>` (runtime) + `langfuse-synth-core[companion] @ …@<ref>` (the `[playground]` extra) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
+| `langfuse-synth-lender` | `pyproject.toml` | same three pins |
 
 > Add a row here whenever a new kit starts consuming the lib, so this table stays the
 > single source of truth for "who must be re-pinned."
@@ -34,8 +38,9 @@ to wait for (or force) a coordinated runtime re-pin across every kit.
    PR → merge to `main`.
 2. **Tag** `vX.Y.Z` on the landed `main` commit and **push the tag** (`git push origin
    vX.Y.Z`). The tag must be on origin before any kit or CI can resolve `@vX.Y.Z`.
-3. **Re-pin every kit** in the table above — both pins, to the same `@vX.Y.Z` — on a
-   branch per kit; PR → merge.
+3. **Re-pin every kit** in the table above — all three pins, to the same `@vX.Y.Z` — on a
+   branch per kit; PR → merge. Grep the kit's `pyproject.toml` for
+   `langfuse-synth-core` and check every hit moved; a stale one is silent.
 4. **Prove each kit still golden-green** on the new ref: run its
    `tests/test_determinism.py::test_full_payload_golden_is_byte_identical` (needs the
    `[dev]` / `[authoring]` extra installed) under the deny-LLM egress block. A red gate
