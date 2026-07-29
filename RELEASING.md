@@ -37,17 +37,8 @@ to wait for (or force) a coordinated runtime re-pin across every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **Scaffolded kits are born with CI and ignore their egg-info** (portal #183):
-  `synth-authoring new` now emits `.github/workflows/ci.yml` (job `test` — the status check
-  the kit repos' `protect main` ruleset requires) alongside `publish.yml`, and the emitted
-  `.gitignore` covers `*.egg-info/`. Authoring-tooling only — no runtime behavior moved, so
-  no kit golden can shift; existing kits are unaffected until they re-scaffold.
-- **Kit images publish multi-arch** (portal #185): `kit-publish.yml` now builds
-  `linux/amd64` + `linux/arm64` on native runners and signs the merged index, so a kit image
-  runs on the amd64 depot host *and* on an arm64 laptop (`docs/CI_SIGNING.md` §5). CI logic
-  only — no runtime behavior moved. Already-published kit tags stay single-arch forever; a
-  kit gains arm64 only by bumping its `publish.yml` CI-workflow pin (see above) and cutting
-  a **new** tag.
+_(Nothing pending — v1.5.0 shipped the CI-scaffold delta (portal #183) and the multi-arch
+kit-publish workflow (portal #185).)_
 
 ## Release checklist
 
