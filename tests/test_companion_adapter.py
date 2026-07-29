@@ -226,6 +226,36 @@ def test_llm_binds_without_a_billable_call(adapter, fake_anthropic):
     assert fake_anthropic["completions"] == 0
 
 
+# -- per-call model: the boundary amendment surfaced by the second migrated kit (G5, #144) --
+# A Surface may let its *user* pick the model per request (a model selector), while provider
+# selection and key resolution stay adapter-owned. Split: the adapter resolves WHICH PROVIDER
+# and WHICH KEY (deployment-owned); the Surface names WHICH MODEL (scenario-owned). Without
+# this the Surface would have to reach past the adapter into the resolution module for its own
+# client — bending the Surface to hide a seam that is one argument short.
+def test_llm_accepts_a_per_call_model_the_surface_names(adapter):
+    client = adapter.llm("some-other-model")
+    assert (client.provider, client.model) == ("anthropic", "some-other-model")
+    # …and the adapter's own default is untouched by an override elsewhere.
+    assert adapter.llm().model == "claude-sonnet-4-6"
+
+
+def test_llm_caches_per_requested_model(adapter):
+    a1, a2 = adapter.llm("model-a"), adapter.llm("model-a")
+    assert a1 is a2                      # same request -> same client (one SDK construction)
+    assert adapter.llm("model-b") is not a1   # a different request -> its own client
+    assert adapter.llm() is not a1            # the default is its own entry, never aliased
+
+
+def test_deployment_pinned_model_still_wins_over_a_per_call_override(adapter, monkeypatch):
+    # LLM_MODEL is the deployment's pin (the portal injects it when the manifest declares a
+    # model for the selected provider). It outranks BOTH the adapter default and a per-call
+    # model, exactly as it outranks the caller default in the resolution module — so a Surface
+    # model selector can never escape a pinned deployment.
+    monkeypatch.setenv("LLM_MODEL", "pinned-by-deployment")
+    assert adapter.llm("some-other-model").model == "pinned-by-deployment"
+    assert adapter.llm().model == "pinned-by-deployment"
+
+
 # ---------------------------------------------------------------------------
 # Row: readiness surface — "write ok / llm bound", secret-free, no billable call
 # ---------------------------------------------------------------------------

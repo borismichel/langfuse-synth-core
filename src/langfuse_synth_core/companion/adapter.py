@@ -28,7 +28,9 @@ The eight rows of ``CompanionAdapterContract`` (#25) map onto this module as:
    (:meth:`ingestor`, the ``seed.ingest`` seam) AND the SDK surface (:meth:`langfuse`, the
    ``lfclient`` seam), all bound to ``LANGFUSE_BASE_URL`` + the project keys (D5, story 6/24).
 6. **LLM client** — :meth:`llm` returns a ready client via the G1 resolution module (#138);
-   the adapter owns *resolution*, the Surface owns *usage* (D6). Legacy-safe: with
+   the adapter owns *resolution* (provider + key), the Surface owns *usage* — including,
+   via :meth:`llm`'s optional ``model``, a per-request model a Surface's user picks (a
+   deployment-pinned ``LLM_MODEL`` still outranks it) (D6). Legacy-safe: with
    ``LLM_PROVIDER``/``LLM_MODEL`` unset it resolves the historical Anthropic default
    byte-for-byte (story 38).
 
@@ -128,7 +130,7 @@ class CompanionAdapterContract(Protocol):
     def langfuse(self) -> Any: ...
     def ingestor(self, **kw: Any) -> Any: ...
     def read_json(self, path: str, params: dict | None = ..., *, throttle: float = ...) -> dict: ...
-    def llm(self) -> _llm.LLMClient: ...
+    def llm(self, model: str | None = ...) -> _llm.LLMClient: ...
     def readiness(self) -> ReadinessReport: ...
     def mount_health(self, app: Any) -> None: ...
     def serve(self, app: Any, *, host: str, port: int) -> None: ...
@@ -162,7 +164,9 @@ class CompanionAdapter:
         self.health_path = health_path
         self.llm_model_default = llm_model_default
         self._langfuse: Any = None
-        self._llm: _llm.LLMClient | None = None
+        # Keyed by the model the caller asked for (``None`` = the adapter's own default), so a
+        # Surface with a per-request model selector still constructs one SDK client per model.
+        self._llm: dict[str | None, _llm.LLMClient] = {}
 
     # -- connection identity (D5): the deployment's own base URL ----------
     @property
@@ -205,14 +209,21 @@ class CompanionAdapter:
         return lfread.get_json(self.base_url, path, params, throttle=throttle)
 
     # -- 6. LLM credential resolution (D6) -> ready client ----------------
-    def llm(self) -> _llm.LLMClient:
+    def llm(self, model: str | None = None) -> _llm.LLMClient:
         """The ready LLM client for the environment-selected provider (G1 resolution, #138).
-        The adapter owns *resolution* (which provider/model/key); the Surface owns *usage*
-        (what to prompt). Legacy-safe: unset ``LLM_PROVIDER``/``LLM_MODEL`` -> the historical
-        Anthropic default, byte-for-byte (story 38). Cached per adapter."""
-        if self._llm is None:
-            self._llm = _llm.get_llm(self.llm_model_default)
-        return self._llm
+        The adapter owns *resolution* (which provider, which key); the Surface owns *usage*
+        (what to prompt — and, via ``model``, which model). Legacy-safe: unset
+        ``LLM_PROVIDER``/``LLM_MODEL`` -> the historical Anthropic default, byte-for-byte
+        (story 38). Cached per requested model.
+
+        ``model`` is the *caller default* for this call, standing in for the adapter's
+        ``llm_model_default`` — for a Surface whose user picks the model per request. The
+        precedence is unchanged from the resolution module: a deployment-pinned ``LLM_MODEL``
+        still outranks it, so a Surface selector can never escape a pinned deployment.
+        """
+        if model not in self._llm:
+            self._llm[model] = _llm.get_llm(model or self.llm_model_default)
+        return self._llm[model]
 
     # -- readiness surface ------------------------------------------------
     def readiness(self) -> ReadinessReport:
