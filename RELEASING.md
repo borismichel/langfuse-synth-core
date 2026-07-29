@@ -58,15 +58,8 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **The retargeting gate + the scaffold's `LANGFUSE_BASE_URL` fix (portal #187).** New
-  `authoring/retarget.py`, a `tests/test_retargeting.py` emitted into every scaffolded kit, and
-  `config.py.tmpl` reshaped to a `host` field with `base_url` as a property over it. This is an
-  **authoring-package** change, so it takes the **full step 3** — all three pins, every kit — not
-  the CI-only carve-out above: a kit reaches the new gate through its `[authoring]` pin, and that
-  pin may not move alone. Two things ride along: already-scaffolded kits do not inherit
-  `tests/test_retargeting.py` from a pin bump (the file is emitted by `new`, so an existing kit
-  hand-adds it), and the support kit needs this tag on origin before its own fix and patch
-  release can land (portal #187 wave 2).
+_(Nothing pending — v1.6.0 shipped the retargeting gate and the scaffold's `LANGFUSE_BASE_URL`
+fix, portal #187.)_
 
 ## Release checklist
 
