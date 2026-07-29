@@ -78,6 +78,7 @@ file floor you now own:
 | `DEMO_SCRIPT.md` | The `render: markdown` Presenter Runbook stub. | **Phase 4** |
 | `tests/` | The determinism golden gate + manifest-validity test (green now). | Never by hand — re-bless via `freeze` |
 | `Dockerfile` | The reference non-root image. | Only for real runtime deps |
+| `.github/workflows/` | `ci.yml` runs the suite (job `test` — the check `protect main` requires) on every push/PR; `publish.yml` builds + signs the image on a `v*.*.*` tag. | Never by hand |
 
 Then confirm the floor is real before you touch anything:
 
