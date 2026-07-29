@@ -51,8 +51,12 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-_(Nothing pending — v1.5.0 shipped the CI-scaffold delta (portal #183) and the multi-arch
-kit-publish workflow (portal #185).)_
+- **The retargeting gate + the scaffold's `LANGFUSE_BASE_URL` fix (portal #187).** New
+  `authoring/retarget.py`, a `tests/test_retargeting.py` emitted into every scaffolded kit, and
+  `config.py.tmpl` reshaped to a `host` field with `base_url` as a property over it.
+  **Authoring-only**: nothing a kit imports at runtime moved, so consuming kits bump their
+  `[authoring]` pin alone (the carve-out above). The support kit needs this tag on origin before
+  its own fix + patch release can land.
 
 ## Release checklist
 

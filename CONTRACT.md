@@ -76,6 +76,31 @@ container command.
 
 ---
 
+## Retargeting: `LANGFUSE_BASE_URL` overrides the config file
+
+A kit ships **one** config and the portal points it at whatever Langfuse a deployment targets,
+by injecting **`LANGFUSE_BASE_URL`** into the container. So:
+
+- **`cfg.target.base_url` MUST let `LANGFUSE_BASE_URL` win** over whatever the committed config
+  file says. The idiomatic shape is a `host` field with `base_url` as a property over it:
+  `os.environ.get("LANGFUSE_BASE_URL", self.host).rstrip("/")`.
+- **With the var absent, the committed value MUST still apply.** The env var *overrides* the
+  file; it does not replace it. Otherwise the kit only works inside the portal — the author's
+  laptop, the determinism golden gate, and every offline run resolve nothing.
+
+This is a *behavioural* requirement, so the `Target` Protocol cannot express it: a kit with a
+plain `base_url` field satisfies the shape and is still undeployable. It is gated instead —
+every scaffolded kit carries `tests/test_retargeting.py`, one call into
+`langfuse_synth_core.authoring.retarget.assert_retargetable`, which injects a probe base URL and
+asserts it won.
+
+Worth stating why this needed its own gate: **every other authoring gate configures by file
+while the portal configures by env.** `validate` lints the manifest, the golden gate seeds from a
+fixed config, the live verify reads that same file. A kit that ignored the var passed all three
+and then dialled `localhost:3000` on its first deployment (portal #187).
+
+---
+
 ## The canonical volume knob
 
 Every volume-adjustable kit exposes the **same** operator volume control:
