@@ -32,8 +32,8 @@ images and burn CI minutes for no reader of that image.
 
 **Reversed by Spec E · E7b (#113, 2026-07-28).** #102 originally put this job on a
 self-hosted runner (see the old runbook this section used to carry, now deleted). That
-decision is reversed: the publish job runs on a GitHub-hosted `ubuntu-24.04` runner, same
-as the lint/test jobs in `ci.yml`.
+decision is reversed: the publish jobs run on GitHub-hosted runners (`ubuntu-24.04` and
+its arm64 sibling `ubuntu-24.04-arm`, see §5), same as the lint/test jobs in `ci.yml`.
 
 This follows directly from the CLAUDE.md infrastructure policy (2026-07-28): while
 running, Demo Depot's total infrastructure footprint is the dedicated depot host plus
@@ -81,6 +81,43 @@ change made to `kit-publish.yml` reaches every kit the next time it bumps its co
 — exactly the same "pin to a tag or SHA, never a branch" discipline as the runtime
 dependency (see [`RELEASING.md`](../RELEASING.md)).
 
+### 5. Multi-arch images: native runners, one signed index
+
+**Added by portal #185 (2026-07-29).** Until then the workflow built on `ubuntu-24.04`
+with no `platforms:` key, so every kit tag published a manifest list holding a single
+`linux/amd64` entry. That is fine on the amd64 depot host and breaks on arm64: spawning
+an asset from a presenter's Apple-silicon laptop failed with
+
+```
+DockerEngineError: docker POST /images/create -> HTTP 404:
+  no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+Kit images now publish for **both `linux/amd64` and `linux/arm64`**, so the daemon picks
+the right child manifest on either host and the portal worker's pull needs no
+platform-forcing hack of its own.
+
+**Shape: fan-out per architecture, then merge.** A `build` matrix runs one job per
+platform on a runner of that architecture — `ubuntu-24.04` and `ubuntu-24.04-arm` — each
+pushing an *untagged* manifest with buildx's `push-by-digest`. A `merge` job then assembles
+those digests into one index with `docker buildx imagetools create`, and that index is what
+carries the release tag. The alternative — a single job with `platforms:
+linux/amd64,linux/arm64` plus `docker/setup-qemu-action` — is one line instead of two jobs,
+but builds arm64 under emulation; GitHub-hosted arm runners are free on public repos (which
+every kit is), so there is nothing to buy by paying the emulation tax.
+`tests/test_kit_publish_workflow.py` pins these properties against silent drift.
+
+**What signs, and what the portal pins.** cosign signs the **index** digest — the same ref
+`registry.yaml` pins and the portal's E2 gate verifies before `create`. Signing a per-arch
+child instead would leave the ref actually pulled unsigned. An index digest is
+platform-independent, so the E1 digest-pin fence (`is_ghcr_pinned_ref`) is unaffected, and
+so is the identity below: OIDC's `job_workflow_ref` names *this file* for every job in it,
+so splitting build from merge does not move the identity #104 verifies.
+
+**The fix only reaches images built after it.** Tags published before this landed stay
+single-arch forever — a kit has to cut a new release to gain arm64. See
+[`RELEASING.md`](../RELEASING.md).
+
 ## The signing-identity contract (for #104 to consume)
 
 Keyless (OIDC) signing — no key material anywhere. Verify with:
@@ -114,6 +151,7 @@ future, with no per-kit allowlist entry to maintain in #104.
 - Signature verification policy: recorded above, identical for #104.
 - New kits inherit build+sign without manual wiring: `synth-authoring new` emits the
   caller (§4).
-- Cadence decision recorded: §2 (build-on-tag) + §3 (GitHub-hosted).
+- Cadence decision recorded: §2 (build-on-tag) + §3 (GitHub-hosted) + §5 (multi-arch on
+  native runners).
 - No portal code change: none made; §3's move to GitHub-hosted runners removes the
   runner-provisioning step entirely rather than touching portal or infra code.
