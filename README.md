@@ -70,7 +70,7 @@ toolchain (namespaced `synth-authoring`, never `synth`, so it can't shadow a kit
 synth-authoring new my-kit                 # -> ./my-kit/
 synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
-synth-authoring new my-kit --core-ref v1.2.0   # lib git ref the kit pins to (a tag)
+synth-authoring new my-kit --core-ref v1.3.0   # lib git ref the kit pins to (a tag)
 
 # Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
 synth-authoring validate path/to/usecase.yaml
@@ -112,9 +112,11 @@ pytest
 
 ## Versioning
 
-`0.0.0` = pre-Ring-1 scaffold. **`v0.1.0`** is tagged only when the byte-identical core is
-extracted and **both** kits are golden-green (Ring 1b, #32); **`v1.0.0`** after Ring 2
-(#34). Kits upgrade deliberately by bumping their pin.
+`langfuse_synth_core.__version__` is derived from the installed distribution's
+metadata, so it always matches the `pyproject.toml` version (guarded by
+`tests/test_runtime_import.py`; #145). History: **`v0.1.0`** was tagged when the
+byte-identical core was extracted and **both** kits went golden-green (Ring 1b, #32);
+**`v1.0.0`** after Ring 2 (#34). Kits upgrade deliberately by bumping their pin.
 
 Cutting a version is not done until **every consuming kit is re-pinned to it** — follow
 the checklist in [`RELEASING.md`](RELEASING.md), which lists the kits that must be bumped.
