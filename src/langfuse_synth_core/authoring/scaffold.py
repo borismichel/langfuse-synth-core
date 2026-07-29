@@ -225,6 +225,10 @@ def build_manifest(slug: str, *, with_companion: bool = False) -> dict:
         "artifacts": [
             {"path": "DEMO_SCRIPT.md", "render": "markdown", "title": "Presenter Runbook"},
         ],
+        # Sync captures `assets.docs` at the registry's pinned ref; this entry is what makes
+        # the kit's depot-first README reach the portal docs reader as its "Overview" doc
+        # (portal #161).
+        "assets": {"docs": [{"path": "README.md", "title": "Overview"}]},
     }
     if with_companion:
         manifest.update(_companion_manifest_blocks(slug))

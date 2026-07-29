@@ -61,6 +61,30 @@ def test_emits_the_full_file_floor(kit):
         assert (kit.dest / rel).is_file(), f"missing floor file: {rel}"
 
 
+# --- AC (portal #161): the scaffolded kit is born depot-first ----------------------------
+def test_readme_is_depot_first(kit):
+    """The portal serves the README as the kit's catalog "Overview" doc, so the scaffold
+    leads with the cartridge/demo story and demotes all developer content below a marked
+    section — no install/CLI instructions above the fold."""
+    readme = (kit.dest / "README.md").read_text()
+    marker = "## Development and running outside the depot"
+    assert marker in readme
+    top, dev = readme.split(marker, 1)
+    assert "cartridge" in top, "the delivery-model framing is stated up top"
+    assert "deferred" in top, "the standalone-run decision is referenced, not made"
+    assert "pip install" not in top, "no install instructions above the fold"
+    assert "pip install" in dev, "dev content demoted, not deleted"
+
+
+def test_manifest_declares_readme_as_the_overview_doc(kit):
+    """Sync captures ``assets.docs`` at the pinned ref; without this entry the depot-first
+    README would never reach the portal's docs reader."""
+    import yaml
+
+    doc = yaml.safe_load((kit.dest / "usecase.yaml").read_text())
+    assert {"path": "README.md", "title": "Overview"} in doc["assets"]["docs"]
+
+
 def test_render_markdown_runbook_is_declared_and_present(kit):
     """The Presenter Runbook stub exists AND the manifest declares it as render: markdown."""
     import yaml
