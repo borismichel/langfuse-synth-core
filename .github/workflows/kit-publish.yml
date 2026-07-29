@@ -132,14 +132,22 @@ jobs:
           SERVER_URL: ${{ github.server_url }}
           SHA: ${{ github.sha }}
         run: |
+          # One ref per digest file. `%s` placeholders, not interpolation: a `%` or a
+          # backslash reaching printf's FORMAT string would corrupt the refs.
+          refs="$(for d in *; do printf 'ghcr.io/%s@sha256:%s ' "$REPO" "$d"; done)"
           docker buildx imagetools create \
             --tag "ghcr.io/${REPO}:${TAG}" \
             --annotation "index:org.opencontainers.image.source=${SERVER_URL}/${REPO}" \
             --annotation "index:org.opencontainers.image.revision=${SHA}" \
             --annotation "index:org.opencontainers.image.version=${TAG}" \
-            $(printf "ghcr.io/${REPO}@sha256:%s " *)
+            ${refs}
           digest="$(docker buildx imagetools inspect "ghcr.io/${REPO}:${TAG}" --format '{{.Manifest.Digest}}')"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          # Read the platforms back off the index rather than restating the matrix —
+          # this reports what was actually published, and cannot drift from it.
+          platforms="$(docker buildx imagetools inspect "ghcr.io/${REPO}:${TAG}" \
+            --format '{{range .Manifest.Manifests}}{{if ne .Platform.OS "unknown"}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}{{end}}')"
+          echo "platforms=${platforms}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -162,5 +170,5 @@ jobs:
             echo ""
             echo "\`ghcr.io/${{ github.repository }}@${{ steps.merge.outputs.digest }}\`"
             echo ""
-            echo "Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "Platforms: ${{ steps.merge.outputs.platforms }}"
           } >> "$GITHUB_STEP_SUMMARY"

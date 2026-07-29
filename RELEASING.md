@@ -33,6 +33,20 @@ determinism golden and does **not** require step 4 of the checklist below. Bump 
 independently, whenever a kit wants a `kit-publish.yml` fix or policy change — no need
 to wait for (or force) a coordinated runtime re-pin across every kit.
 
+### CI/authoring-only releases: step 3 covers the workflow pin alone
+
+A version whose whole delta is CI or authoring logic — nothing under
+`src/langfuse_synth_core/` that a kit imports at runtime — satisfies step 3 by bumping
+each kit's **`publish.yml` workflow pin** and leaves the three runtime pins where they
+are. A runtime re-pin would move every kit's dependency ref to a release that changes
+nothing it executes, and cost a golden re-proof (step 4) for a delta the kit cannot
+observe. State in the release PR that the release is CI/authoring-only, so the next
+reader can tell a deliberate carve-out from a half-landed re-pin.
+
+**v1.5.0 (portal #185/#183) was the first release cut this way**: all three kits moved
+their workflow pin to `@v1.5.0` and stayed on `@v1.4.0` for runtime. A release that
+moves ANY runtime code takes the full step 3 — all three pins, every kit.
+
 ## Pending for the next release (unreleased on `main`)
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.

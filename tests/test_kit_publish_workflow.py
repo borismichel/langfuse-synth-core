@@ -120,13 +120,29 @@ def test_the_release_tag_and_the_signature_cover_the_merged_index(
     merge = merge_jobs[0]
     assert merge.get("needs"), "the merge job must wait for the per-arch builds"
 
-    body = _text(merge).replace("\\n", " ")
-    assert "github.ref_name" in body, "the merge job must apply the release tag"
+    merge_steps = [s for s in _steps(merge) if "imagetools create" in _text(s)]
+    assert len(merge_steps) == 1
+    # The tag must be applied by `imagetools create` itself — a `ref_name` that only
+    # reaches the step summary would leave the release tag unpublished.
+    step = merge_steps[0]
+    tag_var = next(
+        (k for k, v in (step.get("env") or {}).items() if "github.ref_name" in str(v)),
+        None,
+    )
+    assert tag_var, "the merge step must bind the release tag into its env"
+    run = str(step.get("run", ""))
+    assert "--tag" in run and tag_var in run.split("--tag", 1)[1].split("\n", 1)[0], (
+        "the merge job must pass the release tag to `imagetools create`"
+    )
 
     sign_steps = [s for s in _steps(merge) if "cosign sign" in _text(s)]
     assert len(sign_steps) == 1, "expected exactly one cosign signing step"
-    # The signature must name a digest, never the mutable tag.
-    assert "@sha256:" in _text(sign_steps[0]) or "@${" in _text(sign_steps[0])
+    # The signature must cover the digest the MERGE step resolved (the index), not a
+    # per-arch child from the build matrix — and never the mutable tag.
+    signed = _text(sign_steps[0])
+    assert "@${" in signed and f"steps.{merge_steps[0]['id']}.outputs" in signed, (
+        "cosign must sign the merged index digest"
+    )
 
 
 def test_signing_identity_stays_kit_publish_yml(workflow: dict) -> None:
