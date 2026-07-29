@@ -32,6 +32,16 @@ determinism golden and does **not** require step 4 of the checklist below. Bump 
 independently, whenever a kit wants a `kit-publish.yml` fix or policy change — no need
 to wait for (or force) a coordinated runtime re-pin across every kit.
 
+## Pending for the next release (unreleased on `main`)
+
+Whoever cuts the next version ships these; delete each entry when its tag lands.
+
+- **Depot-first scaffold (portal #161, core PR #20)** — `main` since v1.3.0 carries the
+  depot-first `README.md.tmpl` and `build_manifest` emitting
+  `assets.docs [README.md → "Overview"]`. Authoring-only (no kit runtime/golden impact,
+  no urgency), but until a tag ships it, `synth-authoring new` on the released version
+  still births developer-first kits whose README never reaches the portal docs reader.
+
 ## Release checklist
 
 1. **Bump the version** in `pyproject.toml` (`version = "X.Y.Z"`) on a release branch;
