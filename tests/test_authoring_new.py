@@ -42,6 +42,8 @@ FLOOR = (
     "tests/test_determinism.py",
     "tests/test_validate.py",
     ".github/workflows/publish.yml",
+    ".github/workflows/ci.yml",
+    ".gitignore",
 )
 
 
@@ -127,6 +129,63 @@ def test_publish_workflow_grants_exactly_the_needed_permissions(kit):
     doc = yaml.safe_load((kit.dest / ".github" / "workflows" / "publish.yml").read_text())
     perms = doc["jobs"]["publish"]["permissions"]
     assert perms == {"contents": "read", "packages": "write", "id-token": "write"}
+
+
+# --- portal #183: the scaffold gets a test-running CI workflow too -----------------------
+# The publish workflow above only fires on a tag, so a kit scaffolded before this ran its
+# suite nowhere but the author's laptop — and `protect main` (which requires a status check
+# named `test`) could not be applied to it at all. `ci.yml` closes that: every scaffolded kit
+# is born with the same `test` check EV and Lender have, so branch protection is applicable
+# from the first push.
+
+
+def _ci_doc(kit):
+    import yaml
+
+    return yaml.safe_load((kit.dest / ".github" / "workflows" / "ci.yml").read_text())
+
+
+def test_ci_workflow_runs_on_push_and_pull_request(kit):
+    doc = _ci_doc(kit)
+    # YAML parses the bare `on:` key as the boolean True.
+    on = doc[True] if True in doc else doc["on"]
+    assert "push" in on and "pull_request" in on
+
+
+def test_ci_job_is_named_test_so_protect_main_can_require_it(kit):
+    """`protect main` on every kit repo requires a status check literally named `test` —
+    the job key IS the check name, so renaming it silently makes the ruleset unsatisfiable."""
+    assert list(_ci_doc(kit)["jobs"]) == ["test"]
+
+
+def test_ci_runs_the_suite_on_a_github_hosted_runner(kit):
+    """Infrastructure policy (CLAUDE.md, 2026-07-28): public repos build and test on
+    GitHub-hosted runners, never self-hosted."""
+    job = _ci_doc(kit)["jobs"]["test"]
+    assert job["runs-on"] == "ubuntu-latest"
+    steps = " ".join(step.get("run", "") for step in job["steps"])
+    assert "pip install -e '.[dev]'" in steps
+    assert "pytest -q" in steps
+
+
+def test_ci_python_matches_the_dockerfile_runtime(kit):
+    """A kit whose CI tests on a different interpreter than its image runs proves nothing
+    about the image; the Dockerfile's `python:3.N-slim` is the one runtime."""
+    import re
+
+    dockerfile = (kit.dest / "Dockerfile").read_text()
+    runtime = re.search(r"FROM python:(\d+\.\d+)-slim", dockerfile).group(1)
+    steps = _ci_doc(kit)["jobs"]["test"]["steps"]
+    setup = [s for s in steps if "setup-python" in s.get("uses", "")]
+    assert setup and setup[0]["with"]["python-version"] == runtime
+
+
+# --- portal #183: build artifacts never enter a kit's history ----------------------------
+def test_gitignore_covers_the_editable_install_egg_info(kit):
+    """`pip install -e .` writes `src/<dist_name>.egg-info/` on the author's first run, before
+    the first commit — untracked only if `.gitignore` already covers it (the support kit
+    published one publicly because it did not)."""
+    assert "*.egg-info/" in (kit.dest / ".gitignore").read_text().splitlines()
 
 
 # --- AC (#141): `--companion` emits a runnable-green companion surface -------------------

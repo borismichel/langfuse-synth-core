@@ -16,6 +16,9 @@ File floor of the emitted kit:
 * a ``.github/workflows/publish.yml`` that builds, GHCR-pushes, and cosign-signs the kit
   image on every tag push, via a ``workflow_call`` into this repo's own ``kit-publish.yml``
   pinned to ``core_ref`` (Spec E · E7, #102 — see ``docs/CI_SIGNING.md``);
+* a ``.github/workflows/ci.yml`` that runs the kit's suite on every push/PR under a job
+  named ``test`` — the status check the kit repos' ``protect main`` ruleset requires, so a
+  freshly scaffolded kit can be branch-protected from its first push (portal #183);
 * a runnable-green **companion surface only on request** (Spec G · G3, #141): with
   ``--companion`` the manifest gains a validate-passing ``live_components`` + ``llm`` block,
   the kit CLI gains the ``synth companion`` verb, the pyproject pulls the core ``[companion]``
@@ -74,6 +77,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
     ("test_determinism.py.tmpl", "tests/test_determinism.py"),
     ("test_validate.py.tmpl", "tests/test_validate.py"),
     ("publish.yml.tmpl", ".github/workflows/publish.yml"),
+    ("ci.yml.tmpl", ".github/workflows/ci.yml"),
 )
 
 # Emitted ONLY when `--companion` is passed (Spec G · G3, #141). A subpackage of the kit's

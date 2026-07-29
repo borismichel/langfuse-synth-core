@@ -18,6 +18,7 @@ the new core but serves through the old one.)
 | --- | --- | --- |
 | `langfuse-synth-ev` | `pyproject.toml` | `langfuse-synth-core @ …@<ref>` (runtime) + `langfuse-synth-core[companion] @ …@<ref>` (the `[playground]` extra) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
 | `langfuse-synth-lender` | `pyproject.toml` | same three pins |
+| `langfuse-synth-support` | `pyproject.toml` | the runtime pin IS `langfuse-synth-core[companion] @ …@<ref>` (scaffolded with `--companion`, so the extra rides the runtime dependency) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
 
 > Add a row here whenever a new kit starts consuming the lib, so this table stays the
 > single source of truth for "who must be re-pinned."
@@ -36,7 +37,11 @@ to wait for (or force) a coordinated runtime re-pin across every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-*(nothing pending — v1.4.0 shipped the depot-first scaffold, portal #161)*
+- **Scaffolded kits are born with CI and ignore their egg-info** (portal #183):
+  `synth-authoring new` now emits `.github/workflows/ci.yml` (job `test` — the status check
+  the kit repos' `protect main` ruleset requires) alongside `publish.yml`, and the emitted
+  `.gitignore` covers `*.egg-info/`. Authoring-tooling only — no runtime behavior moved, so
+  no kit golden can shift; existing kits are unaffected until they re-scaffold.
 
 ## Release checklist
 
