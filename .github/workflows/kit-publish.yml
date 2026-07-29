@@ -11,13 +11,18 @@
 # and it is what lets this file stay kit-agnostic.
 #
 # Runner: GitHub-hosted (Spec E · E7b, #113 — reverses #102's self-hosted decision).
-# Core and both kits are public repos, so per the CLAUDE.md infrastructure policy
+# Core and the kits are public repos, so per the CLAUDE.md infrastructure policy
 # (2026-07-28) their CI/CD runs entirely on GitHub-hosted infrastructure — the depot's
 # footprint is the depot host + GitHub, nothing else. This job's credentials
 # (`packages: write` GHCR token, `id-token: write` OIDC for keyless cosign signing) are
 # both GitHub-minted for the run, not *project* secrets, so the "no third-party build
 # infra touches secrets" directive (portal PLAN.md §9/§10) does not place them out of
 # scope here. See docs/CI_SIGNING.md §3 for the full rationale.
+#
+# Shape: fan out one NATIVE build per architecture, then merge the results into a single
+# multi-arch manifest index that carries the release tag and the signature (portal #185 —
+# a single-arch image 404s the portal worker's pull on an arm64 host). docs/CI_SIGNING.md
+# §5 explains why native runners rather than QEMU.
 
 name: Kit publish (build + GHCR push + cosign sign)
 
@@ -30,8 +35,21 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
-    runs-on: ubuntu-24.04
+  build:
+    # One job per architecture, each on a runner of that architecture — no emulation.
+    # `fail-fast: false` so a flake on one arch still leaves the other's log readable;
+    # the merge job needs both to succeed either way.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            slug: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: linux-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,31 +65,102 @@ jobs:
       # 12-Factor (per the ticket): no per-deploy value is ever baked in here — the
       # image is purely env-parameterized at container start. This step takes no
       # build-args beyond source, on purpose.
-      - name: Build and push
+      #
+      # `push-by-digest` publishes an UNTAGGED per-arch manifest: the release tag is
+      # applied exactly once, by the merge job below. Two matrix jobs both pushing
+      # `:vX.Y.Z` would race and leave a single-arch tag behind — #185 with extra steps.
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
 
+      # The digests travel to the merge job as artifacts (empty marker files named after
+      # the digest) — the standard buildx multi-runner handoff. Matrix jobs cannot share
+      # a plain job output: the last writer would clobber the others.
+      - name: Export the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload the digest
+        uses: actions/upload-artifact@v4
+        with:
+          # Slashes are illegal in artifact names, hence the matrix `slug`.
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the per-arch digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # One index over the per-arch manifests, carrying the release tag. The
+      # `image.source` annotation goes on the INDEX too: GHCR reads it to link the
+      # package to its repo, and an index does not inherit it from its children.
+      - name: Create the multi-arch manifest
+        id: merge
+        working-directory: /tmp/digests
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          SERVER_URL: ${{ github.server_url }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker buildx imagetools create \
+            --tag "ghcr.io/${REPO}:${TAG}" \
+            --annotation "index:org.opencontainers.image.source=${SERVER_URL}/${REPO}" \
+            --annotation "index:org.opencontainers.image.revision=${SHA}" \
+            --annotation "index:org.opencontainers.image.version=${TAG}" \
+            $(printf "ghcr.io/${REPO}@sha256:%s " *)
+          digest="$(docker buildx imagetools inspect "ghcr.io/${REPO}:${TAG}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      # Keyless (OIDC) signing — no key material to manage or leak. The signature
-      # covers the immutable digest, never the mutable tag.
+      # Keyless (OIDC) signing — no key material to manage or leak. The signature covers
+      # the immutable INDEX digest: that is the ref the portal pins in registry.yaml and
+      # the ref its E2 cosign gate verifies before `create`. Signing a per-arch child
+      # instead would leave the ref actually pulled unsigned. The identity stays
+      # `kit-publish.yml@refs/tags/v*` (docs/CI_SIGNING.md) — OIDC's `job_workflow_ref`
+      # names this file for every job in it, so the split into build/merge changes
+      # nothing on the verification side.
       - name: Sign the published digest (keyless OIDC)
         run: |
-          cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+          cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.merge.outputs.digest }}"
 
       - name: Record the immutable digest
         run: |
           {
             echo "### Published"
             echo ""
-            echo "\`ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}\`"
+            echo "\`ghcr.io/${{ github.repository }}@${{ steps.merge.outputs.digest }}\`"
+            echo ""
+            echo "Platforms: \`linux/amd64\`, \`linux/arm64\`"
           } >> "$GITHUB_STEP_SUMMARY"
