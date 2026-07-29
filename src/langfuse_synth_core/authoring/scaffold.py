@@ -12,6 +12,9 @@ File floor of the emitted kit:
 * ``seed`` + ``verify`` wired **through the library** (`Ingestor` write / `lfread` read);
 * the ``target_traces`` derivation hook pre-wired to the trivial identity derivation;
 * a ``render: markdown`` Presenter Runbook stub;
+* a ``tests/test_retargeting.py`` gate proving the kit honors ``LANGFUSE_BASE_URL`` — the env
+  var the portal injects to retarget one shipped config per deployment (portal #187). Every
+  other gate configures by *file*, so without this one an undeployable kit passes them all;
 * the reference ``Dockerfile`` (non-root uid 10001);
 * a ``.github/workflows/publish.yml`` that builds, GHCR-pushes, and cosign-signs the kit
   image on every tag push, via a ``workflow_call`` into this repo's own ``kit-publish.yml``
@@ -76,6 +79,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
     ("golden_seed.py.tmpl", "tests/golden_seed.py"),
     ("test_determinism.py.tmpl", "tests/test_determinism.py"),
     ("test_validate.py.tmpl", "tests/test_validate.py"),
+    ("test_retargeting.py.tmpl", "tests/test_retargeting.py"),
     ("publish.yml.tmpl", ".github/workflows/publish.yml"),
     ("ci.yml.tmpl", ".github/workflows/ci.yml"),
 )

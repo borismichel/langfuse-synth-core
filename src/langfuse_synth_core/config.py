@@ -34,10 +34,22 @@ class Model(Protocol):
 
 @runtime_checkable
 class Target(Protocol):
-    """The Langfuse instance a run points at. ``lfclient`` reads ``base_url``."""
+    """The Langfuse instance a run points at. ``lfclient`` reads ``base_url``.
+
+    ``base_url`` MUST honor the ``LANGFUSE_BASE_URL`` environment variable, letting it override
+    whatever the kit's config file says — that override is how the portal retargets ONE shipped
+    config at whatever Langfuse a deployment points to. A kit returning only its committed value
+    satisfies the *shape* of this Protocol and is still undeployable (portal #187).
+
+    A Protocol cannot express behaviour, so the rule is stated in ``CONTRACT.md``
+    §"Retargeting" and gated by
+    :func:`langfuse_synth_core.authoring.retarget.assert_retargetable`, which every scaffolded
+    kit calls from ``tests/test_retargeting.py``.
+    """
 
     # A read-only attribute from the core's view; a concrete kit may back it with a
-    # @property (as EV's pydantic Target does) — structurally the same to a Protocol.
+    # @property (as EV's pydantic Target does) — structurally the same to a Protocol, and the
+    # natural place to let the env win.
     base_url: str
 
 

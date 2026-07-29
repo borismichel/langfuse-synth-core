@@ -41,6 +41,7 @@ FLOOR = (
     "tests/golden_seed.py",
     "tests/test_determinism.py",
     "tests/test_validate.py",
+    "tests/test_retargeting.py",
     ".github/workflows/publish.yml",
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -195,16 +196,6 @@ def test_gitignore_covers_the_editable_install_egg_info(kit):
 # 0.0.0.0, and answers its health path. Without `--companion`, the base scaffold is unchanged.
 
 
-def _load_module_from_path(path, name):
-    """Import an emitted kit module by file path (the scaffolded kit is not pip-installed)."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.fixture(scope="module")
 def companion_kit(tmp_path_factory):
     """Scaffold one `--companion` kit once and reuse it (the freeze subprocess is slow)."""
@@ -271,7 +262,7 @@ def test_companion_live_component_declares_the_adapter_contract_shape(companion_
     }
 
 
-def test_companion_manifest_and_app_constants_agree(companion_kit):
+def test_companion_manifest_and_app_constants_agree(companion_kit, load_kit_module):
     """The manifest's live_component and the emitted app's declared constants agree — no drift
     across the manifest/app boundary. Guards BOTH the health path AND requires_secrets: the
     manifest declares what the portal provisions, the app declares what the Adapter enforces
@@ -280,7 +271,7 @@ def test_companion_manifest_and_app_constants_agree(companion_kit):
 
     doc = yaml.safe_load((companion_kit.dest / "usecase.yaml").read_text())
     comp = doc["live_components"][0]
-    app_mod = _load_module_from_path(
+    app_mod = load_kit_module(
         companion_kit.dest / "src" / "synth" / "companion" / "app.py", "scaffold_companion_drift"
     )
     assert app_mod.HEALTH_PATH == comp["health_path"]
@@ -477,6 +468,37 @@ def test_seed_and_verify_wire_through_the_library(kit):
     verify_src = (kit.dest / "src" / "synth" / "verify.py").read_text()
     assert "from langfuse_synth_core.seed.ingest import Ingestor" in seed_src
     assert "from langfuse_synth_core.lfread import" in verify_src
+
+
+# --- AC (portal #187): the emitted kit is retargetable, and carries the gate that says so ---
+# The portal retargets one shipped config by injecting LANGFUSE_BASE_URL. The scaffold used to
+# emit a plain `base_url` field, so every kit `new` produced was born undeployable — and no gate
+# could see it, because validate lints the manifest and the golden gate seeds from a fixed file.
+
+
+def test_scaffolded_config_honors_the_env_the_portal_retargets_with(kit, load_kit_module):
+    """The behaviour, exercised through the emitted loader — not a grep for `os.environ`."""
+    from langfuse_synth_core.authoring.retarget import assert_retargetable
+
+    config_mod = load_kit_module(kit.dest / "src" / "synth" / "config.py", "scaffold_cfg_retarget")
+    assert_retargetable(config_mod.load_config, kit.dest / "config" / "demo.yaml")
+
+
+def test_scaffolded_config_file_uses_the_host_key_its_model_reads(kit):
+    """`host` in the YAML and `host` in the dataclass must agree, or the committed default is
+    silently dropped and every run resolves the hardcoded fallback instead."""
+    import yaml
+
+    doc = yaml.safe_load((kit.dest / "config" / "demo.yaml").read_text())
+    assert "host" in doc["target"], "the emitted config must use the key the model reads"
+    assert "base_url" not in doc["target"], "`base_url` is derived from `host`, never a stored key"
+
+
+def test_scaffold_emits_the_retargeting_gate_into_the_kits_own_suite(kit):
+    """The gate ships with the kit, so its CI (not just core's) fails if it regresses."""
+    src = (kit.dest / "tests" / "test_retargeting.py").read_text()
+    assert "assert_retargetable" in src
+    assert "LANGFUSE_BASE_URL" in src
 
 
 def test_derivation_hook_is_pre_wired_to_identity(kit):

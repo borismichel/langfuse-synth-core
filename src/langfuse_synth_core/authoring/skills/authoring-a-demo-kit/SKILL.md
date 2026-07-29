@@ -76,7 +76,7 @@ file floor you now own:
 | `src/synth/config.py` | Config model + the `DERIVATION_HOOK` (identity by default). | **Phase 3** |
 | `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library. | Rarely — grow verbs here + in `usecase.yaml` together |
 | `DEMO_SCRIPT.md` | The `render: markdown` Presenter Runbook stub. | **Phase 4** |
-| `tests/` | The determinism golden gate + manifest-validity test (green now). | Never by hand — re-bless via `freeze` |
+| `tests/` | The determinism golden gate + manifest-validity test + the retargeting gate (all green now). | Never by hand — re-bless via `freeze` |
 | `Dockerfile` | The reference non-root image. | Only for real runtime deps |
 | `.github/workflows/` | `ci.yml` runs the suite (job `test` — the check `protect main` requires) on every push/PR; `publish.yml` builds + signs the image on a `v*.*.*` tag. | Never by hand |
 
@@ -154,6 +154,22 @@ The contract the hook must uphold: `seed + target_traces (+ declared params) →
 byte-identical Spool`, with fixed golden assets left unscaled. Keep it pure and
 deterministic or the golden gate will (correctly) go red.
 
+**Don't break retargeting while you're in this file.** The same `config.py` carries `Target`,
+where `host` is the committed default and `base_url` is a property that lets
+`LANGFUSE_BASE_URL` win:
+
+```python
+@property
+def base_url(self) -> str:
+    return os.environ.get("LANGFUSE_BASE_URL", self.host).rstrip("/")
+```
+
+That override is how the portal points ONE shipped config at whatever Langfuse a deployment
+targets. Flatten it back into a plain field and the kit passes every other gate and then dials
+`localhost:3000` on its first deployment — which is exactly what happened to the first
+scaffolded kit (portal #187). `tests/test_retargeting.py` gates it; keep both halves (env wins,
+and with the var absent the file value still applies).
+
 ### Phase 4 — Grow the Presenter Runbook
 
 `DEMO_SCRIPT.md` is the `render: markdown` artifact declared in `usecase.yaml` — the script
@@ -180,7 +196,8 @@ before the kit is done.
 # 1. Static Contract lint — same code the portal runs at sync (offline, instant).
 synth-authoring validate usecase.yaml
 
-# 2. Determinism golden gate + manifest validity (offline, under the deny-LLM egress block).
+# 2. Determinism golden gate + manifest validity + retargeting (offline; the golden gate runs
+#    seed in a subprocess under the deny-LLM egress block).
 pytest
 
 # 3. Read-back suite against a LIVE seeded env — asserts the scenario truth landed.
@@ -232,7 +249,8 @@ runtime, once or per-unit). Full pattern in
 ## What "done" looks like
 
 - `synth-authoring validate usecase.yaml` — valid.
-- `pytest` — green (determinism golden gate + manifest validity), under the egress block.
+- `pytest` — green (determinism golden gate + manifest validity + retargeting), under the
+  egress block.
 - `synth verify` — the scenario truth reads back from a live seeded env.
 - The trace tree and runbook tell the real story; Langfuse semantic choices were made with
   the `langfuse` skill, not from memory.

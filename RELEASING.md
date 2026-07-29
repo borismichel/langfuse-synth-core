@@ -33,15 +33,22 @@ determinism golden and does **not** require step 4 of the checklist below. Bump 
 independently, whenever a kit wants a `kit-publish.yml` fix or policy change — no need
 to wait for (or force) a coordinated runtime re-pin across every kit.
 
-### CI/authoring-only releases: step 3 covers the workflow pin alone
+### CI-only releases: step 3 covers the workflow pin alone
 
-A version whose whole delta is CI or authoring logic — nothing under
-`src/langfuse_synth_core/` that a kit imports at runtime — satisfies step 3 by bumping
+A version whose whole delta is **CI logic** — `kit-publish.yml` and friends, nothing under
+`src/langfuse_synth_core/` that a kit installs at all — satisfies step 3 by bumping
 each kit's **`publish.yml` workflow pin** and leaves the three runtime pins where they
 are. A runtime re-pin would move every kit's dependency ref to a release that changes
 nothing it executes, and cost a golden re-proof (step 4) for a delta the kit cannot
-observe. State in the release PR that the release is CI/authoring-only, so the next
+observe. State in the release PR that the release is CI-only, so the next
 reader can tell a deliberate carve-out from a half-landed re-pin.
+
+**This carve-out does NOT extend to the authoring package.** A kit resolves
+`langfuse_synth_core.authoring` through its `[authoring]` dev pin — one of the three pins that
+must share a ref — so a release that changes the authoring toolchain or the scaffold templates
+reaches a kit only via the full step 3. Bumping `[authoring]` alone is precisely the
+half-landed re-pin the table above warns about. The golden re-proof in step 4 is not waste
+here: it is what proves an authoring change did not move the deterministic pool.
 
 **v1.5.0 (portal #185/#183) was the first release cut this way**: all three kits moved
 their workflow pin to `@v1.5.0` and stayed on `@v1.4.0` for runtime. A release that
@@ -51,8 +58,15 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-_(Nothing pending — v1.5.0 shipped the CI-scaffold delta (portal #183) and the multi-arch
-kit-publish workflow (portal #185).)_
+- **The retargeting gate + the scaffold's `LANGFUSE_BASE_URL` fix (portal #187).** New
+  `authoring/retarget.py`, a `tests/test_retargeting.py` emitted into every scaffolded kit, and
+  `config.py.tmpl` reshaped to a `host` field with `base_url` as a property over it. This is an
+  **authoring-package** change, so it takes the **full step 3** — all three pins, every kit — not
+  the CI-only carve-out above: a kit reaches the new gate through its `[authoring]` pin, and that
+  pin may not move alone. Two things ride along: already-scaffolded kits do not inherit
+  `tests/test_retargeting.py` from a pin bump (the file is emitted by `new`, so an existing kit
+  hand-adds it), and the support kit needs this tag on origin before its own fix and patch
+  release can land (portal #187 wave 2).
 
 ## Release checklist
 
