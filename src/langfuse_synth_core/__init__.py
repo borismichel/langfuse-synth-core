@@ -14,10 +14,13 @@ target_traces derivation hook). The synthesis machinery itself is extracted from
 two gold-standard kits in the Ring 1 / Ring 2 migration (#31–#34).
 """
 
+from importlib.metadata import version as _distribution_version
+
 from langfuse_synth_core import companion, derivation
 
-# 0.0.0 = pre-Ring-1 scaffold. v0.1.0 is tagged only when the byte-identical core is
-# extracted and BOTH kits are golden-green (Ring 1b, #32); v1.0.0 after Ring 2 (#34).
-__version__ = "0.0.0"
+# Derived from the installed distribution so it tracks `pyproject.toml` by construction
+# (#145 — the hardcoded pre-Ring-1 "0.0.0" drifted for five releases unnoticed).
+# `tests/test_runtime_import.py::test_version_matches_packaging_version` is the guard.
+__version__ = _distribution_version("langfuse-synth-core")
 
 __all__ = ["companion", "derivation", "__version__"]

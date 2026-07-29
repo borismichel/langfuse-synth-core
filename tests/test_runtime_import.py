@@ -5,6 +5,8 @@ the [authoring] deps present.
 """
 
 import importlib.util
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,19 @@ def test_package_imports_and_is_versioned():
     import langfuse_synth_core as core
 
     assert isinstance(core.__version__, str)
+
+
+def test_version_matches_packaging_version():
+    # #145 (Spec G · G6): `__version__` sat at the pre-Ring-1 "0.0.0" for five releases
+    # because nothing asserted it. It is now derived from the installed distribution's
+    # metadata, and this guard pins that metadata to `pyproject.toml`, so the attribute
+    # can never silently drift from the packaging version again. (A stale editable
+    # install fails here by design — reinstall with `pip install -e .`.)
+    import langfuse_synth_core as core
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    packaged = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert core.__version__ == packaged
 
 
 def test_companion_shell_seam_is_exposed():

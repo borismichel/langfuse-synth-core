@@ -35,7 +35,12 @@ to wait for (or force) a coordinated runtime re-pin across every kit.
 ## Release checklist
 
 1. **Bump the version** in `pyproject.toml` (`version = "X.Y.Z"`) on a release branch;
-   PR → merge to `main`.
+   PR → merge to `main`. On the same branch, bump the release-coupled ref sites:
+   `DEFAULT_CORE_REF` in `src/langfuse_synth_core/authoring/scaffold.py` (the pin every
+   freshly scaffolded kit resolves — a default left behind emits kits on the old core)
+   and the `--core-ref` examples in `README.md` and the shipped
+   `authoring-a-demo-kit/SKILL.md`. (`__version__` needs no bump: it is derived from the
+   distribution metadata and guarded by `tests/test_runtime_import.py`; #145.)
 2. **Tag** `vX.Y.Z` on the landed `main` commit and **push the tag** (`git push origin
    vX.Y.Z`). The tag must be on origin before any kit or CI can resolve `@vX.Y.Z`.
 3. **Re-pin every kit** in the table above — all three pins, to the same `@vX.Y.Z` — on a
