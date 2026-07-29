@@ -1,40 +1,29 @@
 """The retargeting gate — proves a kit config honors ``LANGFUSE_BASE_URL`` (portal #187).
 
-The portal ships one kit config and points it at whatever Langfuse a deployment targets, and
-it retargets by **environment**: the worker injects ``LANGFUSE_BASE_URL`` into the container
-and every read/write seam (``lfclient``, ``lfread``, the Companion Adapter) resolves through
-``cfg.target.base_url``. A kit whose ``base_url`` is a plain field therefore *cannot* be
-deployed — it dials whatever its committed config file says, usually ``localhost:3000``.
+``CONTRACT.md`` §"Retargeting" states the rule and why the other gates could not see it. This
+module is how it is enforced: inject a probe base URL, load the kit's config through the kit's
+**own** loader, and assert the probe won. Both halves of the rule are asserted — env wins, and
+with the var absent the committed file value still applies — because each has its own failure
+mode (undeployable kit / kit that only works inside the portal).
 
-Nothing caught that for a whole kit generation, because **every authoring gate configures by
-file while the portal configures by env**: ``validate`` is a manifest linter, the determinism
-golden seeds from a fixed config (and env-sensitivity is if anything a determinism *hazard*),
-and the live verify reads its base URL from that same file. The paths only met on a real
-deployment — which is where portal #187 surfaced.
+Deliberately a **config-resolution** check, not a connectivity one: no network, no LLM, no
+container, so it belongs in a kit's ordinary pytest run. The scaffold emits
+``tests/test_retargeting.py``, which is one call into :func:`assert_retargetable`.
 
-This module is the gate that makes them meet at authoring time. It is a **config-resolution**
-law, not a connectivity check: inject a probe base URL, load the kit's config through the kit's
-own loader, and assert the probe won. No network, no LLM, no container — so it belongs in a
-kit's ordinary pytest run (the scaffold emits ``tests/test_retargeting.py``, which is one call
-into :func:`assert_retargetable`).
-
-The contract has two halves and both are asserted, because each has its own failure mode:
-
-* **env wins** — with ``LANGFUSE_BASE_URL`` set, that value is what resolves. Miss this and
-  the kit is undeployable (#187).
-* **the file is still the default** — with the var absent, the committed config value resolves.
-  Miss this and the kit works only inside the portal, breaking the author's laptop, the golden
-  gate, and every offline run.
+Its limit is worth knowing: it proves the kit *resolves* the injected base URL, not that every
+seam dials the resolved value. A kit that resolved ``base_url`` correctly and then built a
+client from a literal would still pass. The scaffolded ``seed``/``verify`` both read
+``cfg.target.base_url``, so for scaffolded kits that gap is narrow — but it is a gap.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 # The env var the portal worker injects to retarget a deployment (see the portal's
-# `api/app/worker/spec.py`). Named here so the gate and the docs cannot drift.
+# `api/app/worker/spec.py`).
 BASE_URL_ENV = "LANGFUSE_BASE_URL"
 
 # Two distinct, deliberately unroutable probes. Two, not one: a single probe cannot tell
@@ -47,14 +36,8 @@ PROBE_BASE_URLS: tuple[str, str] = (
 )
 
 
-class _Loader(Protocol):
-    """A kit's ``load_config(path, overrides=None) -> Config`` (the scaffolded signature)."""
-
-    def __call__(self, path: Any, overrides: list[str] | None = None) -> Any: ...
-
-
 def resolve_base_url(
-    load_config: _Loader | Callable[..., Any],
+    load_config: Callable[[Path], Any],
     config_path: str | Path,
     env_base_url: str | None,
 ) -> str:
@@ -81,7 +64,7 @@ def resolve_base_url(
 
 
 def assert_retargetable(
-    load_config: _Loader | Callable[..., Any],
+    load_config: Callable[[Path], Any],
     config_path: str | Path,
 ) -> None:
     """Assert the kit at ``config_path`` is retargetable by the portal, both halves.

@@ -94,6 +94,12 @@ every scaffolded kit carries `tests/test_retargeting.py`, one call into
 `langfuse_synth_core.authoring.retarget.assert_retargetable`, which injects a probe base URL and
 asserts it won.
 
+The gate's limit, stated so it is not mistaken for a deployability proof: it checks that the kit
+**resolves** the injected base URL, not that every seam dials the resolved value. A kit that
+resolved `base_url` correctly and then built a client from a literal would pass it. The
+scaffolded `seed` / `verify` both read `cfg.target.base_url`, so the remaining gap is narrow —
+a real portal deployment is still the only end-to-end proof.
+
 Worth stating why this needed its own gate: **every other authoring gate configures by file
 while the portal configures by env.** `validate` lints the manifest, the golden gate seeds from a
 fixed config, the live verify reads that same file. A kit that ignored the var passed all three

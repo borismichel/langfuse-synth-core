@@ -1,29 +1,17 @@
 """The retargeting gate — a kit config must honor ``LANGFUSE_BASE_URL`` (portal #187).
 
-The portal deploys one shipped kit config against whatever Langfuse the deployment targets,
-and it retargets by **env**: the worker injects ``LANGFUSE_BASE_URL`` and expects
-``cfg.target.base_url`` to resolve to it. Every *authoring* gate, by contrast, configures by
-**file** — ``validate`` reads the manifest, the golden gate seeds from a fixed config, the live
-verify takes its base URL from that same file. So the two paths never met, and a kit that
-silently ignored the env var passed all three gates and then dialled its own ``localhost:3000``
-on first deployment (portal #187, the support kit).
+The rule, and why it needed a gate of its own, are in ``CONTRACT.md`` §"Retargeting". This
+module pins both halves of it: an injected ``LANGFUSE_BASE_URL`` wins, and with the var absent
+the committed file value still applies.
 
-This module pins the gate that closes that: :mod:`langfuse_synth_core.authoring.retarget`
-resolves a kit's ``base_url`` under an injected env var and asserts the injected value wins,
-while an *absent* env var still falls back to the file. Offline, no network, no LLM — it is a
-config-resolution law, not a connectivity check.
-
-The end-to-end test at the bottom runs the gate against a freshly scaffolded kit: that is the
-one that was red before #187 landed, because the scaffold emitted a plain ``base_url`` field
-with no env read at all.
+The end-to-end test at the bottom runs the gate against a freshly scaffolded kit — the one that
+was red before #187, because the scaffold emitted a plain ``base_url`` field with no env read.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import os
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -124,27 +112,14 @@ def test_a_kit_hardcoded_to_one_probe_value_still_fails(tmp_path):
 
 
 # --- end to end: the scaffolded kit is retargetable ---------------------------------------
-def _load_module_from_path(path: Path, name: str, monkeypatch):
-    """Import an emitted kit module by file path (the scaffolded kit is not pip-installed).
-
-    Registered in ``sys.modules`` before execution: the emitted config is a ``@dataclass``, and
-    dataclass field resolution looks its own module up there. Removed again by monkeypatch.
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_a_freshly_scaffolded_kit_is_retargetable_by_the_portal(tmp_path, monkeypatch):
+def test_a_freshly_scaffolded_kit_is_retargetable_by_the_portal(tmp_path, load_kit_module):
     """The gate applied to `synth-authoring new` output — red before #187: the scaffold's
     `Target.base_url` was a plain field, so a portal deployment could never move it."""
     from langfuse_synth_core.authoring.retarget import assert_retargetable
     from langfuse_synth_core.authoring.scaffold import scaffold_kit
 
     kit = scaffold_kit("retarget-demo", tmp_path / "retarget-demo")
-    config_mod = _load_module_from_path(
-        kit.dest / "src" / "synth" / "config.py", "scaffold_retarget_config", monkeypatch
+    config_mod = load_kit_module(
+        kit.dest / "src" / "synth" / "config.py", "scaffold_retarget_config"
     )
     assert_retargetable(config_mod.load_config, kit.dest / "config" / "demo.yaml")
