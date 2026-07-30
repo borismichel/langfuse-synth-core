@@ -21,6 +21,7 @@ is authoring tooling, never part of the lean runtime install.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import sys
 from importlib import resources
@@ -250,6 +251,130 @@ def authoring_errors(doc: dict) -> list[str]:
 
 
 # --------------------------------------------------------------------------------------
+# Runbook-executability advisory lint (portal #181). Kits are cartridges delivered as-is
+# through the depot: the presenter has no shell and the portal's invocation contract
+# templates only `{config}`, so a `synth` CLI command in a presenter beat is unreachable
+# in a deployed kit. Flag fenced `synth` command blocks in the declared runbook
+# artifact(s) unless they sit under a clearly-marked developer-mode heading.
+#
+# ADVISORY by design: this channel nudges, it never blocks — it is deliberately kept out
+# of validate_doc/validate_path (the blocking error API the portal's sync imports).
+# --------------------------------------------------------------------------------------
+
+# A heading marks a developer-mode section when it says so: "## Developer mode — …",
+# "### Dev-mode appendix", etc. Everything under it (including deeper subsections) is
+# exempt until a heading at the same or a shallower level closes the section.
+_DEV_MODE_HEADING_RE = re.compile(r"\bdev(?:eloper)?[\s-]+mode\b", re.IGNORECASE)
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_FENCE_RE = re.compile(r"^\s{0,3}(```+|~~~+)")
+
+
+def _is_synth_command(line: str) -> bool:
+    """True when a fenced-block line invokes the kit's ``synth`` CLI.
+
+    Keys on the first token (an optional shell prompt ``$`` stripped) being exactly
+    ``synth`` or a pathed ``…/synth`` — so an inline mention in prose never matches, and
+    neither does the distinct ``synth-authoring`` toolchain.
+    """
+    tokens = line.strip().split()
+    if tokens and tokens[0] == "$":
+        tokens = tokens[1:]
+    if not tokens:
+        return False
+    head = tokens[0]
+    return head == "synth" or head.rsplit("/", 1)[-1] == "synth"
+
+
+def _markdown_synth_block_lines(text: str) -> list[int]:
+    """1-based line numbers of the first ``synth`` command in each offending fenced block."""
+    flagged: list[int] = []
+    heading_stack: list[tuple[int, bool]] = []  # (level, is developer-mode)
+    fence: str | None = None
+    block_flagged_at: int | None = None
+    in_dev_block = False
+
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        fence_match = _FENCE_RE.match(line)
+        if fence is None:
+            heading = _HEADING_RE.match(line)
+            if heading:
+                level = len(heading.group(1))
+                while heading_stack and heading_stack[-1][0] >= level:
+                    heading_stack.pop()
+                heading_stack.append(
+                    (level, bool(_DEV_MODE_HEADING_RE.search(heading.group(2))))
+                )
+            elif fence_match:
+                fence = fence_match.group(1)[0]
+                block_flagged_at = None
+                in_dev_block = any(is_dev for _, is_dev in heading_stack)
+        else:
+            if fence_match and fence_match.group(1)[0] == fence:
+                fence = None
+                if block_flagged_at is not None and not in_dev_block:
+                    flagged.append(block_flagged_at)
+            elif block_flagged_at is None and _is_synth_command(line):
+                block_flagged_at = lineno
+    # An unterminated fence still reports (the block visibly exists in the rendered doc).
+    if fence is not None and block_flagged_at is not None and not in_dev_block:
+        flagged.append(block_flagged_at)
+    return flagged
+
+
+def _runbook_source(base_dir: Path, declared: str) -> Path | None:
+    """The committed source for a declared ``render: markdown`` artifact, if lintable.
+
+    The scaffold commits the runbook at the declared path itself; the gold kits commit it
+    as a ``templates/<name lowercased>.j2`` template rendered to the declared path at
+    seed time (e.g. ``DEMO_SCRIPT.md`` → ``templates/demo_script.md.j2``). One logical
+    runbook gets one lint pass — the declared path wins when both exist. A source that
+    exists in neither place is simply not lintable offline — silence, not an error.
+    """
+    name = Path(declared).name
+    candidates = (
+        base_dir / declared,
+        base_dir / "templates" / f"{name.lower()}.j2",
+    )
+    return next((c for c in candidates if c.is_file()), None)
+
+
+def runbook_advisories(doc: dict, base_dir: str | Path) -> list[str]:
+    """Advisory findings for presenter-facing ``synth`` command blocks in the runbook.
+
+    ``base_dir`` is the directory the manifest lives in (artifact paths and the gold-kit
+    template convention resolve against it). Returns human-readable advisory lines in the
+    same shape as the error channel; callers surface them without ever failing on them.
+    """
+    if not isinstance(doc, dict):
+        return []
+    base = Path(base_dir)
+    advisories: list[str] = []
+    artifacts = doc.get("artifacts")
+    if not isinstance(artifacts, list):
+        return []
+    for artifact in artifacts:
+        if not (isinstance(artifact, dict) and artifact.get("render") == "markdown"):
+            continue
+        declared = artifact.get("path")
+        if not isinstance(declared, str):
+            continue
+        source = _runbook_source(base, declared)
+        if source is None:
+            continue
+        label = source.relative_to(base).as_posix()
+        for lineno in _markdown_synth_block_lines(source.read_text()):
+            advisories.append(
+                f"  ⚠ advisory at {label}:{lineno}: presenter-facing `synth` command "
+                "block outside a marked developer-mode section — every runbook beat "
+                "must be reachable from the delivered surfaces (a Companion route or "
+                "the Langfuse UI); move CLI commands under a \"Developer mode\" "
+                "heading (advisory only, never blocks)"
+            )
+    return advisories
+
+
+# --------------------------------------------------------------------------------------
 # The single choke point: Draft7 schema + semantic parity + new authoring checks.
 # --------------------------------------------------------------------------------------
 
@@ -267,12 +392,19 @@ def validate_doc(doc: dict, validator: Draft7Validator) -> list[str]:
     return errors
 
 
+def _parse_manifest(path: Path) -> tuple[dict | None, list[str]]:
+    """Load the YAML at ``path``; returns ``(doc, errors)``, errors non-empty on failure."""
+    try:
+        return yaml.safe_load(Path(path).read_text()), []
+    except yaml.YAMLError as exc:
+        return None, [f"YAML parse error: {exc}"]
+
+
 def validate_file(path: Path, validator: Draft7Validator) -> list[str]:
     """Return a list of human-readable errors for the manifest at ``path`` (empty = valid)."""
-    try:
-        doc = yaml.safe_load(Path(path).read_text())
-    except yaml.YAMLError as exc:  # pragma: no cover - surfaced to user
-        return [f"YAML parse error: {exc}"]
+    doc, errors = _parse_manifest(path)
+    if errors:
+        return errors
     return validate_doc(doc, validator)
 
 
@@ -293,15 +425,21 @@ def run(paths: list[str]) -> int:
     ok = True
     for arg in paths:
         path = Path(arg)
-        errs = validate_file(path, validator)
+        doc, errs = _parse_manifest(path)
+        if not errs:
+            errs = validate_doc(doc, validator)
         if errs:
             ok = False
             print(f"✗ {path} — INVALID")
             print("\n".join(errs))
         else:
-            doc = yaml.safe_load(path.read_text())
             slug = doc.get("slug") if isinstance(doc, dict) else None
             print(f"✓ {path} — valid (slug: {slug})")
+        # The advisory channel (#181): nudges printed alongside, NEVER part of the
+        # red/green verdict or the exit code.
+        if isinstance(doc, dict):
+            for advisory in runbook_advisories(doc, path.parent):
+                print(advisory)
     return 0 if ok else 1
 
 

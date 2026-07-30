@@ -70,6 +70,15 @@ Whoever cuts the next version ships these; delete each entry when its tag lands.
   digest. Deliberately batched with portal #181 into one shared version cut so the
   three-pin re-pin + golden re-proof is paid once.
 
+- **Runbook-executability rule in the SDK (portal #181)** — the `authoring-a-demo-kit`
+  skill and the scaffolded `DEMO_SCRIPT.md` stub now state the rule (presenter beats
+  reachable only from the delivered surfaces; `synth` CLI confined to a marked
+  developer-mode section; presenter controls tucked away), and `synth-authoring validate`
+  gained the advisory runbook lint (`runbook_advisories`) that flags presenter-facing
+  `synth` command blocks — advisory only, never fails validation. **Authoring-only delta →
+  ships in the same shared version cut as the portal #189 entry above** (one full
+  three-pin re-pin + golden re-proof for both).
+
 ## Release checklist
 
 1. **Bump the version** in `pyproject.toml` (`version = "X.Y.Z"`) on a release branch;

@@ -98,6 +98,21 @@ def test_render_markdown_runbook_is_declared_and_present(kit):
     assert md and any(a["path"] == "DEMO_SCRIPT.md" for a in md)
 
 
+# --- AC (portal #181): the stub carries the runbook-executability rule -------------------
+def test_runbook_stub_states_the_executability_rule(kit):
+    """The one-line rule sits where the story beats get written, and the scaffolded kit
+    produces no runbook advisories (the walking skeleton lints clean)."""
+    import yaml
+
+    from langfuse_synth_core.authoring.validate import runbook_advisories
+
+    stub = (kit.dest / "DEMO_SCRIPT.md").read_text()
+    assert "reachable from the delivered surfaces" in stub
+    assert "Developer mode" in stub
+    doc = yaml.safe_load((kit.dest / "usecase.yaml").read_text())
+    assert runbook_advisories(doc, kit.dest) == []
+
+
 def test_reference_dockerfile_is_non_root_uid_10001(kit):
     dockerfile = (kit.dest / "Dockerfile").read_text()
     assert "uid 10001" in dockerfile.lower() or "--uid 10001" in dockerfile
