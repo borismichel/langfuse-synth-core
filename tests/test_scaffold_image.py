@@ -13,18 +13,25 @@ both runtime write paths take writes. A grep of the Dockerfile cannot prove this
 (``test_reference_dockerfile_makes_the_runtime_write_paths_writable`` guards the shape
 only); running the image is the point.
 
-Cost and where it runs: the build needs a Docker daemon plus network (the base image and
-the git-pinned core at ``DEFAULT_CORE_REF`` — the PINNED release, not this working tree,
-which is fine: the subject under test is the emitted Dockerfile, not core's Python). The
-module skips wherever there is no daemon; core CI's ``authoring-suite`` job (GitHub-hosted
-ubuntu, daemon preinstalled) has one, so the gate is load-bearing on every core PR. It
-deliberately does NOT ship in every scaffolded kit's suite — kit CI would pay the build on
-every push to re-prove a file only the scaffolder changes.
+Cost and where it runs: the build needs a Docker daemon plus network (the base image and a
+git-pinned core release — the subject under test is the emitted Dockerfile, not core's
+Python). The module skips wherever there is no daemon; core CI's ``authoring-suite`` job
+(GitHub-hosted ubuntu, daemon preinstalled) has one, so the gate is load-bearing on every
+core PR. It deliberately does NOT ship in every scaffolded kit's suite — kit CI would pay
+the build on every push to re-prove a file only the scaffolder changes.
+
+Which core ref the image installs: the **latest tag that actually exists on origin**, not
+``DEFAULT_CORE_REF``. On a release-bump PR the default names the tag being cut — it cannot
+exist until after the PR merges, so scaffolding with it makes ``pip install`` fail inside
+the build on every release PR (found cutting v1.7.0). Resolving the newest published
+``v*`` tag keeps the gate green through a release while still building against a real,
+installable core.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import uuid
@@ -60,6 +67,35 @@ JOB_RUN_USER = "10001:10001"
 BUILD_TIMEOUT = 900  # base-image pull + apt git + pip install of the pinned core
 RUN_TIMEOUT = 300
 
+CORE_REPO_URL = "https://github.com/borismichel/langfuse-synth-core"
+
+
+def _latest_released_core_ref() -> str:
+    """The newest ``vX.Y.Z`` tag on origin — a ref ``pip install`` can always resolve.
+
+    ``DEFAULT_CORE_REF`` is deliberately not used: on a release-bump PR it names the tag
+    being cut, which does not exist yet (CI checkouts are shallow and tagless anyway, so
+    this asks the remote). Falls back to ``DEFAULT_CORE_REF`` only if the remote cannot be
+    queried — in which case the build was doomed without network regardless.
+    """
+    from langfuse_synth_core.authoring.scaffold import DEFAULT_CORE_REF
+
+    try:
+        out = subprocess.run(
+            ["git", "ls-remote", "--tags", CORE_REPO_URL, "v*"],
+            capture_output=True, text=True, timeout=60, check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return DEFAULT_CORE_REF
+    versions = []
+    for line in out.splitlines():
+        _, _, ref = line.partition("\t")
+        tag = ref.removeprefix("refs/tags/").removesuffix("^{}")
+        m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+        if m:
+            versions.append((tuple(int(g) for g in m.groups()), tag))
+    return max(versions)[1] if versions else DEFAULT_CORE_REF
+
 
 @pytest.fixture(scope="module")
 def image(tmp_path_factory):
@@ -67,7 +103,7 @@ def image(tmp_path_factory):
     from langfuse_synth_core.authoring.scaffold import scaffold_kit
 
     dest = tmp_path_factory.mktemp("kits") / "image-gate"
-    scaffold_kit("image-gate", dest)
+    scaffold_kit("image-gate", dest, core_ref=_latest_released_core_ref())
 
     tag = f"synth-scaffold-gate:{uuid.uuid4().hex[:12]}"
     build = subprocess.run(

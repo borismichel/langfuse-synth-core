@@ -58,26 +58,10 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **Scaffold Dockerfile ownership fix (portal #189)** — the emitted Dockerfile now creates
-  and chowns `/app/out` + `/app/.synth_spool` before the `USER synth` drop, so the built
-  image can write its spool and artifacts as uid 10001; guarded by the new built-image
-  gate (`tests/test_scaffold_image.py`). **Authoring-only delta → the release takes the
-  FULL three-pin re-pin** (step 3 for all kits; the CI-only carve-out does not apply).
-  The same release chain also ships the tail this fix implies **outside** this repo:
-  the support kit's own `Dockerfile` needs the identical `mkdir -p /app/out
-  /app/.synth_spool && chown -R synth:synth /app` line (it reproduced the broken
-  scaffold) plus a patch release, and the portal registry then re-pins the new kit
-  digest. Deliberately batched with portal #181 into one shared version cut so the
-  three-pin re-pin + golden re-proof is paid once.
-
-- **Runbook-executability rule in the SDK (portal #181)** — the `authoring-a-demo-kit`
-  skill and the scaffolded `DEMO_SCRIPT.md` stub now state the rule (presenter beats
-  reachable only from the delivered surfaces; `synth` CLI confined to a marked
-  developer-mode section; presenter controls tucked away), and `synth-authoring validate`
-  gained the advisory runbook lint (`runbook_advisories`) that flags presenter-facing
-  `synth` command blocks — advisory only, never fails validation. **Authoring-only delta →
-  ships in the same shared version cut as the portal #189 entry above** (one full
-  three-pin re-pin + golden re-proof for both).
+_(Nothing pending — v1.7.0 shipped the scaffold Dockerfile ownership fix + built-image gate
+(portal #189) and the runbook-executability rule (portal #181). The #189 tail outside this
+repo — the support kit's own Dockerfile line + patch release, then the portal registry
+re-pin — ships in the same release chain.)_
 
 ## Release checklist
 
