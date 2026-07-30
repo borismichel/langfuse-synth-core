@@ -73,6 +73,15 @@ container command.
   **one** artifact must declare `render: markdown` — the Presenter Runbook the operator
   reads to walk the demo.
 - **`assets.docs` / `screenshots`** paths are repo-relative and rendered in-portal.
+- **Runtime write paths must be writable by uid 10001.** Job containers run as
+  `JOB_RUN_USER=10001:10001`, never as the image's build user, and a plain `COPY . .`
+  lands root-owned. The image must therefore create and chown the directories the kit
+  writes at runtime: **`/app/out/`** (the artifact-collection dir above — contract) and
+  **`/app/.synth_spool/`** (where the reference `seed` spools events — convention, but
+  every scaffolded kit uses it). The reference Dockerfiles do this with
+  `RUN mkdir -p /app/out /app/.synth_spool && chown -R synth:synth /app` before the
+  `USER` drop; a kit that skips it dies on `open_spool()` at its first deployment
+  (portal #189).
 
 ---
 

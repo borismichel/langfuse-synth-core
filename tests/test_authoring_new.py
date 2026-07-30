@@ -104,6 +104,23 @@ def test_reference_dockerfile_is_non_root_uid_10001(kit):
     assert "USER synth" in dockerfile
 
 
+def test_reference_dockerfile_makes_the_runtime_write_paths_writable(kit):
+    """`COPY . .` lands root-owned and the container then drops to uid 10001 — so unless
+    the image creates and chowns the two runtime write paths (the spool at
+    /app/.synth_spool, and /app/out where the worker collects artifacts), every scaffolded
+    kit dies on `open_spool()` at its first deployment (portal #189). Being non-root — the
+    test above — is exactly what breaks this, so this asserts the ownership prep happens
+    before the USER drop; the built-image proof lives in ``test_scaffold_image.py``."""
+    dockerfile = (kit.dest / "Dockerfile").read_text()
+    before_user_drop = dockerfile.partition("USER synth")[0]
+    chown = [line for line in before_user_drop.splitlines() if "chown" in line]
+    assert chown, "no chown before USER synth — /app stays root-owned at runtime"
+    assert any(
+        "mkdir -p /app/out /app/.synth_spool" in line and "chown -R synth:synth /app" in line
+        for line in chown
+    )
+
+
 # --- Spec E · E7 (#102): the scaffold gets build+sign CI with no manual wiring -----------
 def test_publish_workflow_triggers_on_tag_push(kit):
     import yaml

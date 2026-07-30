@@ -58,8 +58,17 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-_(Nothing pending — v1.6.0 shipped the retargeting gate and the scaffold's `LANGFUSE_BASE_URL`
-fix, portal #187.)_
+- **Scaffold Dockerfile ownership fix (portal #189)** — the emitted Dockerfile now creates
+  and chowns `/app/out` + `/app/.synth_spool` before the `USER synth` drop, so the built
+  image can write its spool and artifacts as uid 10001; guarded by the new built-image
+  gate (`tests/test_scaffold_image.py`). **Authoring-only delta → the release takes the
+  FULL three-pin re-pin** (step 3 for all kits; the CI-only carve-out does not apply).
+  The same release chain also ships the tail this fix implies **outside** this repo:
+  the support kit's own `Dockerfile` needs the identical `mkdir -p /app/out
+  /app/.synth_spool && chown -R synth:synth /app` line (it reproduced the broken
+  scaffold) plus a patch release, and the portal registry then re-pins the new kit
+  digest. Deliberately batched with portal #181 into one shared version cut so the
+  three-pin re-pin + golden re-proof is paid once.
 
 ## Release checklist
 
