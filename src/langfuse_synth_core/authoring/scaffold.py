@@ -55,7 +55,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 # workflow_call ref (#102) share this one pin. The author bumps it as the lib releases;
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
 # `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call.
-DEFAULT_CORE_REF = "v1.6.0"
+DEFAULT_CORE_REF = "v1.7.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted
