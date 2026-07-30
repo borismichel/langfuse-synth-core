@@ -76,6 +76,23 @@ def test_skill_delegates_langfuse_craft(skill_body: str):
     assert "observation" in lowered and "evaluator" in lowered
 
 
+def test_skill_states_the_runbook_executability_rule(skill_body: str):
+    """Portal #181: presenter beats must be reachable from the delivered surfaces (a
+    Companion route or the Langfuse UI), `synth` CLI is confined to a marked
+    developer-mode section, and presenter-only controls are tucked away (the cosmetic
+    corollary) — stated in the runbook phase AND the closing checklist, with EV's
+    CLI-only eval beat (portal #180) as the recognizable counter-example."""
+    lowered = skill_body.lower()
+    assert "delivered surfaces" in lowered
+    assert "developer-mode" in lowered
+    assert "companion route" in lowered
+    assert "tucked away" in lowered
+    assert "#180" in skill_body, "the EV counter-example anchors the failure shape"
+    checklist = skill_body.split('## What "done" looks like', 1)[1]
+    assert "delivered surfaces" in checklist.lower()
+    assert "tucked away" in checklist.lower()
+
+
 # ── locate / install surface ────────────────────────────────────────────────────────────
 def test_skills_cli_lists_the_orchestrator(capsys):
     """``synth-authoring skills`` names the shipped skill and prints its path."""

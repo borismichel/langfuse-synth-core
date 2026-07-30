@@ -177,6 +177,24 @@ a solutions engineer reads to walk the demo. At least one `render: markdown` art
 mandatory; the scaffold ships this one. Grow the stub into the real walkthrough: what the
 demo shows, the setup, the story beats, the reset.
 
+**The runbook-executability rule.** Every step the presenter performs must be reachable
+from the **delivered surfaces** — the Companion's routes or the Langfuse UI. Kits are
+cartridges delivered as-is through the depot: the presenter has no shell, and the portal's
+invocation contract templates only `{config}`, so there is no sanctioned way to run extra
+verbs in a deployed container. The failure shape to recognize: EV once wired its red/green
+eval beat only to a `synth` CLI verb — unreachable in a depot delivery (portal #180). An
+interactive beat has exactly two compliant homes: a **Companion route**, or the **Langfuse
+UI**. `synth` CLI commands may appear only in a clearly-marked developer-mode section
+(both gold kits close with a `## Developer mode — …` footnote); `synth-authoring validate`
+flags presenter-facing `synth` command blocks outside such a section as an advisory.
+
+**The cosmetic corollary: presenter controls are tucked away.** When a beat does need a
+presenter-only control on a Companion surface, make it visually recessive — a collapsed
+disclosure at the bottom of the page, footer placement, muted styling, no accent color —
+so the demo fiction stays intact for the prospect; the runbook tells the presenter where
+it lives. The reference implementation is EV's playground eval triggers (portal #180): a
+quiet disclosure at the foot of the page, never a big red button in the prospect's face.
+
 **Wiring note (deploy-time, not a gate).** Per `CONTRACT.md` ("Filesystem conventions"),
 the portal collects declared artifacts from the container's `/app/out/` directory after the
 producing step exits — so the committed `DEMO_SCRIPT.md` is the *source*, and for the portal
@@ -254,6 +272,10 @@ runtime, once or per-unit). Full pattern in
 - `synth verify` — the scenario truth reads back from a live seeded env.
 - The trace tree and runbook tell the real story; Langfuse semantic choices were made with
   the `langfuse` skill, not from memory.
+- Every presenter beat in the runbook is reachable from the delivered surfaces (a
+  Companion route or the Langfuse UI); `synth` commands sit only in a marked
+  developer-mode section (`validate`'s advisory is silent), and presenter-only controls
+  on Companion surfaces are tucked away — recessive, not in the prospect's face.
 - No LLM call at seed runtime; any author-time model use is frozen as a fixture and blessed.
 
 ## References
