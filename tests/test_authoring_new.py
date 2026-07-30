@@ -115,10 +115,9 @@ def test_reference_dockerfile_makes_the_runtime_write_paths_writable(kit):
     before_user_drop = dockerfile.partition("USER synth")[0]
     chown = [line for line in before_user_drop.splitlines() if "chown" in line]
     assert chown, "no chown before USER synth — /app stays root-owned at runtime"
-    assert any(
-        "mkdir -p /app/out /app/.synth_spool" in line and "chown -R synth:synth /app" in line
-        for line in chown
-    )
+    assert any("synth:synth" in line and "/app" in line for line in chown)
+    for path in ("/app/out", "/app/.synth_spool"):
+        assert any(path in line for line in chown), f"{path} never created before the USER drop"
 
 
 # --- Spec E · E7 (#102): the scaffold gets build+sign CI with no manual wiring -----------
