@@ -24,6 +24,11 @@ COPY . .
 # Fetches the pinned public lib over HTTPS during the build; nothing to authenticate.
 RUN pip install --no-cache-dir -e '.[playground]'
 
+# COPY lands root-owned, but the container runs as uid 10001 (JOB_RUN_USER). Create and
+# chown the two runtime write paths — the spool and the artifact dir the portal collects
+# from (CONTRACT.md) — or `seed` dies on open_spool() at the first deployment.
+RUN mkdir -p /app/out /app/.synth_spool && chown -R synth:synth /app
+
 USER synth
 # The portal supplies `synth <step> --config {config}` at container-create time.
 
