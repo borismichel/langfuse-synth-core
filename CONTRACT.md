@@ -22,6 +22,13 @@ The Contract has three parts, all versioned together in this repo:
 > author's offline lint and the portal's admission gate run the same code and the same
 > schema.
 
+The policy half of this document is additionally **executable**: `synth-authoring conformance
+<kit-dir>` (portal #198) proves a kit checkout honors the live-surface declarations, the
+fixed companion invocation (including `--set` rejection), the offline health/index serve,
+and the per-run anchors location — each finding citing its section here. All kits run it
+in CI; pre-portal kits run it with `--advisory` (findings reported, never blocking) until
+they have converged on the target shape.
+
 **How this document is versioned.** The Contract rides the library release: a
 `vX.Y.Z` tag pins schema, validator, and this document together, and the portal enforces
 exactly one pinned version (`api/app/contract_pin.py` reads the pin in the portal's

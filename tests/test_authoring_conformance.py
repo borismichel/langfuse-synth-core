@@ -1,0 +1,526 @@
+"""``synth-authoring conformance`` — the Contract as executable checks (portal #198).
+
+The suite proves a kit honors the Contract instead of documenting that it should (the
+#187 retargeting-gate precedent), so these tests mirror the ticket's acceptance criteria:
+
+* a target-shape kit (``synth-authoring new --companion --anchors``) passes clean;
+* a stateless kit passes — statelessness is a legitimate contract citizen, so the
+  anchors checks skip rather than fail (the support-kit case);
+* deliberately breaking a contract rule surfaces as a finding that cites ``CONTRACT.md``;
+* advisory mode reports the same findings but never blocks (exit 0 — the #181
+  runbook-advisories precedent for the pre-portal kits).
+
+Runs under the ``[authoring]`` extra plus the companion web deps (fastapi/starlette),
+both of which core's own dev env installs; the module skips without them.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import ClassVar
+
+import pytest
+import yaml
+
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("jsonschema") is None,
+    reason="conformance ships in the [authoring] extra; not on a runtime-only job",
+)
+
+needs_companion_deps = pytest.mark.skipif(
+    importlib.util.find_spec("fastapi") is None
+    or importlib.util.find_spec("httpx") is None,
+    reason="the companion serve checks drive a TestClient (fastapi/httpx)",
+)
+
+
+# --------------------------------------------------------------------------------------
+# A minimal in-memory manifest in the target shape, mutated per test.
+# --------------------------------------------------------------------------------------
+def target_manifest() -> dict:
+    return {
+        "schema_version": 1,
+        "slug": "probe-kit",
+        "name": "Probe Kit",
+        "tagline": "conformance fixture",
+        "vertical": "testing",
+        "story": "fixture",
+        "langfuse_features": ["tracing"],
+        "target": {"project_hint": "demo", "supports": ["cloud_eu"]},
+        "base_config": {"default": "config/demo.yaml"},
+        "config_schema": {
+            "type": "object",
+            "properties": {
+                "generation.target_traces": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "default": 100,
+                    "title": "Target traces",
+                    "description": "volume knob",
+                }
+            },
+            "required": [],
+        },
+        "pipeline": [
+            {"id": "seed", "run": "synth seed --config {config}"},
+            {"id": "verify", "run": "synth verify --config {config}", "fatal": True},
+        ],
+        "artifacts": [
+            {"path": "DEMO_SCRIPT.md", "render": "markdown", "title": "Presenter Runbook"}
+        ],
+        "llm": {"providers": ["anthropic"]},
+        "live_components": [
+            {
+                "name": "companion",
+                "command": "synth companion --config {config} --host 0.0.0.0 --port 8080",
+                "port": 8080,
+                "health_path": "/healthz",
+                "requires_secrets": [
+                    "LANGFUSE_PUBLIC_KEY",
+                    "LANGFUSE_SECRET_KEY",
+                    "LLM_API_KEY",
+                ],
+                "routes": [{"path": "/", "title": "console"}],
+            }
+        ],
+    }
+
+
+# --------------------------------------------------------------------------------------
+# Manifest declarations (static) — CONTRACT.md §"The live surface"
+# --------------------------------------------------------------------------------------
+def test_target_manifest_has_no_manifest_findings():
+    from langfuse_synth_core.authoring.conformance import manifest_findings
+
+    assert manifest_findings(target_manifest()) == []
+
+
+def test_health_path_equal_to_root_is_a_finding():
+    """EV/Lender's legacy `health_path: /` collides with the index — the target shape
+    points health at the adapter readiness route, which must differ from `/`."""
+    from langfuse_synth_core.authoring.conformance import manifest_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["health_path"] = "/"
+    findings = manifest_findings(doc)
+    assert len(findings) == 1
+    assert "health_path" in findings[0]
+    assert 'CONTRACT.md §"The live surface"' in findings[0]
+
+
+def test_missing_health_path_is_a_finding():
+    from langfuse_synth_core.authoring.conformance import manifest_findings
+
+    doc = target_manifest()
+    del doc["live_components"][0]["health_path"]
+    findings = manifest_findings(doc)
+    assert len(findings) == 1
+    assert "health_path" in findings[0]
+
+
+def test_command_without_config_placeholder_is_a_finding():
+    from langfuse_synth_core.authoring.conformance import manifest_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "synth companion --config config/demo.yaml --host 0.0.0.0 --port 8080"
+    )
+    findings = manifest_findings(doc)
+    assert any("{config}" in f for f in findings)
+    assert any('CONTRACT.md §"The container invocation"' in f for f in findings)
+
+
+def test_stateless_manifest_without_live_components_is_clean():
+    from langfuse_synth_core.authoring.conformance import manifest_findings
+
+    doc = target_manifest()
+    del doc["live_components"]
+    assert manifest_findings(doc) == []
+
+
+# --------------------------------------------------------------------------------------
+# The live command (executable) — CONTRACT.md §"The container invocation"
+# --------------------------------------------------------------------------------------
+def test_target_live_command_parses_clean():
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    assert live_command_findings(target_manifest()) == []
+
+
+def test_live_command_with_a_baked_in_set_flag_is_a_finding():
+    """The LAN-165 class: a `--set` in a live command kills the surface on argv parse."""
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "synth companion --config {config} --host 0.0.0.0 --port 8080 --set a=1"
+    )
+    findings = live_command_findings(doc)
+    assert len(findings) == 1
+    assert 'CONTRACT.md §"The container invocation"' in findings[0]
+
+
+def test_live_command_port_must_match_the_declared_port():
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "synth companion --config {config} --host 0.0.0.0 --port 9999"
+    )
+    findings = live_command_findings(doc)
+    assert len(findings) == 1
+    assert "9999" in findings[0] and "8080" in findings[0]
+
+
+def test_live_command_must_bind_all_interfaces():
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "synth companion --config {config} --host 127.0.0.1 --port 8080"
+    )
+    findings = live_command_findings(doc)
+    assert len(findings) == 1
+    assert "0.0.0.0" in findings[0]
+
+
+def test_live_command_must_invoke_the_kit_synth_entrypoint():
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "uvicorn synth.app:app --host 0.0.0.0 --port 8080"
+    )
+    findings = live_command_findings(doc)
+    assert len(findings) == 1
+    assert "synth" in findings[0]
+
+
+def test_live_command_without_a_companion_verb_is_a_finding():
+    """`synth --config …` has no verb token — a distinct defect from a non-synth command,
+    and the finding must say so rather than mis-report a parse failure."""
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "synth --config {config} --host 0.0.0.0 --port 8080"
+    )
+    findings = live_command_findings(doc)
+    assert len(findings) == 1
+    assert "verb" in findings[0]
+
+
+def test_kit_chosen_verb_names_are_fine():
+    """EV/Lender use `playground`; the verb name is kit-chosen, only the shape is fixed."""
+    from langfuse_synth_core.authoring.conformance import live_command_findings
+
+    doc = target_manifest()
+    doc["live_components"][0]["command"] = (
+        "synth playground --config {config} --host 0.0.0.0 --port 8080"
+    )
+    assert live_command_findings(doc) == []
+
+
+# --------------------------------------------------------------------------------------
+# The companion serve checks (executable) — CONTRACT.md §"The live surface"
+# --------------------------------------------------------------------------------------
+@needs_companion_deps
+def test_target_shape_companion_serves_health_and_index_offline():
+    from langfuse_synth_core.authoring.conformance import companion_findings
+
+    def create_app(adapter):
+        from fastapi import FastAPI
+        from fastapi.responses import HTMLResponse
+
+        app = FastAPI()
+
+        @app.get("/", response_class=HTMLResponse)
+        async def _root() -> str:
+            return "<h1>console</h1>"
+
+        return app
+
+    findings, notes = companion_findings(target_manifest(), create_app)
+    assert findings == []
+
+
+@needs_companion_deps
+def test_companion_index_needing_the_network_is_a_finding():
+    """`renders its index without network access or secrets` — an index route that dials
+    out through the adapter fails against the offline probe adapter."""
+    from langfuse_synth_core.authoring.conformance import companion_findings
+
+    def create_app(adapter):
+        from fastapi import FastAPI
+        from fastapi.responses import HTMLResponse
+
+        app = FastAPI()
+
+        @app.get("/", response_class=HTMLResponse)
+        async def _root() -> str:
+            adapter.read_json("/api/public/projects")  # a network read at render time
+            return "<h1>console</h1>"
+
+        return app
+
+    findings, _ = companion_findings(target_manifest(), create_app)
+    assert len(findings) == 1
+    assert "index" in findings[0]
+
+
+@needs_companion_deps
+def test_companion_factory_not_taking_the_adapter_is_a_finding():
+    """The EV/Lender migration-debt shape `create_app(cfg, adapter)` is not the target
+    `create_app(adapter)` — surfaced, and advisory for the pre-portal kits."""
+    from langfuse_synth_core.authoring.conformance import companion_findings
+
+    def create_app(cfg, adapter):  # legacy two-arg shape
+        raise AssertionError("never built")
+
+    findings, _ = companion_findings(target_manifest(), create_app)
+    assert len(findings) == 1
+    assert "create_app(adapter)" in findings[0]
+
+
+@needs_companion_deps
+def test_companion_checks_skip_when_no_live_components():
+    from langfuse_synth_core.authoring.conformance import companion_findings
+
+    doc = target_manifest()
+    del doc["live_components"]
+    findings, notes = companion_findings(doc, lambda adapter: None)
+    assert findings == []
+    assert any("no live components" in n for n in notes)
+
+
+@needs_companion_deps
+def test_companion_check_scrubs_secrets_from_the_environment(monkeypatch):
+    """The serve check must not let ambient secrets leak into the surface under test."""
+    from langfuse_synth_core.authoring.conformance import companion_findings
+
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-ambient")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ambient")
+    seen: dict = {}
+
+    def create_app(adapter):
+        import os
+
+        from fastapi import FastAPI
+        from fastapi.responses import HTMLResponse
+
+        seen["secret"] = os.environ.get("LANGFUSE_SECRET_KEY")
+        seen["anthropic"] = os.environ.get("ANTHROPIC_API_KEY")
+        app = FastAPI()
+
+        @app.get("/", response_class=HTMLResponse)
+        async def _root() -> str:
+            return "ok"
+
+        return app
+
+    findings, _ = companion_findings(target_manifest(), create_app)
+    assert findings == []
+    assert seen == {"secret": None, "anthropic": None}
+    # ...and the ambient environment is restored afterwards.
+    import os
+
+    assert os.environ["LANGFUSE_SECRET_KEY"] == "sk-ambient"
+
+
+# --------------------------------------------------------------------------------------
+# Anchors (executable, opt-in) — CONTRACT.md §"Per-run anchors (opt-in)"
+# --------------------------------------------------------------------------------------
+def _payload_class(fallback: Path):
+    from langfuse_synth_core.anchors import AnchorsIO
+
+    @dataclass
+    class RunState(AnchorsIO):
+        FALLBACK_STATE_DIR: ClassVar[Path] = fallback
+
+        base_url: str = ""
+        target_traces: int = 0
+        summary: dict = field(default_factory=dict)
+
+    return RunState
+
+
+def test_anchors_payload_on_the_core_mechanism_passes(tmp_path):
+    from langfuse_synth_core.authoring.conformance import anchors_findings
+
+    findings, notes = anchors_findings([_payload_class(tmp_path / "spool")])
+    assert findings == []
+
+
+def test_anchors_written_where_the_state_dir_env_points(tmp_path, monkeypatch):
+    """The executable half: a fabricated payload SAVES under SYNTH_STATE_DIR and loads
+    back — proving the write lands where the env points, at call time."""
+    from langfuse_synth_core.authoring.conformance import anchors_findings
+
+    cls = _payload_class(tmp_path / "fallback")
+    findings, notes = anchors_findings([cls])
+    assert findings == []
+    # The round-trip really ran (it is a note-worthy skip when fabrication fails).
+    assert not any("round-trip skipped" in n for n in notes)
+
+
+def test_a_payload_that_ignores_the_env_is_a_finding(tmp_path):
+    from langfuse_synth_core.anchors import AnchorsIO
+    from langfuse_synth_core.authoring.conformance import anchors_findings
+
+    hardwired = tmp_path / "hardwired"
+
+    @dataclass
+    class Pinned(AnchorsIO):
+        FALLBACK_STATE_DIR: ClassVar[Path] = hardwired
+        base_url: str = ""
+
+        @classmethod
+        def state_dir(cls) -> Path:  # the defect: env ignored
+            return hardwired
+
+        @classmethod
+        def state_path(cls) -> str:
+            return str(hardwired / ".synth_state.json")
+
+    findings, _ = anchors_findings([Pinned])
+    assert findings
+    assert any("SYNTH_STATE_DIR" in f for f in findings)
+    assert any('CONTRACT.md §"Per-run anchors (opt-in)"' in f for f in findings)
+
+
+def test_a_payload_that_raises_becomes_a_finding_not_a_crash(tmp_path):
+    """A broken payload (e.g. no FALLBACK_STATE_DIR set) must surface as a finding —
+    the suite reports, it never tracebacks out of a kit's CI step."""
+    from langfuse_synth_core.anchors import AnchorsIO
+    from langfuse_synth_core.authoring.conformance import anchors_findings
+
+    @dataclass
+    class Broken(AnchorsIO):  # FALLBACK_STATE_DIR deliberately missing
+        base_url: str = ""
+
+    findings, _ = anchors_findings([Broken])
+    assert len(findings) == 1
+    assert "Broken" in findings[0]
+
+
+def test_required_fields_without_defaults_are_fabricated(tmp_path):
+    """EV/Lender payloads have required str/int/dict fields — fabrication must cover
+    them so the write round-trip still runs."""
+    from langfuse_synth_core.anchors import AnchorsIO
+    from langfuse_synth_core.authoring.conformance import anchors_findings
+
+    @dataclass
+    class EvLike(AnchorsIO):
+        FALLBACK_STATE_DIR: ClassVar[Path] = tmp_path / "spool"
+
+        base_url: str
+        run_date: str
+        drift_window_days: int
+        prompt_versions: dict
+        summary: dict = field(default_factory=dict)
+
+    findings, notes = anchors_findings([EvLike])
+    assert findings == []
+    assert not any("round-trip skipped" in n for n in notes)
+
+
+def test_stateless_kit_skips_anchors_with_a_note():
+    from langfuse_synth_core.authoring.conformance import find_anchor_payloads
+
+    assert find_anchor_payloads("synth_no_such_state_module_xyz") is None
+
+
+# --------------------------------------------------------------------------------------
+# The whole suite against a real scaffolded kit (the flagship), plus the CLI verdict.
+# --------------------------------------------------------------------------------------
+@pytest.fixture()
+def kit_on_path(tmp_path_factory, request):
+    """Scaffold a kit and make ITS `synth` package the importable one for the test."""
+    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+
+    def _make(slug: str, **kw):
+        dest = tmp_path_factory.mktemp("kits") / slug
+        result = scaffold_kit(slug, dest, **kw)
+        src = str(result.dest / "src")
+        sys.path.insert(0, src)
+
+        def _cleanup():
+            if src in sys.path:
+                sys.path.remove(src)
+            for name in [n for n in sys.modules if n == "synth" or n.startswith("synth.")]:
+                del sys.modules[name]
+
+        request.addfinalizer(_cleanup)
+        return result.dest
+
+    return _make
+
+
+@needs_companion_deps
+def test_scaffolded_companion_anchors_kit_passes_clean(kit_on_path):
+    from langfuse_synth_core.authoring.conformance import run_conformance
+
+    kit_dir = kit_on_path("conf-full", with_companion=True, with_anchors=True)
+    report = run_conformance(kit_dir)
+    assert report.findings == [], "\n".join(report.findings)
+    assert report.ok
+
+
+@needs_companion_deps
+def test_scaffolded_stateless_kit_passes_with_the_anchors_skip_note(kit_on_path):
+    """The support-kit case: companion, no anchors — stateless is a legitimate citizen."""
+    from langfuse_synth_core.authoring.conformance import run_conformance
+
+    kit_dir = kit_on_path("conf-stateless", with_companion=True)
+    report = run_conformance(kit_dir)
+    assert report.findings == [], "\n".join(report.findings)
+    assert any("stateless" in n for n in report.notes)
+
+
+@needs_companion_deps
+def test_broken_contract_rule_surfaces_in_the_verdict(kit_on_path, capsys):
+    """AC: deliberately breaking a contract rule surfaces in the kit's CI output —
+    enforcing mode exits 1 and names the rule; advisory mode prints it but exits 0."""
+    from langfuse_synth_core.authoring.conformance import run
+
+    kit_dir = kit_on_path("conf-broken", with_companion=True)
+    manifest = kit_dir / "usecase.yaml"
+    doc = yaml.safe_load(manifest.read_text())
+    doc["live_components"][0]["health_path"] = "/"  # the legacy collision
+    manifest.write_text(yaml.safe_dump(doc, sort_keys=False))
+
+    assert run([str(kit_dir)]) == 1
+    out = capsys.readouterr().out
+    assert "health_path" in out and "CONTRACT.md" in out
+
+    assert run([str(kit_dir), "--advisory"]) == 0
+    out = capsys.readouterr().out
+    assert "advisory" in out and "health_path" in out
+
+
+def test_missing_manifest_is_a_finding(tmp_path, capsys):
+    from langfuse_synth_core.authoring.conformance import run
+
+    assert run([str(tmp_path)]) == 1
+    assert "usecase.yaml" in capsys.readouterr().out
+
+
+def test_scaffolded_ci_runs_the_conformance_suite_enforcing(kit_on_path):
+    """AC: kits run the suite in CI. A scaffolded kit is born in the target shape, so
+    its emitted workflow runs the suite enforcing — no `--advisory` carve-out."""
+    kit_dir = kit_on_path("conf-ci")
+    doc = yaml.safe_load((kit_dir / ".github" / "workflows" / "ci.yml").read_text())
+    runs = [step.get("run", "") for step in doc["jobs"]["test"]["steps"]]
+    assert "synth-authoring conformance ." in runs, runs
+
+
+def test_cli_dispatches_conformance(kit_on_path):
+    """`synth-authoring conformance <kit>` is wired into the dispatcher."""
+    from langfuse_synth_core.authoring.cli import main
+
+    kit_dir = kit_on_path("conf-cli", with_companion=True, with_anchors=True)
+    assert main(["conformance", str(kit_dir)]) == 0

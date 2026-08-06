@@ -1,6 +1,7 @@
 """The ``synth-authoring`` CLI — a subcommand dispatcher (Spec A).
 
 Ships ``synth-authoring validate`` (#27, the offline Contract lint),
+``synth-authoring conformance`` (portal #198, the Contract as executable checks),
 ``synth-authoring freeze`` (#28, the determinism golden gate),
 ``synth-authoring new`` (#36, the walking-skeleton scaffold generator), and
 ``synth-authoring skills`` (#37, locate/install the shipped kit-dev skills). The dispatcher
@@ -26,6 +27,7 @@ import json
 import sys
 from pathlib import Path
 
+from langfuse_synth_core.authoring import conformance as _conformance
 from langfuse_synth_core.authoring import repin as _repin
 from langfuse_synth_core.authoring import skills as _skills
 from langfuse_synth_core.authoring import validate as _validate
@@ -52,6 +54,17 @@ def _add_validate(subparsers: argparse._SubParsersAction) -> None:
         help="path(s) to the manifest(s) to validate",
     )
     parser.set_defaults(func=_cmd_validate)
+
+
+# ── synth-authoring conformance (portal #198) ───────────────────────────────────────────
+def _add_conformance(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "conformance",
+        help="the Contract as executable checks against a kit checkout — every finding "
+        "cites CONTRACT.md; --advisory reports without failing (pre-portal kits)",
+    )
+    _conformance.add_arguments(parser)
+    parser.set_defaults(func=_conformance.execute)
 
 
 # ── synth-authoring freeze (#28) ────────────────────────────────────────────────────────
@@ -274,6 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     _add_validate(subparsers)
+    _add_conformance(subparsers)
     _add_freeze(subparsers)
     _add_new(subparsers)
     _add_repin(subparsers)
