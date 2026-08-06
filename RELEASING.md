@@ -38,7 +38,8 @@ to wait for (or force) a coordinated runtime re-pin across every kit.
 A version whose whole delta is **CI logic** — `kit-publish.yml` and friends, nothing under
 `src/langfuse_synth_core/` that a kit installs at all — satisfies step 3 by bumping
 each kit's **`publish.yml` workflow pin** and leaves the three runtime pins where they
-are. A runtime re-pin would move every kit's dependency ref to a release that changes
+are. (That bump is a one-line hand edit — `synth-authoring repin` deliberately moves the
+workflow pin *together* with the dependency pins, which is what a full core release wants.) A runtime re-pin would move every kit's dependency ref to a release that changes
 nothing it executes, and cost a golden re-proof (step 4) for a delta the kit cannot
 observe. State in the release PR that the release is CI-only, so the next
 reader can tell a deliberate carve-out from a half-landed re-pin.
@@ -58,10 +59,10 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-_(Nothing pending — v1.7.0 shipped the scaffold Dockerfile ownership fix + built-image gate
-(portal #189) and the runbook-executability rule (portal #181). The #189 tail outside this
-repo — the support kit's own Dockerfile line + patch release, then the portal registry
-re-pin — ships in the same release chain.)_
+- **`synth-authoring repin` — the one-command kit re-pin** (portal #197): checklist
+  step 3's manual pin dance is now `synth-authoring repin vX.Y.Z` run from a kit
+  checkout. Authoring-tooling only — no runtime behavior moved, no kit golden can shift;
+  existing kits pick it up on their next `[authoring]` pin bump.
 
 ## Release checklist
 
@@ -74,9 +75,20 @@ re-pin — ships in the same release chain.)_
    distribution metadata and guarded by `tests/test_runtime_import.py`; #145.)
 2. **Tag** `vX.Y.Z` on the landed `main` commit and **push the tag** (`git push origin
    vX.Y.Z`). The tag must be on origin before any kit or CI can resolve `@vX.Y.Z`.
-3. **Re-pin every kit** in the table above — all three pins, to the same `@vX.Y.Z` — on a
-   branch per kit; PR → merge. Grep the kit's `pyproject.toml` for
-   `langfuse-synth-core` and check every hit moved; a stale one is silent.
+3. **Re-pin every kit** in the table above — on a branch per kit, from the kit checkout:
+
+   ```
+   synth-authoring repin vX.Y.Z [--kit-tag vA.B.C] [--dry-run]
+   ```
+
+   One command (portal #197) moves ALL the kit's core pins — every `pyproject.toml`
+   dependency pin (however many that kit carries) **and** the `publish.yml` workflow pin
+   — and fails loudly if any core ref it could not rewrite would be left behind (the old
+   "grep for stragglers" step, mechanized). It also prints the portal `registry.yaml`
+   snippet for the follow-up registry PR; pass `--kit-tag` with the kit's next release
+   tag to resolve the GHCR image digest into the output (it says plainly when that tag's
+   image is not published yet). `--dry-run` shows the diff without writing.
+   PR → merge, per kit.
 4. **Prove each kit still golden-green** on the new ref: run its
    `tests/test_determinism.py::test_full_payload_golden_is_byte_identical` (needs the
    `[dev]` / `[authoring]` extra installed) under the deny-LLM egress block. A red gate

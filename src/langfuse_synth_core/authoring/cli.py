@@ -26,6 +26,7 @@ import json
 import sys
 from pathlib import Path
 
+from langfuse_synth_core.authoring import repin as _repin
 from langfuse_synth_core.authoring import skills as _skills
 from langfuse_synth_core.authoring import validate as _validate
 from langfuse_synth_core.authoring.golden import GoldenSpec, freeze
@@ -149,6 +150,64 @@ def _add_new(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=_cmd_new)
 
 
+# ── synth-authoring repin (portal #197) ─────────────────────────────────────────────────
+def _cmd_repin(args: argparse.Namespace) -> int:
+    try:
+        result = _repin.repin_kit(
+            Path(args.kit),
+            args.core_ref,
+            kit_tag=args.kit_tag,
+            repo_url=args.repo_url,
+            dry_run=args.dry_run,
+        )
+    except _repin.RepinError as exc:
+        print(f"✗ synth-authoring repin: {exc}", file=sys.stderr)
+        return 2
+    if result.dry_run:
+        for diff in result.diffs.values():
+            print(diff, end="")
+        print("(dry-run: nothing written)")
+    else:
+        print(
+            f"✓ repinned {result.slug!r} to core {result.core_ref}: "
+            f"{result.pyproject_moves} pyproject pin(s) + {result.workflow_moves} workflow pin(s)"
+        )
+    print("\nportal registry.yaml snippet (paste into the registry PR):")
+    print(result.snippet, end="")
+    print(result.image_note)
+    return 0
+
+
+def _add_repin(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "repin",
+        help="move ALL of a kit's core pins (pyproject + publish workflow) to a core "
+        "release in one step, and emit the portal registry snippet",
+    )
+    parser.add_argument(
+        "core_ref",
+        help="the langfuse-synth-core release to pin to — a vX.Y.Z tag or full 40-hex SHA",
+    )
+    parser.add_argument(
+        "--kit", default=".",
+        help="path to the kit checkout to repin (default: cwd)",
+    )
+    parser.add_argument(
+        "--kit-tag", default=None, metavar="vA.B.C",
+        help="the kit's NEXT release tag, for the registry snippet's ref + GHCR digest "
+        "lookup (omit if undecided — the snippet carries a placeholder)",
+    )
+    parser.add_argument(
+        "--repo-url", default=None,
+        help="the kit's GitHub repo URL (default: derived from `git remote get-url origin`)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="print the unified diff and the snippet without writing anything",
+    )
+    parser.set_defaults(func=_cmd_repin)
+
+
 # ── synth-authoring skills (#37) ────────────────────────────────────────────────────────
 # Default target for `--install`: the directory Claude Code discovers project skills in.
 DEFAULT_SKILLS_DEST = ".claude/skills"
@@ -210,6 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_validate(subparsers)
     _add_freeze(subparsers)
     _add_new(subparsers)
+    _add_repin(subparsers)
     _add_skills(subparsers)
     return parser
 
