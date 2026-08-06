@@ -59,9 +59,8 @@ moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-*(nothing pending — v1.8.0 shipped the repin command (portal #197), the extended
-Contract (portal #196), the runbook-executability lint (portal #181), and the shared
-anchors mechanism (portal #199))*
+*(nothing pending — v1.9.0 shipped the kit conformance suite, `synth-authoring
+conformance` (portal #198))*
 
 ## Release checklist
 
