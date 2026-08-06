@@ -145,6 +145,34 @@ def test_the_release_tag_and_the_signature_cover_the_merged_index(
     )
 
 
+def test_the_tag_is_checked_against_pyproject_before_any_build(workflow: dict) -> None:
+    """A tag whose pyproject `version` disagrees must fail before anything is pushed.
+
+    EV/Lender v0.4.0 and support v0.1.4 all published carrying the previous release's
+    `version` field — `pip show` inside those images reports the wrong version. The
+    guard only helps if every build waits for it, so pin the `needs` edge too.
+    """
+    verify = [
+        name
+        for name, job in workflow["jobs"].items()
+        if "pyproject.toml" in _text(job) and "GITHUB_REF_NAME" in _text(job)
+    ]
+    assert len(verify) == 1, "expected exactly one tag/pyproject version-check job"
+    build_jobs = [
+        job
+        for job in workflow["jobs"].values()
+        if job.get("strategy", {}).get("matrix", {}).get("include")
+    ]
+    assert build_jobs, "expected a per-architecture build matrix"
+    for job in build_jobs:
+        needs = job.get("needs")
+        needs = [needs] if isinstance(needs, str) else list(needs or [])
+        assert verify[0] in needs, (
+            "per-arch builds must wait for the version check, or a mismatched tag "
+            "still pushes per-arch manifests by digest"
+        )
+
+
 def test_signing_identity_stays_kit_publish_yml(workflow: dict) -> None:
     """#104's verification identity is `kit-publish.yml@refs/tags/v*`.
 

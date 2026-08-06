@@ -28,6 +28,13 @@ already-established kit release rhythm (a kit repo cuts a semver tag; see each k
 release notes). Building on every push would flood GHCR with untagged intermediate
 images and burn CI minutes for no reader of that image.
 
+The tag is also **checked against the kit's `pyproject.toml` `version`** before anything
+is built: a `verify-version` job fails the whole run when the two disagree. A mismatch
+would publish an image whose installed distribution reports the previous release's
+version — `pip show` inside it lies about what it is, which is how EV/Lender `v0.4.0`
+and support `v0.1.4` actually shipped. The release motion is therefore: bump `version`
+on `main`, tag that commit, push the tag.
+
 ### 3. Runner: GitHub-hosted, not self-hosted
 
 **Reversed by Spec E · E7b (#113, 2026-07-28).** #102 originally put this job on a
