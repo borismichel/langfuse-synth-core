@@ -1,0 +1,38 @@
+"""Per-run anchors — the state `synth seed` writes and every later reader trusts.
+
+A seed run resolves facts nobody else can reconstruct (the target instance, the resolved
+project, the volumes actually spooled). This kit records them in `.synth_state.json` via
+the core anchors mechanism, so `verify`, `script`, and the live surface can never drift
+from the seeded data. The rules — the file, its location (`SYNTH_STATE_DIR`, i.e. the
+spool volume), the read-only-mount transport into live surfaces, seed as the only writer
+— are the Contract's (`langfuse-synth-core` `CONTRACT.md` §"Per-run anchors (opt-in)").
+
+The IO (locate/save/load/exists) is core's `AnchorsIO`; the FIELDS below are this kit's
+territory — grow them with the story (example trace ids, prompt versions, headline
+figures), and the portal never parses them.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import ClassVar
+
+from langfuse_synth_core.anchors import AnchorsIO
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass
+class RunState(AnchorsIO):
+    """The anchors of one seeded run. Scaffolded starter fields — replace with the facts
+    YOUR demo's readers need to agree on."""
+
+    # Dev-checkout fallback; deployed containers always get SYNTH_STATE_DIR (the spool).
+    FALLBACK_STATE_DIR: ClassVar[Path] = REPO_ROOT / ".synth_spool"
+
+    base_url: str = ""
+    project_name: str = ""
+    target_traces: int = 0
+    seed: int = 0
+    spooled_events: int = 0
+    dry_run: bool = False

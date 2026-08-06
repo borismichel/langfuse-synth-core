@@ -234,10 +234,13 @@ state file. **Console-style companions may stay stateless by design** (the suppo
 console derives its scene from config + adapter and reads no run state); statelessness is
 a legitimate contract citizen, not a gap.
 
-**Mechanism.** The read/write plumbing (locate the state dir from `SYNTH_STATE_DIR`,
-load/save the file) ships **once, in this library** (portal #199) and the scaffold hands
-it to future kits; the anchor *fields* stay kit-owned. Until #199 lands, EV and Lender
-carry diverged kit-local copies — migration debt, not contract.
+**Mechanism.** The read/write plumbing ships **once, in this library** —
+`langfuse_synth_core.anchors` (portal #199): the canonical filename, the location
+resolved from `SYNTH_STATE_DIR` at call time, and the `AnchorsIO` mixin a kit's payload
+dataclass inherits `save`/`load`/`exists` from (`load` tolerates unknown keys, so an
+older state file survives a payload change). The anchor *fields* stay kit-owned. EV and
+Lender consume this mechanism (their formerly diverged kit-local copies are retired), and
+the scaffold hands it to future kits behind `synth-authoring new --anchors`.
 
 ---
 
@@ -369,10 +372,11 @@ A kit that deviates from this shape is carrying **migration debt, not exercising
 contract option**. The known debt (EV `v0.3.0` / Lender `v0.3.0`, recorded here so it is
 answerable from one place; **this list is descriptive, never normative**):
 
-- **Kit-local anchors/run-state modules.** `src/synth/state.py` exists twice (EV 72
-  lines, Lender 83) with a byte-duplicated plumbing half and diverged payload halves
-  (Lender's `load()` filters unknown keys; EV's crashes on them). Superseded by the core
-  mechanism when portal #199 lands.
+- **Kit-local anchors/run-state modules** — *retired by portal #199 on the kit mains*
+  (the shipped `v0.3.0` images predate the migration): each `src/synth/state.py` now
+  keeps only the kit-owned payload dataclass on `langfuse_synth_core.anchors.AnchorsIO`;
+  the byte-duplicated plumbing halves are deleted and Lender's tolerant `load()` became
+  the shared behavior.
 - **Lender writes run state from live containers.** `workbench/runner.py` and
   `certify/run.py` persist back into `.synth_state.json`, and `workbench/results.py`
   keeps a second run store under `.workbench/runs/` — both collide with the read-only

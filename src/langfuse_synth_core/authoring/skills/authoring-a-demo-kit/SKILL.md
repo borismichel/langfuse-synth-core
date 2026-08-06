@@ -61,7 +61,8 @@ the story and re-bless.
 ```bash
 synth-authoring new my-kit --dir ../kits          # kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion            # also emit the companion stub (Spec G)
-synth-authoring new my-kit --core-ref v1.7.0      # lib git tag the kit pins to
+synth-authoring new my-kit --anchors              # also emit per-run anchors wiring (#199)
+synth-authoring new my-kit --core-ref v1.8.0      # lib git tag the kit pins to
 ```
 
 This emits a **runnable-green walking skeleton**, not a blank template: the plumbing

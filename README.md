@@ -70,7 +70,7 @@ toolchain (namespaced `synth-authoring`, never `synth`, so it can't shadow a kit
 synth-authoring new my-kit                 # -> ./my-kit/
 synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
-synth-authoring new my-kit --core-ref v1.7.0   # lib git ref the kit pins to (a tag)
+synth-authoring new my-kit --core-ref v1.8.0   # lib git ref the kit pins to (a tag)
 
 # Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
 synth-authoring validate path/to/usecase.yaml

@@ -31,7 +31,7 @@ HEALTH_PATH = "/healthz"
 REQUIRES_SECRETS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY")
 
 
-def _placeholder_page() -> str:
+__ANCHORS_HELPER__def _placeholder_page() -> str:
     """The starter page, rendered through the shared Langfuse-styled shell (`live.theme`)."""
     body = (
         "<p class='eyebrow'>Companion surface</p>"
@@ -40,7 +40,7 @@ def _placeholder_page() -> str:
         "placeholder is served by the Companion Adapter — replace it with the demo's "
         "interactive surface. Your routes get ready Langfuse + LLM clients from the adapter; "
         "you never handle a raw secret.</p>"
-        f"<a class='back' href='{paths.local(HEALTH_PATH)}'>readiness &rarr;</a>"
+        f"<a class='back' href='{paths.local(HEALTH_PATH)}'>readiness &rarr;</a>"__ANCHORS_BODY__
     )
     return theme.page(body, title="__NAME__ · companion")
 
