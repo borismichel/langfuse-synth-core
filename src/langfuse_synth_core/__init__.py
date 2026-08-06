@@ -16,11 +16,11 @@ two gold-standard kits in the Ring 1 / Ring 2 migration (#31–#34).
 
 from importlib.metadata import version as _distribution_version
 
-from langfuse_synth_core import companion, derivation
+from langfuse_synth_core import anchors, companion, derivation
 
 # Derived from the installed distribution so it tracks `pyproject.toml` by construction
 # (#145 — the hardcoded pre-Ring-1 "0.0.0" drifted for five releases unnoticed).
 # `tests/test_runtime_import.py::test_version_matches_packaging_version` is the guard.
 __version__ = _distribution_version("langfuse-synth-core")
 
-__all__ = ["companion", "derivation", "__version__"]
+__all__ = ["anchors", "companion", "derivation", "__version__"]

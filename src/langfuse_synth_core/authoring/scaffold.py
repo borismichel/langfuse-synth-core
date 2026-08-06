@@ -27,6 +27,11 @@ File floor of the emitted kit:
   the kit CLI gains the ``synth companion`` verb, the pyproject pulls the core ``[companion]``
   web deps, and ``src/synth/companion/app.py`` is a minimal working Surface on the Companion
   Adapter (boots, binds, answers its health path). Without it the scaffold is unchanged.
+* **per-run anchors only on request** (portal #199): with ``--anchors`` the kit gains
+  ``src/synth/state.py`` — its anchors payload on the core ``AnchorsIO`` mechanism
+  (``CONTRACT.md`` §"Per-run anchors (opt-in)") — its ``seed`` writes the state file, and
+  a ``--companion`` surface reads it back from the spool mount. Without the flag the kit
+  is stateless (the contract's other legitimate citizen) and the scaffold is unchanged.
 
 As its final step the generator **blesses the initial golden** by running the emitted
 seed through the determinism golden gate under the deny-LLM egress block — so the freshly
@@ -55,7 +60,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 # workflow_call ref (#102) share this one pin. The author bumps it as the lib releases;
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
 # `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call.
-DEFAULT_CORE_REF = "v1.7.0"
+DEFAULT_CORE_REF = "v1.8.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted
@@ -92,6 +97,12 @@ COMPANION_FILES: tuple[tuple[str, str], ...] = (
     ("companion_app.py.tmpl", "src/synth/companion/app.py"),
 )
 
+# Emitted ONLY when `--anchors` is passed (portal #199): the kit's anchors payload on the
+# core `AnchorsIO` mechanism. The fields are the kit's territory; the IO is core's.
+ANCHORS_FILES: tuple[tuple[str, str], ...] = (
+    ("state.py.tmpl", "src/synth/state.py"),
+)
+
 # The live_components port + health path the emitted `--companion` manifest declares. The
 # health path is the Adapter's default and MUST differ from the surface's own `/` route (the
 # adapter mounts readiness at the health path). The emitted app.py mirrors these constants —
@@ -120,6 +131,60 @@ _COMPANION_CLI_DISPATCH = (
     "\n"
     "\n        return companion_main(_argv[1:])"
 )
+
+
+# Injected into `seed.py` under `--anchors` (the `__ANCHORS_IMPORT__` / `__ANCHORS_WRITE__`
+# tokens; both collapse to "" in the base scaffold, keeping it byte-identical to today).
+# Seed is the anchors' ONLY writer (CONTRACT.md §"Per-run anchors (opt-in)"); the state is
+# written last, after a successful run, so the file always describes completed work. The
+# `"" if dry_run else project_name` guard matters: the guardrail that binds `project_name`
+# only runs on live seeds, and the conditional's short-circuit keeps dry runs (incl. the
+# golden-blessing freeze) off the unbound name.
+_ANCHORS_SEED_IMPORT = "\nfrom .state import RunState"
+_ANCHORS_SEED_WRITE = (
+    "\n    # Per-run anchors: record the facts this run resolved (CONTRACT.md §\"Per-run"
+    "\n    # anchors (opt-in)\"). Seed is the only writer; verify/script/the live surface read"
+    "\n    # the file back from the spool volume (SYNTH_STATE_DIR), so no reader can drift"
+    "\n    # from the seeded data. Grow RunState's fields with the story."
+    "\n    RunState("
+    "\n        base_url=cfg.target.base_url,"
+    "\n        project_name=\"\" if dry_run else project_name,"
+    "\n        target_traces=cfg.generation.target_traces,"
+    "\n        seed=cfg.generation.seed,"
+    "\n        spooled_events=ingestor.spooled,"
+    "\n        dry_run=dry_run,"
+    "\n    ).save()"
+    "\n    log(f\"· anchors -> {RunState.state_path()}\")"
+    "\n"
+)
+
+# Injected into `companion_app.py` under `--anchors` + `--companion` (the
+# `__ANCHORS_HELPER__` / `__ANCHORS_BODY__` tokens): the surface reads the anchors back —
+# per the Contract via the read-only spool mount, never writing them — and shows a fact
+# only the seeded run could have produced. `RunState` is imported function-locally for the
+# same reason `main` imports `synth.config` there: the module stays importable by file
+# path (the drift tests) without the kit package on `sys.path`.
+_ANCHORS_PAGE_HELPER = (
+    "def _anchors_line() -> str:\n"
+    "    \"\"\"The run-state proof: a fact only `synth seed` could have written, read back\n"
+    "    from the spool mount (read-only in live surfaces — this page never writes it).\"\"\"\n"
+    "    from synth.state import RunState\n"
+    "\n"
+    "    if not RunState.exists():\n"
+    "        return (\n"
+    "            \"<p class='sub'>No run anchors yet — <code>synth seed</code> writes \"\n"
+    "            \"<code>.synth_state.json</code> to the spool; this page reads it there.</p>\"\n"
+    "        )\n"
+    "    state = RunState.load()\n"
+    "    return (\n"
+    "        f\"<p class='sub'>Anchored to the seeded run: <code>{state.spooled_events}</code> \"\n"
+    "        f\"events, <code>{state.target_traces}</code> traces against \"\n"
+    "        f\"<code>{state.base_url}</code>.</p>\"\n"
+    "    )\n"
+    "\n"
+    "\n"
+)
+_ANCHORS_PAGE_BODY = "\n        + _anchors_line()"
 
 
 class ScaffoldError(ValueError):
@@ -272,6 +337,7 @@ def scaffold_kit(
     dest: str | Path,
     *,
     with_companion: bool = False,
+    with_anchors: bool = False,
     core_ref: str = DEFAULT_CORE_REF,
     force: bool = False,
 ) -> ScaffoldResult:
@@ -305,6 +371,12 @@ def scaffold_kit(
         # injects the `synth companion` verb into the kit CLI's `main`.
         "__CORE_EXTRA__": "[companion]" if with_companion else "",
         "__COMPANION_DISPATCH__": _COMPANION_CLI_DISPATCH if with_companion else "",
+        # Anchors placeholders (portal #199): empty without `--anchors`, so the base seed
+        # (and a plain `--companion` surface) stay byte-identical to today.
+        "__ANCHORS_IMPORT__": _ANCHORS_SEED_IMPORT if with_anchors else "",
+        "__ANCHORS_WRITE__": _ANCHORS_SEED_WRITE if with_anchors else "",
+        "__ANCHORS_HELPER__": _ANCHORS_PAGE_HELPER if with_anchors else "",
+        "__ANCHORS_BODY__": _ANCHORS_PAGE_BODY if with_anchors else "",
     }
 
     result = ScaffoldResult(slug=slug, dest=dest)
@@ -312,6 +384,8 @@ def scaffold_kit(
     files = list(BASE_FILES)
     if with_companion:
         files += list(COMPANION_FILES)
+    if with_anchors:
+        files += list(ANCHORS_FILES)
     for template_name, rel in files:
         _write(dest / rel, _render(_template(template_name), ctx))
         result.files.append(rel)

@@ -13,7 +13,7 @@ from pathlib import Path
 from langfuse_synth_core.seed.ingest import Ingestor, assert_demo_project
 
 from .config import Config
-from .materialize import build_events
+from .materialize import build_events__ANCHORS_IMPORT__
 
 DEFAULT_SPOOL = Path(".synth_spool") / "events.ndjson"
 
@@ -44,4 +44,4 @@ def run_seed(
     if do_import and not dry_run:
         sent = ingestor.import_spool(path=spool_path, log=log)
         log(f"✓ imported {sent} events")
-    return spool_path
+__ANCHORS_WRITE__    return spool_path

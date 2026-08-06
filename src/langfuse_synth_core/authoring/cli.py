@@ -111,6 +111,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
             args.slug,
             dest,
             with_companion=args.companion,
+            with_anchors=args.anchors,
             core_ref=args.core_ref,
             force=args.force,
         )
@@ -138,6 +139,12 @@ def _add_new(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--companion", action="store_true",
         help="also emit the companion-app stub (full companion authoring is Spec G)",
+    )
+    parser.add_argument(
+        "--anchors", action="store_true",
+        help="also emit the per-run anchors wiring (portal #199): seed writes "
+        ".synth_state.json via the core anchors mechanism; a --companion surface reads it "
+        "back. Without it the kit is stateless.",
     )
     parser.add_argument(
         "--core-ref", default=DEFAULT_CORE_REF,

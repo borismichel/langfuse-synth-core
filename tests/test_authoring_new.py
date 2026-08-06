@@ -564,3 +564,136 @@ def test_cli_new_scaffolds_and_returns_zero(tmp_path, capsys):
     assert rc == 0
     assert (tmp_path / "cli-kit" / "usecase.yaml").is_file()
     assert "scaffolded kit" in capsys.readouterr().out
+
+# --- AC (portal #199): `--anchors` emits the per-run anchors wiring, opt-in --------------
+# The Contract's mechanism (CONTRACT.md §"Per-run anchors (opt-in)") shipped once in core:
+# with `--anchors` the kit gains a payload dataclass on core's AnchorsIO, its seed writes
+# the state file, and a `--companion` surface reads it back. Without the flag the kit is
+# stateless and the scaffold is byte-identical to today.
+
+
+@pytest.fixture(scope="module")
+def anchors_kit(tmp_path_factory):
+    """Scaffold one `--anchors --companion` kit once (the freeze subprocess is slow)."""
+    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+
+    dest = tmp_path_factory.mktemp("kits") / "anchored-demo"
+    return scaffold_kit("anchored-demo", dest, with_companion=True, with_anchors=True)
+
+
+def test_anchors_only_on_request(kit):
+    """Without `--anchors` there is no state module and the seed never touches run state —
+    the stateless kit the Contract calls a legitimate citizen."""
+    assert not (kit.dest / "src" / "synth" / "state.py").exists()
+    assert "RunState" not in (kit.dest / "src" / "synth" / "seed.py").read_text()
+
+
+def test_base_scaffold_seed_is_byte_identical_to_the_template(kit):
+    """The anchors placeholders collapse to nothing without the flag — today's seed.py is
+    untouched (the same promise the companion tokens make for cli.py/pyproject)."""
+    from importlib import resources
+
+    text = resources.files("langfuse_synth_core.authoring").joinpath(
+        "scaffold_files", "seed.py.tmpl"
+    ).read_text(encoding="utf-8")
+    for key in ("__ANCHORS_IMPORT__", "__ANCHORS_WRITE__"):
+        text = text.replace(key, "")
+    assert (kit.dest / "src" / "synth" / "seed.py").read_text() == text
+
+
+def test_plain_companion_surface_has_no_anchors_leak(companion_kit):
+    """`--companion` without `--anchors` stays a stateless surface."""
+    app_src = (companion_kit.dest / "src" / "synth" / "companion" / "app.py").read_text()
+    assert "RunState" not in app_src
+    assert "_anchors_line" not in app_src
+
+
+def test_anchors_state_module_rides_the_core_mechanism(anchors_kit, load_kit_module):
+    """The emitted state.py is a payload on core's AnchorsIO — the IO (filename, env
+    resolution, save/load/exists) is inherited, never re-implemented kit-side."""
+    src = (anchors_kit.dest / "src" / "synth" / "state.py").read_text()
+    assert "from langfuse_synth_core.anchors import AnchorsIO" in src
+    # No kit-local IO twin: the diverged-copies debt this flag retires (portal #199).
+    for reimplementation in ("def save", "def load", "def exists", "os.environ", "import json"):
+        assert reimplementation not in src
+
+    state_mod = load_kit_module(anchors_kit.dest / "src" / "synth" / "state.py", "scaffold_state")
+    from langfuse_synth_core.anchors import STATE_FILENAME, AnchorsIO
+
+    assert issubclass(state_mod.RunState, AnchorsIO)
+    assert state_mod.RunState.FALLBACK_STATE_DIR == anchors_kit.dest / ".synth_spool"
+    assert state_mod.RunState.state_path().endswith(STATE_FILENAME)
+
+
+def test_anchors_seed_writes_the_state_file(anchors_kit, monkeypatch, tmp_path):
+    """Drive the emitted seed (dry-run, offline) with SYNTH_STATE_DIR set — the anchors
+    land there and load back through the emitted RunState with the run's facts."""
+    import importlib
+    import sys
+
+    monkeypatch.setenv("SYNTH_STATE_DIR", str(tmp_path / "spool"))
+    monkeypatch.syspath_prepend(str(anchors_kit.dest / "src"))
+    for name in [m for m in list(sys.modules) if m == "synth" or m.startswith("synth.")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    seed_mod = importlib.import_module("synth.seed")
+    config_mod = importlib.import_module("synth.config")
+    state_mod = importlib.import_module("synth.state")
+
+    cfg = config_mod.load_config(str(anchors_kit.dest / "config" / "demo.yaml"))
+    seed_mod.run_seed(
+        cfg, dry_run=True, do_import=False,
+        spool_path=tmp_path / "events.ndjson", log=lambda _m: None,
+    )
+
+    assert state_mod.RunState.exists()
+    state = state_mod.RunState.load()
+    assert state.dry_run is True
+    assert state.spooled_events > 0
+    assert state.target_traces == cfg.generation.target_traces
+    assert state.base_url == cfg.target.base_url
+
+
+def test_anchors_blessing_wrote_state_into_the_gitignored_spool(anchors_kit):
+    """The golden-blessing freeze already ran the emitted seed once (no SYNTH_STATE_DIR),
+    so the anchors landed in the kit's dev fallback — `.synth_spool/`, which the emitted
+    .gitignore keeps out of the repo."""
+    assert (anchors_kit.dest / ".synth_spool" / ".synth_state.json").is_file()
+    assert ".synth_spool/" in (anchors_kit.dest / ".gitignore").read_text()
+
+
+def test_anchors_kit_still_passes_the_golden_gate(anchors_kit):
+    """Writing anchors did not move the deterministic pool: the blessed golden re-proves
+    byte-identical under the deny-LLM egress block."""
+    from langfuse_synth_core.authoring.golden import GoldenSpec, assert_golden
+    from langfuse_synth_core.authoring.scaffold import GOLDEN_TARGET_TRACES
+
+    assert_golden(GoldenSpec(
+        seed_ref="golden_seed:seed",
+        target_traces=GOLDEN_TARGET_TRACES,
+        golden_path=anchors_kit.golden_path,
+        params={},
+        search_paths=(str(anchors_kit.dest / "tests"), str(anchors_kit.dest / "src")),
+    ))
+
+
+def test_anchors_companion_page_reads_the_state_back(anchors_kit, monkeypatch, tmp_path):
+    """The `--anchors --companion` surface renders a fact only the seeded run could have
+    written — read via the emitted RunState (the read-only spool mount in deployment)."""
+    import importlib
+    import sys
+
+    monkeypatch.setenv("SYNTH_STATE_DIR", str(tmp_path))
+    monkeypatch.syspath_prepend(str(anchors_kit.dest / "src"))
+    for name in [m for m in list(sys.modules) if m == "synth" or m.startswith("synth.")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    app_mod = importlib.import_module("synth.companion.app")
+    state_mod = importlib.import_module("synth.state")
+
+    # Before any seed: the page says so instead of crashing.
+    assert "No run anchors yet" in app_mod._anchors_line()
+
+    state_mod.RunState(
+        base_url="https://cloud.langfuse.com", target_traces=24, spooled_events=96,
+    ).save()
+    line = app_mod._anchors_line()
+    assert "96" in line and "24" in line and "https://cloud.langfuse.com" in line
