@@ -25,8 +25,10 @@ RUN pip install --no-cache-dir .
 
 # COPY lands root-owned, but the container runs as uid 10001 (JOB_RUN_USER). Create and
 # chown the two runtime write paths — the spool and the artifact dir the portal collects
-# from (CONTRACT.md) — or `seed` dies on open_spool() at the first deployment.
+# from (CONTRACT.md §"Filesystem conventions") — or `seed` dies on open_spool() at the
+# first deployment.
 RUN mkdir -p /app/out /app/.synth_spool && chown -R synth:synth /app
 
 USER synth
-# The portal supplies `synth <verb> --config {config}` at container-create time.
+# No default CMD: the portal supplies the command at container-create time
+# (CONTRACT.md §"The container invocation").

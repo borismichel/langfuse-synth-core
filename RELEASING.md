@@ -63,6 +63,15 @@ Whoever cuts the next version ships these; delete each entry when its tag lands.
   step 3's manual pin dance is now `synth-authoring repin vX.Y.Z` run from a kit
   checkout. Authoring-tooling only — no runtime behavior moved, no kit golden can shift;
   existing kits pick it up on their next `[authoring]` pin bump.
+- **The portal↔kit contract document** (portal #196): `CONTRACT.md` extended into the
+  single source of truth for the container invocation, the environment and filesystem
+  contracts, per-run anchors (opt-in), the live-surface rules, and the v2-target /
+  migration-debt declaration; scaffold templates now cite it. Docs + template comments
+  only — no runtime code change; the next tag simply carries the extended document (the
+  Contract is versioned with the release). Same chain: move the portal's contract pin
+  (`api/pyproject.toml`, read by `api/app/contract_pin.py` — still at v1.1.0) to that
+  tag, so the version the portal enforces actually contains the document its docstrings
+  cite.
 
 ## Release checklist
 
