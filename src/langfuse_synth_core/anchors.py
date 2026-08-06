@@ -25,7 +25,7 @@ import json
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Self
 
 # The canonical state file, beside `events.ndjson` on the spool volume — the only
 # cross-container surface (the artifact dir is container-local and would strand it).
@@ -89,7 +89,7 @@ class AnchorsIO:
         p.write_text(json.dumps(asdict(self), indent=2))
 
     @classmethod
-    def load(cls, path: str | None = None):
+    def load(cls, path: str | None = None) -> Self:
         data = json.loads(Path(path or cls.state_path()).read_text())
         known = set(cls.__dataclass_fields__)  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in data.items() if k in known})
