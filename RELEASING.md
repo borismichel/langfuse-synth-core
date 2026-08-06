@@ -52,15 +52,18 @@ half-landed re-pin the table above warns about. The golden re-proof in step 4 is
 here: it is what proves an authoring change did not move the deterministic pool.
 
 **v1.5.0 (portal #185/#183) was the first release cut this way**: all three kits moved
-their workflow pin to `@v1.5.0` and stayed on `@v1.4.0` for runtime. A release that
-moves ANY runtime code takes the full step 3 — all three pins, every kit.
+their workflow pin to `@v1.5.0` and stayed on `@v1.4.0` for runtime. v1.10.0 (the
+`verify-version` guard: a kit tag whose `pyproject.toml` `version` disagrees now fails
+the publish before anything is built — the regression that shipped EV/Lender v0.4.0 and
+support v0.1.4 reporting the previous release's version) was cut the same way. A release
+that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 ## Pending for the next release (unreleased on `main`)
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-*(nothing pending — v1.9.0 shipped the kit conformance suite, `synth-authoring
-conformance` (portal #198))*
+*(nothing pending — v1.10.0 shipped the `verify-version` tag↔pyproject guard in
+`kit-publish.yml`, a CI-only release)*
 
 ## Release checklist
 

@@ -35,10 +35,32 @@ permissions:
   id-token: write
 
 jobs:
+  # Release hygiene: the tag IS the version. A tag whose `pyproject.toml` `version`
+  # disagrees ships an image whose installed distribution reports the wrong version —
+  # `pip show` inside it lies about what it is (this bit EV/Lender v0.4.0 and support
+  # v0.1.4, all published carrying the previous release's version field). Fail fast
+  # here, before anything is built or pushed; the fix is to bump `version` on the kit's
+  # `main` and cut the next tag from that.
+  verify-version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail unless pyproject.toml version matches the tag
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pyproject_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "${pyproject_version}" != "${tag_version}" ]; then
+            echo "::error file=pyproject.toml::Tag ${GITHUB_REF_NAME} pushed, but pyproject.toml says version = \"${pyproject_version}\". Bump the version on main first, then tag that commit — nothing was built or pushed."
+            exit 1
+          fi
+          echo "pyproject.toml version ${pyproject_version} matches tag ${GITHUB_REF_NAME}."
+
   build:
     # One job per architecture, each on a runner of that architecture — no emulation.
     # `fail-fast: false` so a flake on one arch still leaves the other's log readable;
     # the merge job needs both to succeed either way.
+    needs: verify-version
     strategy:
       fail-fast: false
       matrix:
