@@ -12,6 +12,9 @@ health, shutdown, secret intake, and the ready Langfuse + LLM clients:
   * `main` is wired to the kit's `synth companion` verb (src/synth/cli.py) and declared under
     `live_components` in usecase.yaml; it parses the fixed `--config/--host/--port` invocation
     with the Adapter's `parse_invocation` helper (never a pipeline `--set`).
+
+What this surface signs up to — env, health/readiness, links, run-state access — is stated
+once in CONTRACT.md §"The live surface"; this module only records the kit-side wiring.
 """
 from __future__ import annotations
 
@@ -22,7 +25,8 @@ from langfuse_synth_core.live import paths, theme
 
 # Kept in step with the `live_components` entry in usecase.yaml (the scaffold pins them
 # together). HEALTH_PATH is the Adapter's readiness route and MUST differ from `/` (the
-# surface's own page), since the Adapter mounts readiness at the health path.
+# surface's own page), since the Adapter mounts readiness at the health path
+# (CONTRACT.md §"The live surface").
 HEALTH_PATH = "/healthz"
 REQUIRES_SECRETS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY")
 

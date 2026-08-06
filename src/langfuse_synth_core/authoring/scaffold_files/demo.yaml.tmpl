@@ -1,9 +1,10 @@
 # Base kit config. The portal writes this as `synth <verb> --config config/demo.yaml`
-# and scales volume via `--set generation.target_traces=N` on top (no YAML templating).
+# and scales volume via `--set generation.target_traces=N` on top (no YAML templating —
+# CONTRACT.md §"The container invocation").
 target:
-  # The Langfuse this config points at by default. `LANGFUSE_BASE_URL` overrides it, which is
-  # how the portal retargets this one shipped config per deployment — so leaving loopback here
-  # is fine and deliberate (portal #187).
+  # The Langfuse this config points at by default. `LANGFUSE_BASE_URL` overrides it
+  # (CONTRACT.md §"Retargeting") — so leaving loopback here is fine and deliberate
+  # (portal #187).
   host: "http://localhost:3000"
   project_hint: "demo"
 generation:

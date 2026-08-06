@@ -43,6 +43,10 @@ makes a billable LLM call (it only *constructs* the client) and never leaks secr
 The web-server deps (FastAPI/uvicorn) ride the core ``[companion]`` extra, imported lazily
 inside :meth:`serve`/:meth:`mount_health` — this module imports on a bare runtime install,
 matching how core lazy-imports ``langfuse``/``anthropic``/``openai``.
+
+What a live surface signs up to overall — invocation, env, health/readiness, links, and
+run-state access — is stated once in ``CONTRACT.md`` §"The live surface"; this module is
+the adapter half of that section.
 """
 from __future__ import annotations
 
