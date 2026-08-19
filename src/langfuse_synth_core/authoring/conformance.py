@@ -6,7 +6,7 @@ don't document it), generalized. Every finding cites the ``CONTRACT.md`` section
 enforces, so a red check is a pointer into the one authoritative document rather than a
 rule restated in this tool's own words (portal #196).
 
-The five check groups, and where each rule lives:
+The six check groups, and where each rule lives:
 
 * **Manifest declarations** — the live surface declares what the portal relies on
   (ports, health paths; the readiness route must differ from ``/``) and the command
@@ -24,6 +24,9 @@ The five check groups, and where each rule lives:
   ``SYNTH_STATE_DIR`` at *call* time and a fabricated payload really writes/loads there.
   A stateless kit skips these with a note — statelessness is a legitimate contract
   citizen — §"Per-run anchors (opt-in)".
+* **The observation-type vocabulary** (static) — every observation type the kit names is
+  one of the ten Langfuse recognises. The OTLP wire accepts an unknown value and silently
+  files it as something else, where batch ingestion answered ``400`` — §"The spool".
 * **Legacy Langfuse surfaces** (static, *advisory*) — whether the kit still reaches an API
   Langfuse removes on 2026-11-16: a deprecated endpoint named in its sources, the
   ``meta.totalItems`` counting technique beside one, and a Spool still written on the batch
@@ -45,6 +48,7 @@ the companion web deps and degrade to a printed skip without them.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import dataclasses
 import importlib
@@ -57,7 +61,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import yaml
 from jsonschema import Draft7Validator
@@ -65,6 +69,10 @@ from jsonschema import Draft7Validator
 from langfuse_synth_core.anchors import STATE_DIR_ENV, STATE_FILENAME, AnchorsIO
 from langfuse_synth_core.authoring.validate import load_schema, validate_doc
 from langfuse_synth_core.companion.adapter import parse_invocation
+from langfuse_synth_core.observation_types import (
+    OBSERVATION_TYPES,
+    unknown_observation_type,
+)
 
 # The target-shape import points (CONTRACT.md §"The target shape, and migration debt"):
 # what `synth-authoring new` emits and where the suite looks by default. A kit that keeps
@@ -592,34 +600,55 @@ _TOTAL_ITEMS = re.compile(r"totalItems")
 
 
 def _kit_sources(kit_dir: Path) -> list[Path]:
-    """The kit's shipped Python sources — what a deployed container actually runs.
+    """The kit's Python sources — what a deployed container runs, plus whatever sits beside
+    it in a kit that keeps its package outside ``src/``.
 
-    ``src/`` is the target shape and the whole checkout is the fallback for a kit that
-    keeps its package elsewhere: over-reading (a tool, a test) costs a nudge nobody has to
-    act on, where missing the package would report a legacy kit clean.
+    ``src/`` is the target shape and the whole checkout is the fallback: over-reading (a
+    tool, a test) costs a nudge nobody has to act on, where missing the package would report
+    a legacy kit clean. **That trade is the advisory channel's**, and it does not carry to a
+    check that blocks — see :func:`_shipped_sources`.
     """
     src = kit_dir / "src"
     root = src if src.is_dir() else kit_dir
     return sorted(path for path in root.rglob("*.py") if ".venv" not in path.parts)
 
 
+def _shipped_sources(kit_dir: Path) -> list[Path]:
+    """:func:`_kit_sources` without the kit's tests — for the checks that block.
+
+    Over-reading is cheap for an advisory and expensive for a finding: a test that names a
+    deliberately wrong value (this suite's own tests do exactly that) would redden a kit's
+    CI over a line no container ever runs. A kit on the target shape is unaffected either
+    way — its tests already sit outside ``src/``.
+    """
+    return [
+        path for path in _kit_sources(kit_dir)
+        if "tests" not in path.parts and not path.name.startswith("test_")
+    ]
+
+
+def _readable(paths: list[Path], kit_dir: Path) -> list[tuple[str, str]]:
+    """``(kit-relative label, text)`` for each source that can actually be read."""
+    out: list[tuple[str, str]] = []
+    for path in paths:
+        try:
+            out.append((path.relative_to(kit_dir).as_posix(), path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return out
 def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
     """Advisory lines for every legacy Langfuse surface the kit still reaches: a deprecated
     endpoint in its sources, the ``meta.totalItems`` counting technique beside one, and a
     Spool still written on the batch path. Empty for a v4-native kit."""
     kit_dir = Path(kit_dir)
-    sources = _kit_sources(kit_dir)
+    sources = _readable(_kit_sources(kit_dir), kit_dir)
     if not sources:
         return []
 
     advisories: list[str] = []
     pinned_otlp = False
-    for path in sources:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
-        label = path.relative_to(kit_dir).as_posix()
+    for label, text in sources:
+        lines = text.splitlines()
         hits: list[tuple[int, str]] = []
         totals: list[int] = []
         for lineno, line in enumerate(lines, start=1):
@@ -660,6 +689,111 @@ def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
             f"(2026-11-16); core's docs/WRITE_PATHS.md carries the cutover ({_CITE_SPOOL})"
         )
     return advisories
+
+
+# --------------------------------------------------------------------------------------
+# The observation-type vocabulary (static, blocking) — portal #217
+# --------------------------------------------------------------------------------------
+# Batch ingestion accepted three observation types and rejected the rest with a `400`. The
+# OTLP wire that replaces it accepts anything: an unrecognised `langfuse.observation.type`
+# is filed as a SPAN, or as a GENERATION when the span carries a model, with nothing
+# reported. So a typo'd tool step that names a model lands in cost and usage views and the
+# demo tells a different story than its author wrote.
+#
+# This restores the rejection at authoring time, and it BLOCKS — unlike the legacy-endpoint
+# group above. That is the distinction: a deprecated endpoint is migration debt the whole
+# fleet is working through, where a type outside the vocabulary is a defect in this kit,
+# fixable in the same edit that surfaces it. The gold kits pass it today.
+#
+# Its limit, stated so it is not mistaken for an execution proof: this reads literals in the
+# kit's *sources*. A type assembled at runtime, or read from data, is invisible here — those
+# are caught at run time by `observation_types.checked_observation_type`, which the span
+# builder and the live seam both run. The two layers cover each other; neither is redundant.
+
+#: The two keywords a kit names an observation type under, and they are not read alike.
+#: ``obs_type`` is core's event-builder keyword: core lowercases it for the wire, so a kit's
+#: uppercase (the batch enum's spelling) is correct there. ``as_type`` is the Langfuse SDK's,
+#: on the live seam — the SDK writes it verbatim, so ``AGENT`` really does land as a SPAN and
+#: case is part of what is checked.
+_NORMALISED_KEYWORD = "obs_type"
+_VERBATIM_KEYWORD = "as_type"
+_TYPE_KEYWORDS = (_NORMALISED_KEYWORD, _VERBATIM_KEYWORD)
+
+
+def _defaults(args: ast.arguments) -> Iterator[tuple[str, ast.expr]]:
+    """``(param_name, default_node)`` for every parameter of ``args`` that has a default."""
+    positional = args.posonlyargs + args.args
+    for arg, default in zip(positional[len(positional) - len(args.defaults):], args.defaults):
+        yield arg.arg, default
+    for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+        if default is not None:
+            yield arg.arg, default
+
+
+def _named_types(source: str) -> list[tuple[int, str, str]]:
+    """``(lineno, keyword, literal)`` for every observation type this source names outright.
+
+    Three places a kit spells one: the keyword at a call, a helper's default for it, and a
+    local assigned before being passed through (Lender's trace builders are that shape).
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []  # a kit that does not parse fails its own gates long before this one
+
+    sites: list[tuple[int, str, str]] = []
+
+    def record(keyword: str, node: ast.expr | None) -> None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            sites.append((node.lineno, keyword, node.value))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg in _TYPE_KEYWORDS:
+                    record(keyword.arg, keyword.value)
+        elif isinstance(node, ast.arguments):
+            for name, default in _defaults(node):
+                if name in _TYPE_KEYWORDS:
+                    record(name, default)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in _TYPE_KEYWORDS:
+                    record(target.id, node.value)
+    return sorted(set(sites))
+
+
+def observation_type_findings(kit_dir: str | Path) -> tuple[list[str], list[str]]:
+    """Findings for every observation type the kit names that Langfuse does not recognise.
+
+    The refusal is :func:`observation_types.unknown_observation_type`'s, verbatim — this
+    adds only where the value was found and, for the SDK keyword, that nothing will
+    lowercase it.
+    """
+    kit_dir = Path(kit_dir)
+    findings: list[str] = []
+    checked = 0
+    for label, source in _readable(_shipped_sources(kit_dir), kit_dir):
+        for lineno, keyword, literal in _named_types(source):
+            checked += 1
+            written = literal.lower() if keyword == _NORMALISED_KEYWORD else literal
+            if written in OBSERVATION_TYPES:
+                continue
+            verbatim = "" if keyword == _NORMALISED_KEYWORD else (
+                f" `{_VERBATIM_KEYWORD}` reaches Langfuse through the SDK exactly as "
+                f"written, so nothing lowercases this one for you."
+            )
+            findings.append(
+                f"at {label}:{lineno}: {unknown_observation_type(literal)}.{verbatim} "
+                f"({_CITE_SPOOL})"
+            )
+    notes = [] if checked else [
+        "no observation type is named outright in the kit's sources — nothing for the "
+        "vocabulary check to read, so it claims nothing (a kit of spans, generations and "
+        "events names none; a type assembled at runtime is caught at seed time instead)"
+    ]
+    return findings, notes
 
 
 # --------------------------------------------------------------------------------------
@@ -770,6 +904,14 @@ def run_conformance(
                 report.passed.append(
                     "anchors write where the state-dir env points, resolved at call time"
                 )
+
+    obs_findings, obs_notes = observation_type_findings(kit_dir)
+    report.findings.extend(obs_findings)
+    report.notes.extend(obs_notes)
+    if not (obs_findings or obs_notes):
+        report.passed.append(
+            "every observation type the kit names is one Langfuse recognises"
+        )
 
     report.advisories.extend(legacy_langfuse_advisories(kit_dir))
     if not report.advisories:

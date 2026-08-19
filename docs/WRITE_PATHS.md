@@ -45,6 +45,31 @@ Verified against a real Langfuse v4 Cloud project on 2026-08-19: a 21-day-backda
 read back with its timestamp intact to the millisecond, producer ids verbatim, hierarchy as
 parent span context, and model / usage / cost / prompt-link on the generation.
 
+## The observation-type vocabulary
+
+`langfuse.observation.type` carries one of ten values — `span`, `generation`, `event`,
+`agent`, `tool`, `chain`, `retriever`, `embedding`, `evaluator`, `guardrail`. Langfuse's own
+docs disagreed about this set (the observation-types page listed ten, the OTEL mapping table
+three), so it was settled by posting to a real Langfuse Cloud project on 2026-08-19:
+
+| Sent as | Lands as |
+| --- | --- |
+| `agent` | `AGENT` |
+| `AGENT` — uppercase | `SPAN` |
+| `genration` — a typo | `SPAN` |
+| an unknown value, on a span carrying a model | `GENERATION` |
+
+Values are lowercase and case-sensitive, and **nothing is rejected**: the last two rows are
+silent, and the last one is damaging — a mistyped step that names a model is ingested as a
+generation, so it lands in cost and usage views and changes the story the demo tells.
+
+Batch ingestion accepted only `SPAN | GENERATION | EVENT` and answered `400` on anything
+else. That rejection was a safety net the OTLP wire removes, so core replaces it rather than
+inheriting the gap (portal #217) — `CONTRACT.md` §"The spool" carries the rule and where it
+is enforced. The vocabulary lives in `langfuse_synth_core.observation_types`, above both
+seams, because both put a value on the same attribute: this one through the span builder, the
+live one through the SDK's `as_type`. The table above is what the rule was measured against.
+
 ## What flipping a kit costs
 
 The OTLP path mints one root observation per trace, so `count_spool`'s `observations` term —

@@ -10,7 +10,7 @@ reference draws the line so you know, at every decision, which skill answers.
 | Owner | **This skill** + the validator | The **`langfuse` skill** |
 | Nature | Mechanical, red/green | Judgment, docs-driven |
 | Checked by | `synth-authoring validate`, the determinism golden gate | Nothing automatic — it's modelling taste |
-| Examples | Is `seed`+`verify` present? Is the manifest schema-valid? Is there a `render: markdown` artifact? Is the pool byte-identical and model-free? | *Which* observation type is this step? *Which* evaluator/score fits? What trace structure reads well in the Langfuse UI? |
+| Examples | Is `seed`+`verify` present? Is the manifest schema-valid? Is there a `render: markdown` artifact? Is the pool byte-identical and model-free? Is every observation type one of the ten Langfuse recognises? | *Which* observation type is this step? *Which* evaluator/score fits? What trace structure reads well in the Langfuse UI? |
 
 If a question has a yes/no answer a tool can compute, it's Contract — stay here. If it needs
 knowledge of how Langfuse models the world, it's craft — **ask the `langfuse` skill, which
@@ -18,10 +18,11 @@ fetches current docs rather than reasoning from memory** (Langfuse changes often
 
 ## Hand off to the `langfuse` skill for these
 
-- **Observation type.** Is a step a `generation` (an LLM call — carries model, tokens, cost),
-  a `span` (a unit of work — retrieval, tool call, routing), an `event` (a point-in-time
-  marker), or the generic `observation`? The library gives you a builder for each
-  (`generation_event`, `span_event`, `event_event`, `observation_event` from
+- **Which observation type a step is.** A `generation` (an LLM call — carries model, tokens,
+  cost)? A `span` (a unit of work)? An `event` (a point-in-time marker)? Or one of the
+  agent-graph types — `agent`, `tool`, `chain`, `retriever`, `embedding`, `evaluator`,
+  `guardrail`? The library gives you a builder for each (`generation_event`, `span_event`,
+  `event_event`, and `observation_event` for the typed rest, from
   `langfuse_synth_core.seed.events`); *which* one models your scenario truthfully is craft.
 - **Evaluator / score design.** Which evaluator type (LLM-as-judge, heuristic, human
   annotation), what score `name`s, what `data_type` (NUMERIC / CATEGORICAL / BOOLEAN), and
@@ -41,6 +42,11 @@ fetches current docs rather than reasoning from memory** (Langfuse changes often
   author-time-fixture escape hatch.
 - **The manifest contract.** `seed`+`verify` present, reserved-verb semantics, the canonical
   `generation.target_traces` knob, ≥1 `render: markdown` artifact — the validator owns these.
+- **The observation-type vocabulary.** *Which* of the ten a step is, is craft — that there
+  are exactly ten, and what a value outside them silently does, is red/green, so core
+  refuses one rather than advising about it. `CONTRACT.md` §"The spool" holds the rule and
+  the orchestrator skill's Phase 2 states it where you meet it; don't restate it a third
+  time here.
 - **The library seam.** The kit composes the trace tree from library primitives; it does not
   reimplement event emission, backdating, ingest, or the read client. See `docs/SEAM.md`.
 - **The wire.** Which transport the Spool is written on (OTLP under Langfuse v4) and which

@@ -53,6 +53,8 @@ import os
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Sequence
 
+from ..observation_types import checked_observation_type
+
 
 class LiveEmitter:
     """A wall-clock emitter bound to one deployment's Langfuse connection."""
@@ -188,9 +190,16 @@ class LiveTrace:
 
     @contextmanager
     def observation(self, name: str, *, as_type: str = "span", **fields: Any) -> Iterator[Any]:
-        """Nest an observation of any v4 type under the current one."""
+        """Nest an observation of any v4 type under the current one.
+
+        ``as_type`` reaches Langfuse exactly as written — the SDK does not normalise it and
+        Langfuse does not refuse it, so an unrecognised value (``AGENT`` included) is
+        silently shown as something else. Checked here for that reason (portal #217); the
+        backdated seam takes the same vocabulary through a case-forgiving door.
+        """
         with self._root.start_as_current_observation(
-                name=name, as_type=as_type, **_pruned(fields)) as obs:
+                name=name, as_type=checked_observation_type(as_type),
+                **_pruned(fields)) as obs:
             yield obs
 
     def span(self, name: str, **fields: Any):

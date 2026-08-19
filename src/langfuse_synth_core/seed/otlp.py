@@ -34,6 +34,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+from ..observation_types import checked_observation_type
 from ..timegen import iso
 
 #: The OTLP/HTTP traces endpoint, relative to the Langfuse base URL. Langfuse accepts
@@ -167,7 +168,10 @@ def observation_span(
     extra: list[dict] | None = None,
 ) -> dict:
     """One observation as an OTLP span. ``end`` defaults to ``start`` (a discrete event)."""
-    attributes = [string_attr(OBS_TYPE, obs_type), string_attr(ENVIRONMENT, environment)]
+    attributes = [
+        string_attr(OBS_TYPE, checked_observation_type(obs_type)),
+        string_attr(ENVIRONMENT, environment),
+    ]
     if input is not None:
         attributes.append(string_attr(OBS_INPUT, _json_value(input)))
     if output is not None:
