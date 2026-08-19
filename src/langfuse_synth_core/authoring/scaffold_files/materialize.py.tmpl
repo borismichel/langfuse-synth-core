@@ -1,7 +1,10 @@
 """Deterministic Spool materializer — the kit's generation, model-free.
 
-Builds Langfuse ingestion events through the shared library's event builders
+Builds the Spool's wire objects through the shared library's event builders
 (`langfuse_synth_core.seed.events`) and deterministic RNG (`langfuse_synth_core.rng.Rng`).
+The builders keep one Python API across both write paths — core turns these calls into
+OTLP spans for the v4 transport this kit writes (`synth.seed`), so nothing here changes
+with the wire.
 No model calls, no network — so the seed passes the determinism golden gate under the
 deny-LLM egress block. The single operator volume knob `generation.target_traces` flows
 through the kit's `DERIVATION_HOOK` (identity by default) at seed time.
@@ -31,7 +34,7 @@ _TASKS = ("chat", "search", "summarize", "classify")
 
 
 def build_events(target_traces: int, params: Mapping[str, Any]) -> list[dict]:
-    """Materialize the full pre-ingestion event stream, deterministically.
+    """Materialize the full pre-upload Spool stream, deterministically.
 
     The canonical volume knob flows through `DERIVATION_HOOK` to the kit's internal count;
     every id, timestamp, and value derives from the seeded `Rng`, so the same inputs yield

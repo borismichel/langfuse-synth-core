@@ -76,6 +76,34 @@ def test_skill_delegates_langfuse_craft(skill_body: str):
     assert "observation" in lowered and "evaluator" in lowered
 
 
+def test_skill_teaches_the_v4_write_path_without_restating_the_observation_model(skill_body):
+    """AC (portal #207): the skill teaches the new write path — the kit-set OTLP pin, the
+    append-not-upsert consequence, and where the wire is documented — while the split it
+    was built on holds: *which* observation type a step is stays the `langfuse` skill's."""
+    lowered = skill_body.lower()
+    assert "set_spool_write_path(otlp)" in lowered
+    assert "docs/write_paths.md" in lowered
+    assert "otlp" in lowered and "2026-11-16" in lowered
+    assert "appends" in lowered and "non-resumable" in lowered
+    assert "langfuse` skill" in skill_body.split("**The wire is core's", 1)[1][:2500]
+
+
+def test_skill_seed_guidance_promises_no_idempotent_re_run(skill_body: str, tmp_path):
+    """The property the platform no longer offers is not taught anywhere in the pack — read
+    as an agent receives it, from an installed copy rather than the source tree."""
+    from langfuse_synth_core.authoring import skills
+
+    skills.install_skills(tmp_path)
+    refs = tmp_path / SKILL_NAME / "references"
+    pack = skill_body + "".join(
+        (refs / name).read_text() for name in ("model-free-seed.md", "langfuse-craft.md")
+    )
+    lowered = pack.lower()
+    for retired in ("idempotent upsert", "re-seeds idempotently", "deterministic upsert",
+                    "re-run to resume", "safe to re-seed"):
+        assert retired not in lowered, retired
+
+
 def test_skill_states_the_runbook_executability_rule(skill_body: str):
     """Portal #181: presenter beats must be reachable from the delivered surfaces (a
     Companion route or the Langfuse UI), `synth` CLI is confined to a marked

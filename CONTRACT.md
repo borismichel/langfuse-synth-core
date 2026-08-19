@@ -51,9 +51,9 @@ just a label — it selects the **job kind** the portal runs it as:
 | -------------------- | ----------- | -------------------------------------------------------------- |
 | `probe`              | `probe`     | Pre-flight reachability / credential check before real work.   |
 | `plan`               | `plan`      | Dry-run that prints the projected volume (parsed into a gate). |
-| `seed`               | `seed`      | Deterministic backdated ingestion — the byte-identical spool.  |
-| `verify`             | `verify`    | Post-ingestion read-back assertions against the seeded env.    |
-| `resume`             | `resume`    | Resume a partially-completed run.                              |
+| `seed`               | `seed`      | Deterministic backdated generation, written to Langfuse — the byte-identical Spool. |
+| `verify`             | `verify`    | Read-back assertions against the seeded project, after the write.                   |
+| `resume`             | `resume`    | Resume a partially-completed run (batch write path only — see §"The spool").        |
 | `teardown`           | `teardown`  | Project-level teardown / cleanup.                              |
 
 Any **other** `id` (e.g. `evaluators`, `memo`) maps to `kind=custom_step`. The portal
@@ -75,6 +75,28 @@ Rules the validator enforces:
   `run` command must invoke `synth <verb>` (e.g. the `seed` step runs `synth seed …`). A
   step named `seed` that actually runs `synth teardown` is a contract violation — the
   reserved id would mislead the portal about the job's kind.
+
+**What `seed` and `verify` do under the current transport.** Langfuse platform v4 makes the
+*observation* the primary entity — there is no separately ingested trace — and Langfuse
+Cloud removes the legacy batch-ingestion and read APIs on **2026-11-16**. The two mandatory
+verbs are therefore stated against that model:
+
+- **`seed`** materializes the Spool and writes it. On the OTLP write path every observation
+  is a span, a trace *is* its root observation (minted by core), and scores keep the legacy
+  ingestion endpoint — the one envelope type that survives the cutover. What `seed`
+  guarantees is the **file**: `seed + target_traces + declared params → byte-identical
+  Spool`, proven offline by the determinism gate before anything is uploaded. What it no
+  longer guarantees is a repeatable **write**: OTLP appends rather than upserting, so
+  seeding a project that already holds the demo tells the story twice. §"The spool" carries
+  the replay rules; core's `docs/WRITE_PATHS.md` carries the wire.
+- **`verify`** reads the seeded project back and asserts what landed — under v4, that is
+  observations and scores (a trace being readable as its root observation). Those read APIs
+  are cursor-paginated and carry no total, so an assertion counts what it reads rather than
+  reaching for a `meta.totalItems` those responses do not carry. The read client itself is
+  core's (`docs/SEAM.md`); what belongs in the kit is *which* assertions to make.
+
+Both verbs are declared identically whichever write path a kit is on — the pipeline, the
+job kinds and the invocation are unchanged by the migration.
 
 Whether a command receives `--set` overrides depends on the invocation class, not on the
 verb — see "The container invocation" below.

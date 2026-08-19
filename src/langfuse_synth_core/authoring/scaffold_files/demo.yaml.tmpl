@@ -8,8 +8,10 @@ target:
   host: "http://localhost:3000"
   project_hint: "demo"
 generation:
-  # Deterministic RNG seed for the whole dataset. Vary it to mint a distinct trace/id set;
-  # the same seed re-seeds idempotently (upsert).
+  # Deterministic RNG seed for the whole dataset. Vary it to mint a distinct trace/id set.
+  # The same seed always materializes the same Spool file — but re-seeding a project that
+  # already holds it APPENDS a second copy: the v4 write path has no upsert (CONTRACT.md
+  # §"The spool"). Re-seed into a cleared project, not on top of one.
   seed: 42
   # The single, cross-kit operator volume knob (Spec A §4). The kit deterministically
   # derives its internal generation params from it via the identity derivation hook.
