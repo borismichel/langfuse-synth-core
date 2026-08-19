@@ -22,8 +22,7 @@ import time
 from datetime import timedelta
 from typing import Callable, Sequence
 
-import requests
-
+from .read import LangfuseReader
 from .rng import Rng
 from .seed.events import span_event, trace_event
 from .seed.ingest import Ingestor, assert_demo_project
@@ -93,24 +92,26 @@ def run_backdate_probe(
     ing.flush()
     log(f"· probe trace {tid[:16]}… ingested with timestamp {backdate.isoformat()}")
 
-    # Ingestion is async; poll the read API with a growing backoff (~65s worst case).
-    pub_auth = ing.public_key, ing.secret_key
+    # Ingestion is async; poll the read seam with a growing backoff (~65s worst case). The
+    # seam (portal #208) is what makes this probe survive the v4 cutover: on a cut-over
+    # target there is no trace endpoint and no trace entity, and the same call still answers
+    # a trace assembled from the observations that share its id.
+    reader = LangfuseReader(base_url, auth=(ing.public_key, ing.secret_key))
     got = None
     for attempt in range(10):
         time.sleep(2 + attempt)
-        resp = requests.get(f"{base_url}/api/public/traces/{tid}", auth=pub_auth, timeout=20)
-        if resp.status_code == 200:
-            got = resp.json()
+        got = reader.trace(tid, with_scores=False)
+        if got is not None:
             break
     if got is None:
         log("✗ PROBE FAILED: trace not retrievable after ~65s — check keys/host/ingestion.")
         return False
 
-    stored = (got.get("timestamp") or "").replace("Z", "+00:00")
+    stored = got.timestamp.isoformat() if got.timestamp else ""
     want = backdate.strftime("%Y-%m-%dT%H:%M")
     ok = stored.startswith(want)
     if ok:
-        n_obs = len(got.get("observations") or [])
+        n_obs = len(got.observations)
         log(f"✓ PROBE PASSED: stored timestamp {stored} matches the backdate; "
             f"{n_obs} observation(s) attached. Backdated bulk seeding is safe on this host.")
     else:

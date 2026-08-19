@@ -383,6 +383,26 @@ def test_adapter_carries_zero_brand_or_scenario_symbols():
     assert not leaked, f"brand/scenario vocabulary leaked into the adapter: {leaked}"
 
 
+# -- the v4 seams the adapter hands a Surface (portal #208) ------------------
+def test_adapter_hands_out_a_reader_bound_to_the_deployment_connection(adapter):
+    """The read seam replaces the Surface composing its own paginated REST reads on
+    ``read_json``; it is bound to the same connection and authenticated the same way."""
+    reader = adapter.reader()
+
+    assert reader.base_url == BASE_URL
+    assert reader.auth == ("pk-seeded", "sk-seeded")
+
+
+def test_adapter_hands_out_a_wall_clock_emitter_not_the_spools_ingestor(adapter):
+    """A Companion App emits at *now*, so it gets the live-emission seam. The Spool's
+    ``Ingestor`` stays reachable only until the kits are rewired (#211)."""
+    emitter = adapter.emitter()
+
+    assert emitter.base_url == BASE_URL
+    assert (emitter.public_key, emitter.secret_key) == ("pk-seeded", "sk-seeded")
+    assert type(emitter).__name__ == "LiveEmitter"
+
+
 def test_shell_structurally_satisfies_the_contract(adapter):
     assert isinstance(adapter, CompanionAdapterContract)
 

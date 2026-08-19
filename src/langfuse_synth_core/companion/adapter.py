@@ -24,9 +24,11 @@ The eight rows of ``CompanionAdapterContract`` (#25) map onto this module as:
    *ready clients only*; the Surface never sees a raw key, sentinel, or source marker (D4,
    story 2/29).
 5. **Langfuse client** — bidirectional against the deployment's own connection: read the
-   seeded pool (:meth:`read_json`, the ``lfread`` seam) AND emit live traces
-   (:meth:`ingestor`, the ``seed.ingest`` seam) AND the SDK surface (:meth:`langfuse`, the
-   ``lfclient`` seam), all bound to ``LANGFUSE_BASE_URL`` + the project keys (D5, story 6/24).
+   seeded pool (:meth:`reader`, the read seam — with :meth:`read_json` for the raw endpoints
+   it does not model) AND emit live traces (:meth:`emitter`, the wall-clock live-emission
+   seam) AND the SDK surface (:meth:`langfuse`, the ``lfclient`` seam), all bound to
+   ``LANGFUSE_BASE_URL`` + the project keys (D5, story 6/24). :meth:`ingestor` is the Spool's
+   backdating write path, kept reachable only until the kits are rewired (portal #208/#211).
 6. **LLM client** — :meth:`llm` returns a ready client via the G1 resolution module (#138);
    the adapter owns *resolution* (provider + key), the Surface owns *usage* — including,
    via :meth:`llm`'s optional ``model``, a per-request model a Surface's user picks (a
@@ -132,6 +134,8 @@ class CompanionAdapterContract(Protocol):
     """
 
     def langfuse(self) -> Any: ...
+    def emitter(self, **kw: Any) -> Any: ...
+    def reader(self, **kw: Any) -> Any: ...
     def ingestor(self, **kw: Any) -> Any: ...
     def read_json(self, path: str, params: dict | None = ..., *, throttle: float = ...) -> dict: ...
     def llm(self, model: str | None = ...) -> _llm.LLMClient: ...
@@ -196,10 +200,36 @@ class CompanionAdapter:
             )
         return self._langfuse
 
+    def emitter(self, **kw: Any) -> Any:
+        """The **live-emission** client: wall-clock traces for this Surface's submissions
+        (portal #208). A live surface emits at *now*, so it belongs on the Langfuse SDK and
+        not on the Spool's backdating machinery — see
+        :mod:`langfuse_synth_core.live.emit`, and the determinism line in ``CONTRACT.md``.
+        A fresh emitter each call, keyed to the deployment's connection."""
+        from ..live.emit import LiveEmitter
+
+        return LiveEmitter(self.base_url, public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
+                           secret_key=os.environ.get("LANGFUSE_SECRET_KEY"), **kw)
+
+    def reader(self, **kw: Any) -> Any:
+        """The **read seam**: the seeded pool read back as normalised rows, on whichever
+        Langfuse read API generation the deployment's target serves (portal #208). This is
+        what a Surface composes its pool reads on; :meth:`read_json` stays for the raw
+        endpoints the seam does not model (projects, prompts, annotation queues)."""
+        from ..read import LangfuseReader
+
+        return LangfuseReader(self.base_url, auth=(os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+                                                   os.environ.get("LANGFUSE_SECRET_KEY", "")),
+                              **kw)
+
     def ingestor(self, **kw: Any) -> Any:
-        """The backdated-batch **write** client (emit live traces per submission), keyed to
-        the deployment's project via env. Reuses the ``seed.ingest`` seam; a fresh instance
-        each call so a Surface can hold its own spool/chunk settings."""
+        """The backdated-batch **write** client, keyed to the deployment's project via env.
+        Reuses the ``seed.ingest`` seam; a fresh instance each call so a Surface can hold its
+        own spool/chunk settings.
+
+        **For live emission use :meth:`emitter` instead.** A Surface reaching for the Spool's
+        ingestor couples a wall-clock surface to backdating machinery it does not need; the
+        kits move off it in #211 and this accessor goes with the batch path in #213."""
         from ..seed.ingest import Ingestor
 
         return Ingestor.from_env(self.base_url, **kw)

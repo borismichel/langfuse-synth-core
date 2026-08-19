@@ -8,7 +8,10 @@ locked at the lib level too.
 
 from __future__ import annotations
 
+import pytest
+
 import langfuse_synth_core.probe as probe_mod
+from langfuse_synth_core import read as read_mod
 from langfuse_synth_core.probe import probe_ids
 from langfuse_synth_core.rng import Rng
 from langfuse_synth_core.seed import writepath
@@ -60,16 +63,34 @@ def _capture_probe_run(monkeypatch) -> dict:
 
     monkeypatch.setattr(ingest_mod.requests, "post", fake_post)
 
-    def fake_get(url, auth=None, timeout=None):
-        posted["read_url"] = url
-        return type("R", (), {
-            "status_code": 200,
-            "json": lambda self: {"timestamp": posted["expect_iso"],
-                                  "observations": [{"id": "x"}]},
-        })()
+    # The read-back goes through the read seam (portal #208), so the fake answers whichever
+    # generation the target is pretending to serve — the probe never names an endpoint.
+    def fake_read(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0, **kw):
+        posted.setdefault("read_urls", []).append(url)
+        legacy = posted.get("read_api", "legacy") == "legacy"
+        if url.endswith("/api/public/traces"):                       # the generation probe
+            return _read_resp(200 if legacy else 404, {"data": [], "meta": {"totalPages": 1}})
+        if "/api/public/traces/" in url:
+            if not legacy:
+                return _read_resp(404, {})
+            return _read_resp(200, {
+                "id": url.rsplit("/", 1)[-1], "timestamp": posted["expect_iso"],
+                "observations": [{"id": "x", "startTime": posted["expect_iso"]}]})
+        if url.endswith("/api/public/v2/observations"):
+            return _read_resp(200 if not legacy else 404, {
+                "data": [{"id": "x", "traceId": params.get("traceId"), "type": "SPAN",
+                          "name": "probe", "startTime": posted["expect_iso"]}],
+                "meta": {}})
+        if url.endswith("/api/public/v3/scores"):
+            return _read_resp(200, {"data": [], "meta": {"limit": 100}})
+        return _read_resp(404, {})
 
-    monkeypatch.setattr(probe_mod.requests, "get", fake_get)
+    monkeypatch.setattr(read_mod, "request_retry", fake_read)
     return posted
+
+
+def _read_resp(status, payload):
+    return type("R", (), {"status_code": status, "json": lambda self: payload})()
 
 
 def _run(posted, monkeypatch) -> bool:
@@ -89,6 +110,20 @@ def test_the_probe_passes_on_the_batch_path(monkeypatch):
         assert _run(posted, monkeypatch) is True
     urls = {c["url"] for c in posted["calls"]}
     assert urls == {"http://lf.local/api/public/ingestion"}
+
+
+@pytest.mark.parametrize("read_api", ["legacy", "v4"])
+def test_the_probe_reads_its_backdate_back_on_either_read_api(monkeypatch, read_api):
+    """The probe is the migration's smoke test, so it must keep working on a target that has
+    cut over — where `/api/public/traces/{id}` is a 404 and the trace is a set of
+    observations. It reads through the seam and never names an endpoint itself (#208)."""
+    posted = _capture_probe_run(monkeypatch)
+    posted["read_api"] = read_api
+    with writepath.use_spool_write_path(writepath.OTLP):
+        assert _run(posted, monkeypatch) is True
+
+    read_urls = " ".join(posted["read_urls"])
+    assert ("/api/public/v2/observations" in read_urls) == (read_api == "v4")
 
 
 def test_the_probe_writes_a_backdated_span_over_otlp(monkeypatch):
