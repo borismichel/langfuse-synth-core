@@ -88,6 +88,26 @@ def test_skill_teaches_the_v4_write_path_without_restating_the_observation_model
     assert "langfuse` skill" in skill_body.split("**The wire is core's", 1)[1][:2500]
 
 
+def test_skill_teaches_the_observation_type_vocabulary_and_its_failure_mode(skill_body, tmp_path):
+    """AC (portal #217): the skill owns the *vocabulary* — the ten values, that the wire
+    spelling is lowercase and case-sensitive, and that an unrecognised value is not
+    rejected but silently shown as something else. It does not take over *which* type a
+    step is; that stays the `langfuse` skill's, and the check below proves both at once."""
+    from langfuse_synth_core.authoring import skills
+
+    skills.install_skills(tmp_path)
+    craft = (tmp_path / SKILL_NAME / "references" / "langfuse-craft.md").read_text()
+    pack = (skill_body + craft).lower()
+
+    for value in ("agent", "tool", "chain", "retriever", "embedding", "evaluator",
+                  "guardrail", "span", "generation", "event"):
+        assert value in pack, value
+    assert "case-sensitive" in pack
+    assert "silent" in pack or "silently" in pack
+    assert "generation" in pack and "cost" in pack      # what a mistyped step becomes
+    assert "langfuse` skill" in craft                   # *which* type is still delegated
+
+
 def test_skill_seed_guidance_promises_no_idempotent_re_run(skill_body: str, tmp_path):
     """The property the platform no longer offers is not taught anywhere in the pack — read
     as an agent receives it, from an installed copy rather than the source tree."""

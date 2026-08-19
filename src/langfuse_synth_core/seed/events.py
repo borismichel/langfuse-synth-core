@@ -155,7 +155,7 @@ def observation_event(
     obs_id: str,
     trace_id: str,
     name: str,
-    obs_type: str,  # ObservationType: AGENT | TOOL | RETRIEVER | CHAIN | GUARDRAIL | ...
+    obs_type: str,  # one of otlp.OBSERVATION_TYPES; either case, checked either way
     start: datetime,
     end: datetime | None = None,
     parent_id: str | None = None,
@@ -169,17 +169,23 @@ def observation_event(
     """A typed agent-graph observation (AGENT/TOOL/RETRIEVER/…). Emits a native typed
     ``observation-create`` when ``RICH_OBSERVATION_TYPES`` is on; otherwise degrades to a
     ``span-create`` that records the intended type in ``metadata.observation_type`` so the
-    structure (agent nesting, tool calls) and filterability survive on older servers."""
+    structure (agent nesting, tool calls) and filterability survive on older servers.
+
+    ``obs_type`` may be spelled either way — kits use the batch enum's uppercase and core
+    lowercases for the wire — but it must be one of the ten types Langfuse recognises. A
+    value outside that vocabulary raises here rather than reaching a wire that would accept
+    it and show something else (portal #217; see :func:`otlp.checked_observation_type`)."""
+    wire_type = otlp.checked_observation_type(obs_type.lower())
     md = dict(metadata or {})
     if on_otlp():
         # Same degrade rule as the batch path: rich types stay off until their own change
         # (turning them on moves observation counts and would confound this migration's
         # golden re-bless), so the intended type rides metadata and the span stays a span.
         if RICH_OBSERVATION_TYPES:
-            emitted_type = obs_type.lower()
+            emitted_type = wire_type
         else:
             emitted_type = "span"
-            md.setdefault("observation_type", obs_type.lower())
+            md.setdefault("observation_type", wire_type)
         return otlp.observation_span(
             obs_id=obs_id, trace_id=trace_id, name=name, obs_type=emitted_type, start=start,
             end=end, parent_id=parent_id, environment=environment, input=input,
@@ -202,7 +208,7 @@ def observation_event(
         body = _clean({**base, "type": obs_type, "metadata": md or None})
         return {"id": _envelope_id(obs_id, "observation-create"), "type": "observation-create",
                 "timestamp": iso(start), "body": body}
-    md.setdefault("observation_type", obs_type.lower())
+    md.setdefault("observation_type", wire_type)
     body = _clean({**base, "metadata": md})
     return {"id": _envelope_id(obs_id, "span-create"), "type": "span-create",
             "timestamp": iso(start), "body": body}

@@ -82,6 +82,12 @@ Whoever cuts the next version ships these; delete each entry when its tag lands.
   between two endpoints platform v4 deletes. `lfread.get_all_scores()` keeps its signature
   and its row shape, and now answers on either generation, so an un-rewired kit reads a
   cut-over project unchanged. See [`docs/READ_LIVE_SEAMS.md`](docs/READ_LIVE_SEAMS.md).
+- **The observation-type vocabulary is guarded** (portal #217) — `observation_event` now
+  raises on a type outside the ten Langfuse recognises, where before it passed anything
+  through to a wire that accepts it and silently shows something else. **Breaking only for
+  a kit that was already mistyping a type**; all three gold kits pass unchanged. The
+  matching `synth-authoring conformance` check blocks, so re-pinning a kit to this release
+  can turn a typo it has always carried into a red CI run — which is the point.
 
 ## Release checklist
 

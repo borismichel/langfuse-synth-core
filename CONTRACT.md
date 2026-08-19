@@ -241,6 +241,19 @@ Recovery is to clear that deployment's Langfuse data and import from the top
 (`SYNTH_IMPORT_CONFIRM_CLEARED=1`); re-running `generate-spool` is also a clean slate.
 Core's `docs/WRITE_PATHS.md` carries the mechanism; this is the portal-facing consequence.
 
+**Observation types are a closed vocabulary, and a wrong one does not fail.** An
+observation's type must be one of ten values — `span`, `generation`, `event`, `agent`,
+`tool`, `chain`, `retriever`, `embedding`, `evaluator`, `guardrail` — spelled lowercase and
+matched case-sensitively on the wire. Langfuse **does not reject** anything else: an
+unrecognised value is filed as a `SPAN`, or as a `GENERATION` when the observation carries
+a model, and nothing anywhere reports it (confirmed against Langfuse Cloud, 2026-08-19). So
+a mistyped tool step turns up in the cost and usage views and the demo tells a different
+story than its author wrote. Batch ingestion answered `400` on an unknown type; the OTLP
+wire that replaces it has no such answer, so **core supplies the rejection** — the event
+builders raise on a value outside the vocabulary, and `synth-authoring conformance` refuses
+one named in a kit's sources. A kit may pass either spelling to `observation_event` (core
+lowercases for the wire); what it may not pass is a value that is not one of the ten.
+
 The three gold kits are on the batch path until each is deliberately cut over, one
 kit at a time. A kit scaffolded by `synth-authoring new` is born on the OTLP path.
 

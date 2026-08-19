@@ -6,7 +6,7 @@ don't document it), generalized. Every finding cites the ``CONTRACT.md`` section
 enforces, so a red check is a pointer into the one authoritative document rather than a
 rule restated in this tool's own words (portal #196).
 
-The five check groups, and where each rule lives:
+The six check groups, and where each rule lives:
 
 * **Manifest declarations** — the live surface declares what the portal relies on
   (ports, health paths; the readiness route must differ from ``/``) and the command
@@ -24,6 +24,9 @@ The five check groups, and where each rule lives:
   ``SYNTH_STATE_DIR`` at *call* time and a fabricated payload really writes/loads there.
   A stateless kit skips these with a note — statelessness is a legitimate contract
   citizen — §"Per-run anchors (opt-in)".
+* **The observation-type vocabulary** (static) — every observation type the kit names is
+  one of the ten Langfuse recognises. The OTLP wire accepts an unknown value and silently
+  files it as something else, where batch ingestion answered ``400`` — §"The spool".
 * **Legacy Langfuse surfaces** (static, *advisory*) — whether the kit still reaches an API
   Langfuse removes on 2026-11-16: a deprecated endpoint named in its sources, the
   ``meta.totalItems`` counting technique beside one, and a Spool still written on the batch
@@ -45,6 +48,7 @@ the companion web deps and degrade to a printed skip without them.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import dataclasses
 import importlib
@@ -65,6 +69,7 @@ from jsonschema import Draft7Validator
 from langfuse_synth_core.anchors import STATE_DIR_ENV, STATE_FILENAME, AnchorsIO
 from langfuse_synth_core.authoring.validate import load_schema, validate_doc
 from langfuse_synth_core.companion.adapter import parse_invocation
+from langfuse_synth_core.seed.otlp import OBSERVATION_TYPES, SILENT_DEGRADATION
 
 # The target-shape import points (CONTRACT.md §"The target shape, and migration debt"):
 # what `synth-authoring new` emits and where the suite looks by default. A kit that keeps
@@ -663,6 +668,108 @@ def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
 
 
 # --------------------------------------------------------------------------------------
+# The observation-type vocabulary (static, blocking) — portal #217
+# --------------------------------------------------------------------------------------
+# Batch ingestion accepted three observation types and rejected the rest with a `400`. The
+# OTLP wire that replaces it accepts anything: an unrecognised `langfuse.observation.type`
+# is filed as a SPAN, or as a GENERATION when the span carries a model, with nothing
+# reported. So a typo'd tool step that names a model lands in cost and usage views and the
+# demo tells a different story than its author wrote.
+#
+# This restores the rejection at authoring time, and it BLOCKS — unlike the legacy-endpoint
+# group above. That is the distinction: a deprecated endpoint is migration debt the whole
+# fleet is working through, where a type outside the vocabulary is a defect in this kit,
+# fixable in the same edit that surfaces it. The gold kits pass it today.
+#
+# Its limit, stated so it is not mistaken for an execution proof: this reads literals in the
+# kit's *sources*. A type assembled at runtime, or read from data, is invisible here — those
+# are caught at seed time by `otlp.checked_observation_type`, which every core event builder
+# runs. The two layers cover each other; neither is redundant.
+
+#: Where a kit spells an observation type: the builders' keyword argument, a helper's
+#: default for it, and a local assigned before being passed through (Lender's shape).
+_OBS_TYPE_NAME = "obs_type"
+
+
+def _defaults(args: ast.arguments):
+    """``(param_name, default_node)`` for every parameter of ``args`` that has a default."""
+    positional = args.posonlyargs + args.args
+    for arg, default in zip(positional[len(positional) - len(args.defaults):], args.defaults):
+        yield arg.arg, default
+    for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+        if default is not None:
+            yield arg.arg, default
+
+
+def _named_types(source: str) -> list[tuple[int, str]]:
+    """``(lineno, literal)`` for every observation type this source names outright."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []  # a kit that does not parse fails its own gates long before this one
+
+    sites: list[tuple[int, str]] = []
+
+    def record(node: ast.expr) -> None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            sites.append((node.lineno, node.value))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg == _OBS_TYPE_NAME:
+                    record(keyword.value)
+        elif isinstance(node, ast.arguments):
+            for name, default in _defaults(node):
+                if name == _OBS_TYPE_NAME:
+                    record(default)
+        elif isinstance(node, ast.Assign):
+            if any(
+                isinstance(t, ast.Name) and t.id == _OBS_TYPE_NAME for t in node.targets
+            ):
+                record(node.value)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == _OBS_TYPE_NAME:
+                if node.value is not None:
+                    record(node.value)
+    return sorted(set(sites))
+
+
+def observation_type_findings(kit_dir: str | Path) -> tuple[list[str], list[str]]:
+    """Findings for every observation type the kit names that Langfuse does not recognise.
+
+    Case is not the test: kits spell these with the batch enum's uppercase and core
+    lowercases for the wire, so the value *core will write* is what gets checked. What is
+    refused is a value that is not in the vocabulary at all, whatever its case.
+    """
+    kit_dir = Path(kit_dir)
+    findings: list[str] = []
+    checked = 0
+    for path in _kit_sources(kit_dir):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        label = path.relative_to(kit_dir).as_posix()
+        for lineno, literal in _named_types(source):
+            checked += 1
+            if literal.lower() in OBSERVATION_TYPES:
+                continue
+            findings.append(
+                f"at {label}:{lineno}: observation type {literal!r} is not one of the ten "
+                f"Langfuse recognises ({', '.join(OBSERVATION_TYPES)}) — lowercase on the "
+                f"wire, and core lowercases what a kit passes. {SILENT_DEGRADATION} "
+                f"({_CITE_SPOOL})"
+            )
+    notes = [] if checked else [
+        "no observation type is named outright in the kit's sources — nothing for the "
+        "vocabulary check to read, so it claims nothing (a kit of spans, generations and "
+        "events names none; a type assembled at runtime is caught at seed time instead)"
+    ]
+    return findings, notes
+
+
+# --------------------------------------------------------------------------------------
 # The whole suite over one kit checkout
 # --------------------------------------------------------------------------------------
 def _resolve_factory(ref: str) -> tuple[Callable[..., Any] | None, str | None]:
@@ -770,6 +877,14 @@ def run_conformance(
                 report.passed.append(
                     "anchors write where the state-dir env points, resolved at call time"
                 )
+
+    obs_findings, obs_notes = observation_type_findings(kit_dir)
+    report.findings.extend(obs_findings)
+    report.notes.extend(obs_notes)
+    if not (obs_findings or obs_notes):
+        report.passed.append(
+            "every observation type the kit names is one Langfuse recognises"
+        )
 
     report.advisories.extend(legacy_langfuse_advisories(kit_dir))
     if not report.advisories:

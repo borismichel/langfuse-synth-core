@@ -673,3 +673,139 @@ def test_a_scaffolded_kit_reaches_no_legacy_endpoint(kit_on_path):
     kit_dir = kit_on_path("conf-v4-native")
     report = run_conformance(kit_dir)
     assert report.advisories == [], "\n".join(report.advisories)
+
+
+# --------------------------------------------------------------------------------------
+# The observation-type vocabulary (static, blocking) — portal #217
+# --------------------------------------------------------------------------------------
+def test_a_type_outside_the_vocabulary_is_a_blocking_finding(tmp_path):
+    """The safety net the wire removed. Batch ingestion answered `400` on an unknown
+    observation type; OTLP accepts it and files the observation as something else, so the
+    rejection has to happen at authoring time instead."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/seed/traces.py": (
+            "events.append(observation_event(\n"
+            '    obs_id=oid, trace_id=tid, name="rank_docs",\n'
+            '    obs_type="genration", start=s, end=e,\n'
+            "))\n"
+        )},
+    )
+    findings, _ = observation_type_findings(kit)
+    assert len(findings) == 1, findings
+    assert "synth/seed/traces.py:3" in findings[0]
+    assert "genration" in findings[0]
+
+
+def test_the_finding_names_the_silent_degradation(tmp_path):
+    """AC: an author refused a valid-looking value learns why — Langfuse would have taken
+    it and shown a generation, not that some list exists."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(tmp_path, **{"synth/x.py": 'observation_event(obs_type="llm")\n'})
+    findings, _ = observation_type_findings(kit)
+    text = findings[0].lower()
+    assert "generation" in text and "model" in text  # what a mistyped step becomes
+    assert "guardrail" in text                        # the vocabulary is spelled out
+    assert "contract.md" in text                      # cites the rule's home, per #196
+
+
+def test_the_spelling_the_gold_kits_use_is_accepted(tmp_path):
+    """Kits name these with the batch enum's uppercase and core lowercases for the wire, so
+    the check reads the value core will write — not the literal's case."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/seed/traces.py": (
+            'observation_event(obs_type="AGENT", name="credit_agent")\n'
+            'observation_event(obs_type="RETRIEVER", name="policy_search")\n'
+            'observation_event(obs_type="tool", name="rate_lookup")\n'
+        )},
+    )
+    findings, notes = observation_type_findings(kit)
+    assert findings == [], findings
+    assert notes == []
+
+
+def test_a_default_and_an_assignment_are_checked_too(tmp_path):
+    """The other two places a kit spells a type: a helper's default and a local it passes
+    through. Lender's trace builders are shaped exactly like this."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/steps.py": (
+            'def _step(name, obs_type: str = "retreiver"):\n'
+            "    ...\n"
+            "\n"
+            "def _tool(name):\n"
+            '    obs_type = "TOLL"\n'
+            "    return observation_event(name=name, obs_type=obs_type)\n"
+        )},
+    )
+    findings, _ = observation_type_findings(kit)
+    assert len(findings) == 2, findings
+    assert any("retreiver" in f and ":1" in f for f in findings)
+    assert any("TOLL" in f.upper() and ":5" in f for f in findings)
+
+
+def test_a_type_this_scan_cannot_see_is_not_invented(tmp_path):
+    """Its stated limit, the same house rule the endpoint scan carries: a value assembled at
+    runtime is invisible here. The builder's own guard is what catches those, at seed time."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/steps.py": (
+            "for kind in KINDS:\n"
+            "    observation_event(name=kind, obs_type=kind.upper())\n"
+        )},
+    )
+    findings, notes = observation_type_findings(kit)
+    assert findings == []
+    assert notes and "nothing" in notes[0]      # and the suite claims no pass for it
+
+
+def test_a_kit_that_types_no_observation_gets_a_note_not_a_tick(tmp_path):
+    """A kit of spans, generations and events names no type at all — nothing was checked,
+    so nothing is claimed."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(tmp_path, **{"synth/x.py": "generation_event(model=m)\n"})
+    findings, notes = observation_type_findings(kit)
+    assert findings == []
+    assert notes and "names none" in notes[0]
+
+
+def test_the_vocabulary_finding_blocks_where_the_v4_advisories_do_not(tmp_path, capsys):
+    """Two channels, and this one is the blocking channel: a mistyped type is a defect in
+    the kit, not migration debt the fleet is working through."""
+    from langfuse_synth_core.authoring.conformance import run, run_conformance
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/seed.py": (
+            "set_spool_write_path(OTLP)\n"
+            'observation_event(obs_id=o, trace_id=t, name="x", obs_type="genration")\n'
+        )},
+    )
+    (kit / "usecase.yaml").write_text(yaml.safe_dump(_stateless_manifest()))
+
+    report = run_conformance(kit)
+    assert any("genration" in f for f in report.findings), report.findings
+    assert not report.ok
+
+    assert run([str(kit)]) == 1
+    assert run([str(kit), "--advisory"]) == 0     # the pre-portal-kit escape, unchanged
+    assert "genration" in capsys.readouterr().out
+
+
+def test_a_scaffolded_kit_names_a_valid_type_for_every_observation(kit_on_path):
+    """AC: what `synth-authoring new` emits passes its own vocabulary check."""
+    from langfuse_synth_core.authoring.conformance import run_conformance
+
+    report = run_conformance(kit_on_path("conf-obs-types"))
+    assert [f for f in report.findings if "observation type" in f] == []

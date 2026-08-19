@@ -125,8 +125,30 @@ Three consequences that change how you author, not what you call:
   Spool carries one more observation per trace than the count you may remember. Nothing to
   do in `materialize.py`; it is what your kit's billable volume now measures.
 
-*Which* observation type each step should be is still Langfuse craft — ask the `langfuse`
-skill (below), not this one.
+*Which* observation type each step should be is still Langfuse craft — ask the
+`langfuse` skill (below), not this one. **Which values exist is not**, and it is a trap worth knowing
+before you write the first `observation_event`:
+
+> **The vocabulary is closed, and a wrong value does not fail — it lies.**
+> Langfuse recognises exactly ten observation types: `span`, `generation`, `event`,
+> `agent`, `tool`, `chain`, `retriever`, `embedding`, `evaluator`, `guardrail`. On the
+> wire they are **lowercase and case-sensitive**. Anything else — a typo, or `AGENT`
+> shouting — is *accepted* and quietly filed as a `SPAN`, or as a `GENERATION` if the
+> observation carries a model. Nothing anywhere reports a problem; your mistyped tool step
+> simply turns up in the cost and usage views and the demo tells a different story than
+> you wrote. The batch path this migration replaces rejected an unknown type with a `400`;
+> the OTLP wire has no such answer.
+
+Core supplies the rejection instead, so this costs you nothing to get right:
+
+- **`observation_event` raises** on a value outside the ten, at the call, with the
+  vocabulary in the message. Either spelling is fine there — kits write `obs_type="TOOL"`
+  and core lowercases for the wire — what is refused is a value that is not one of the ten.
+- **`synth-authoring conformance` refuses one** it finds named in your sources, so a typo
+  in a branch you have not exercised is still caught before the kit ships.
+
+`CONTRACT.md` §"The spool" is the rule's home; `docs/WRITE_PATHS.md` records what each
+input was observed to land as.
 
 **Determinism is the constraint that shapes this code.** Every id, timestamp, and value
 must derive from the seeded RNG (`langfuse_synth_core.rng.Rng`), never from a wall clock,
