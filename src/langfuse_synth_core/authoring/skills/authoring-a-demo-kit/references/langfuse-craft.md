@@ -24,7 +24,6 @@ fetches current docs rather than reasoning from memory** (Langfuse changes often
   `guardrail`? The library gives you a builder for each (`generation_event`, `span_event`,
   `event_event`, and `observation_event` for the typed rest, from
   `langfuse_synth_core.seed.events`); *which* one models your scenario truthfully is craft.
-  **The set of ten is not** — see below.
 - **Evaluator / score design.** Which evaluator type (LLM-as-judge, heuristic, human
   annotation), what score `name`s, what `data_type` (NUMERIC / CATEGORICAL / BOOLEAN), and
   what value ranges make the scenario legible and the demo's point land. The
@@ -43,14 +42,11 @@ fetches current docs rather than reasoning from memory** (Langfuse changes often
   author-time-fixture escape hatch.
 - **The manifest contract.** `seed`+`verify` present, reserved-verb semantics, the canonical
   `generation.target_traces` knob, ≥1 `render: markdown` artifact — the validator owns these.
-- **The observation-type vocabulary.** *Which* of the ten a step is, is craft. *That there
-  are ten*, that the wire spelling is lowercase and case-sensitive, and that an
-  unrecognised value is **not rejected but silently shown as a `SPAN` — or a `GENERATION`
-  if the observation carries a model** — is mechanical, and belongs here: `observation_event`
-  raises on a value outside the vocabulary and `synth-authoring conformance` refuses one
-  named in your sources. That is the whole reason the split is drawn here rather than one
-  bullet up: craft advice is judgment nobody can check, where a value that quietly lands a
-  tool step in the cost views is red/green. `CONTRACT.md` §"The spool" holds the rule.
+- **The observation-type vocabulary.** *Which* of the ten a step is, is craft — that there
+  are exactly ten, and what a value outside them silently does, is red/green, so core
+  refuses one rather than advising about it. `CONTRACT.md` §"The spool" holds the rule and
+  the orchestrator skill's Phase 2 states it where you meet it; don't restate it a third
+  time here.
 - **The library seam.** The kit composes the trace tree from library primitives; it does not
   reimplement event emission, backdating, ingest, or the read client. See `docs/SEAM.md`.
 - **The wire.** Which transport the Spool is written on (OTLP under Langfuse v4) and which

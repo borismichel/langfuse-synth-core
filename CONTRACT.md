@@ -249,10 +249,11 @@ unrecognised value is filed as a `SPAN`, or as a `GENERATION` when the observati
 a model, and nothing anywhere reports it (confirmed against Langfuse Cloud, 2026-08-19). So
 a mistyped tool step turns up in the cost and usage views and the demo tells a different
 story than its author wrote. Batch ingestion answered `400` on an unknown type; the OTLP
-wire that replaces it has no such answer, so **core supplies the rejection** — the event
-builders raise on a value outside the vocabulary, and `synth-authoring conformance` refuses
-one named in a kit's sources. A kit may pass either spelling to `observation_event` (core
-lowercases for the wire); what it may not pass is a value that is not one of the ten.
+wire that replaces it has no such answer, so **core supplies the rejection** — the Spool's
+event builders and the live seam both raise on a value outside the vocabulary, and
+`synth-authoring conformance` refuses one named in a kit's sources. A kit may pass either
+spelling to `observation_event`, which lowercases for the wire; a live surface's `as_type`
+reaches Langfuse verbatim through the SDK and is therefore checked case and all.
 
 The three gold kits are on the batch path until each is deliberately cut over, one
 kit at a time. A kit scaffolded by `synth-authoring new` is born on the OTLP path.

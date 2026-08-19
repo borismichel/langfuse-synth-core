@@ -65,10 +65,10 @@ generation, so it lands in cost and usage views and changes the story the demo t
 
 Batch ingestion accepted only `SPAN | GENERATION | EVENT` and answered `400` on anything
 else. That rejection was a safety net the OTLP wire removes, so core replaces it rather than
-inheriting the gap (portal #217): `otlp.checked_observation_type` guards the wire boundary
-and every event builder runs it, and `synth-authoring conformance` **blocks** on a type named
-in a kit's sources that is not one of the ten. `CONTRACT.md` §"The spool" is the rule; this
-is what it was measured against.
+inheriting the gap (portal #217) — `CONTRACT.md` §"The spool" carries the rule and where it
+is enforced. The vocabulary lives in `langfuse_synth_core.observation_types`, above both
+seams, because both put a value on the same attribute: this one through the span builder, the
+live one through the SDK's `as_type`. The table above is what the rule was measured against.
 
 ## What flipping a kit costs
 

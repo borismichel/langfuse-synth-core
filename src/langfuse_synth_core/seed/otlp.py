@@ -34,6 +34,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+from ..observation_types import checked_observation_type
 from ..timegen import iso
 
 #: The OTLP/HTTP traces endpoint, relative to the Langfuse base URL. Langfuse accepts
@@ -78,43 +79,6 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 class OtlpError(ValueError):
     """A Spool line that cannot be expressed as an OTLP span."""
-
-
-class UnknownObservationType(OtlpError):
-    """An observation type outside the vocabulary Langfuse recognises."""
-
-
-#: The ten values Langfuse accepts on :data:`OBS_TYPE` — the three the batch path carried,
-#: then the agent-graph types that were OTel-only. Lowercase, and **case-sensitive**.
-OBSERVATION_TYPES = (
-    "span", "generation", "event",
-    "agent", "tool", "chain", "retriever", "embedding", "evaluator", "guardrail",
-)
-
-#: Why an unknown type is refused here rather than left to the server. Shared verbatim with
-#: `synth-authoring conformance`, so the two never explain this differently.
-SILENT_DEGRADATION = (
-    "Langfuse does not reject an unrecognised observation type — it files the observation "
-    "as a SPAN, or as a GENERATION when the span carries a model, and reports nothing. A "
-    "mistyped step therefore lands in cost and usage views and quietly changes what the "
-    "demo shows (confirmed against Langfuse Cloud, 2026-08-19)"
-)
-
-
-def checked_observation_type(obs_type: str) -> str:
-    """Assert an observation type is one Langfuse recognises, and hand it back untouched.
-
-    The batch endpoint rejected an unknown type with a ``400``; the OTLP wire accepts it and
-    shows something else, so this is the safety net that rejection used to be. Strict about
-    case on purpose: ``AGENT`` is not ``agent`` on the wire — it is a ``SPAN``.
-    """
-    if obs_type in OBSERVATION_TYPES:
-        return obs_type
-    raise UnknownObservationType(
-        f"observation type {obs_type!r} is not one of the ten Langfuse recognises "
-        f"({', '.join(OBSERVATION_TYPES)}) — lowercase, and case-sensitive. "
-        f"{SILENT_DEGRADATION}."
-    )
 
 
 # ---------------------------------------------------------------------------

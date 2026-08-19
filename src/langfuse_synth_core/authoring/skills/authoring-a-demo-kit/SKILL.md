@@ -144,8 +144,13 @@ Core supplies the rejection instead, so this costs you nothing to get right:
 - **`observation_event` raises** on a value outside the ten, at the call, with the
   vocabulary in the message. Either spelling is fine there — kits write `obs_type="TOOL"`
   and core lowercases for the wire — what is refused is a value that is not one of the ten.
-- **`synth-authoring conformance` refuses one** it finds named in your sources, so a typo
-  in a branch you have not exercised is still caught before the kit ships.
+- **A live surface's `as_type` is checked strictly**, because the SDK hands it to Langfuse
+  exactly as written. `as_type="AGENT"` on the live seam raises; `as_type="agent"` is what
+  you want. This is the one place the casing rule is yours to get right.
+- **`synth-authoring conformance` refuses either** where it finds one named in your
+  sources, so a typo in a branch you have not exercised is still caught before the kit
+  ships. It reads literals: a type your code assembles at runtime is caught by the two
+  guards above instead, when the code runs.
 
 `CONTRACT.md` §"The spool" is the rule's home; `docs/WRITE_PATHS.md` records what each
 input was observed to land as.

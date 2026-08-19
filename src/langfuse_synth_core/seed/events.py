@@ -205,7 +205,9 @@ def observation_event(
         "statusMessage": status_message,
     }
     if RICH_OBSERVATION_TYPES:
-        body = _clean({**base, "type": obs_type, "metadata": md or None})
+        # The batch enum is the uppercase spelling of the same vocabulary, so this branch
+        # up-cases where the OTLP one down-cases. Both accept a kit's either spelling.
+        body = _clean({**base, "type": wire_type.upper(), "metadata": md or None})
         return {"id": _envelope_id(obs_id, "observation-create"), "type": "observation-create",
                 "timestamp": iso(start), "body": body}
     md.setdefault("observation_type", wire_type)

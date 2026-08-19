@@ -804,8 +804,55 @@ def test_the_vocabulary_finding_blocks_where_the_v4_advisories_do_not(tmp_path, 
 
 
 def test_a_scaffolded_kit_names_a_valid_type_for_every_observation(kit_on_path):
-    """AC: what `synth-authoring new` emits passes its own vocabulary check."""
-    from langfuse_synth_core.authoring.conformance import run_conformance
+    """AC: what `synth-authoring new` emits passes its own vocabulary check — and it does so
+    *vacuously*, which is worth stating rather than hiding behind an empty list. The walking
+    skeleton builds traces, generations and scores, none of which name a type. The value of
+    the check here is the day someone grows the template a typed step."""
+    from langfuse_synth_core.authoring.conformance import (
+        observation_type_findings,
+        run_conformance,
+    )
 
-    report = run_conformance(kit_on_path("conf-obs-types"))
+    kit_dir = kit_on_path("conf-obs-types")
+    findings, notes = observation_type_findings(kit_dir)
+    assert findings == []
+    assert notes and "names none" in notes[0]
+
+    report = run_conformance(kit_dir)
     assert [f for f in report.findings if "observation type" in f] == []
+
+
+def test_the_sdk_keyword_on_the_live_seam_is_read_case_sensitively(tmp_path):
+    """The other keyword, and the one where case is the whole failure: `as_type` goes to the
+    Langfuse SDK verbatim, so a live surface's `AGENT` really does land as a SPAN."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/agent.py": (
+            'with trace.observation(name="decide", as_type="AGENT") as obs:\n'
+            "    ...\n"
+            'with trace.observation(name="answer", as_type="generation") as gen:\n'
+            "    ...\n"
+        )},
+    )
+    findings, _ = observation_type_findings(kit)
+    assert len(findings) == 1, findings
+    assert "AGENT" in findings[0] and "synth/agent.py:1" in findings[0]
+    assert "nothing lowercases this one" in findings[0]
+
+
+def test_a_kits_own_tests_are_out_of_scope_for_a_check_that_blocks(tmp_path):
+    """`_kit_sources` over-reads on purpose, and that trade belongs to the advisory channel.
+    A kit's test naming a deliberately wrong type — as this suite's own tests do — must not
+    redden its CI over a line no container runs."""
+    from langfuse_synth_core.authoring.conformance import observation_type_findings
+
+    kit = tmp_path
+    (kit / "synth").mkdir(parents=True)
+    (kit / "synth" / "steps.py").write_text('observation_event(obs_type="TOOL")\n')
+    (kit / "tests").mkdir()
+    (kit / "tests" / "test_steps.py").write_text('observation_event(obs_type="genration")\n')
+
+    findings, _ = observation_type_findings(kit)     # no src/ — the whole checkout is read
+    assert findings == [], findings

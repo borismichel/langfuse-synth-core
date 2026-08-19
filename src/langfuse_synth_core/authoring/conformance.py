@@ -61,7 +61,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import yaml
 from jsonschema import Draft7Validator
@@ -69,7 +69,10 @@ from jsonschema import Draft7Validator
 from langfuse_synth_core.anchors import STATE_DIR_ENV, STATE_FILENAME, AnchorsIO
 from langfuse_synth_core.authoring.validate import load_schema, validate_doc
 from langfuse_synth_core.companion.adapter import parse_invocation
-from langfuse_synth_core.seed.otlp import OBSERVATION_TYPES, SILENT_DEGRADATION
+from langfuse_synth_core.observation_types import (
+    OBSERVATION_TYPES,
+    unknown_observation_type,
+)
 
 # The target-shape import points (CONTRACT.md §"The target shape, and migration debt"):
 # what `synth-authoring new` emits and where the suite looks by default. A kit that keeps
@@ -597,34 +600,55 @@ _TOTAL_ITEMS = re.compile(r"totalItems")
 
 
 def _kit_sources(kit_dir: Path) -> list[Path]:
-    """The kit's shipped Python sources — what a deployed container actually runs.
+    """The kit's Python sources — what a deployed container runs, plus whatever sits beside
+    it in a kit that keeps its package outside ``src/``.
 
-    ``src/`` is the target shape and the whole checkout is the fallback for a kit that
-    keeps its package elsewhere: over-reading (a tool, a test) costs a nudge nobody has to
-    act on, where missing the package would report a legacy kit clean.
+    ``src/`` is the target shape and the whole checkout is the fallback: over-reading (a
+    tool, a test) costs a nudge nobody has to act on, where missing the package would report
+    a legacy kit clean. **That trade is the advisory channel's**, and it does not carry to a
+    check that blocks — see :func:`_shipped_sources`.
     """
     src = kit_dir / "src"
     root = src if src.is_dir() else kit_dir
     return sorted(path for path in root.rglob("*.py") if ".venv" not in path.parts)
 
 
+def _shipped_sources(kit_dir: Path) -> list[Path]:
+    """:func:`_kit_sources` without the kit's tests — for the checks that block.
+
+    Over-reading is cheap for an advisory and expensive for a finding: a test that names a
+    deliberately wrong value (this suite's own tests do exactly that) would redden a kit's
+    CI over a line no container ever runs. A kit on the target shape is unaffected either
+    way — its tests already sit outside ``src/``.
+    """
+    return [
+        path for path in _kit_sources(kit_dir)
+        if "tests" not in path.parts and not path.name.startswith("test_")
+    ]
+
+
+def _readable(paths: list[Path], kit_dir: Path) -> list[tuple[str, str]]:
+    """``(kit-relative label, text)`` for each source that can actually be read."""
+    out: list[tuple[str, str]] = []
+    for path in paths:
+        try:
+            out.append((path.relative_to(kit_dir).as_posix(), path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return out
 def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
     """Advisory lines for every legacy Langfuse surface the kit still reaches: a deprecated
     endpoint in its sources, the ``meta.totalItems`` counting technique beside one, and a
     Spool still written on the batch path. Empty for a v4-native kit."""
     kit_dir = Path(kit_dir)
-    sources = _kit_sources(kit_dir)
+    sources = _readable(_kit_sources(kit_dir), kit_dir)
     if not sources:
         return []
 
     advisories: list[str] = []
     pinned_otlp = False
-    for path in sources:
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
-        label = path.relative_to(kit_dir).as_posix()
+    for label, text in sources:
+        lines = text.splitlines()
         hits: list[tuple[int, str]] = []
         totals: list[int] = []
         for lineno, line in enumerate(lines, start=1):
@@ -683,15 +707,20 @@ def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
 #
 # Its limit, stated so it is not mistaken for an execution proof: this reads literals in the
 # kit's *sources*. A type assembled at runtime, or read from data, is invisible here — those
-# are caught at seed time by `otlp.checked_observation_type`, which every core event builder
-# runs. The two layers cover each other; neither is redundant.
+# are caught at run time by `observation_types.checked_observation_type`, which the span
+# builder and the live seam both run. The two layers cover each other; neither is redundant.
 
-#: Where a kit spells an observation type: the builders' keyword argument, a helper's
-#: default for it, and a local assigned before being passed through (Lender's shape).
-_OBS_TYPE_NAME = "obs_type"
+#: The two keywords a kit names an observation type under, and they are not read alike.
+#: ``obs_type`` is core's event-builder keyword: core lowercases it for the wire, so a kit's
+#: uppercase (the batch enum's spelling) is correct there. ``as_type`` is the Langfuse SDK's,
+#: on the live seam — the SDK writes it verbatim, so ``AGENT`` really does land as a SPAN and
+#: case is part of what is checked.
+_NORMALISED_KEYWORD = "obs_type"
+_VERBATIM_KEYWORD = "as_type"
+_TYPE_KEYWORDS = (_NORMALISED_KEYWORD, _VERBATIM_KEYWORD)
 
 
-def _defaults(args: ast.arguments):
+def _defaults(args: ast.arguments) -> Iterator[tuple[str, ast.expr]]:
     """``(param_name, default_node)`` for every parameter of ``args`` that has a default."""
     positional = args.posonlyargs + args.args
     for arg, default in zip(positional[len(positional) - len(args.defaults):], args.defaults):
@@ -701,64 +730,62 @@ def _defaults(args: ast.arguments):
             yield arg.arg, default
 
 
-def _named_types(source: str) -> list[tuple[int, str]]:
-    """``(lineno, literal)`` for every observation type this source names outright."""
+def _named_types(source: str) -> list[tuple[int, str, str]]:
+    """``(lineno, keyword, literal)`` for every observation type this source names outright.
+
+    Three places a kit spells one: the keyword at a call, a helper's default for it, and a
+    local assigned before being passed through (Lender's trace builders are that shape).
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return []  # a kit that does not parse fails its own gates long before this one
 
-    sites: list[tuple[int, str]] = []
+    sites: list[tuple[int, str, str]] = []
 
-    def record(node: ast.expr) -> None:
+    def record(keyword: str, node: ast.expr | None) -> None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            sites.append((node.lineno, node.value))
+            sites.append((node.lineno, keyword, node.value))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             for keyword in node.keywords:
-                if keyword.arg == _OBS_TYPE_NAME:
-                    record(keyword.value)
+                if keyword.arg in _TYPE_KEYWORDS:
+                    record(keyword.arg, keyword.value)
         elif isinstance(node, ast.arguments):
             for name, default in _defaults(node):
-                if name == _OBS_TYPE_NAME:
-                    record(default)
-        elif isinstance(node, ast.Assign):
-            if any(
-                isinstance(t, ast.Name) and t.id == _OBS_TYPE_NAME for t in node.targets
-            ):
-                record(node.value)
-        elif isinstance(node, ast.AnnAssign):
-            if isinstance(node.target, ast.Name) and node.target.id == _OBS_TYPE_NAME:
-                if node.value is not None:
-                    record(node.value)
+                if name in _TYPE_KEYWORDS:
+                    record(name, default)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in _TYPE_KEYWORDS:
+                    record(target.id, node.value)
     return sorted(set(sites))
 
 
 def observation_type_findings(kit_dir: str | Path) -> tuple[list[str], list[str]]:
     """Findings for every observation type the kit names that Langfuse does not recognise.
 
-    Case is not the test: kits spell these with the batch enum's uppercase and core
-    lowercases for the wire, so the value *core will write* is what gets checked. What is
-    refused is a value that is not in the vocabulary at all, whatever its case.
+    The refusal is :func:`observation_types.unknown_observation_type`'s, verbatim — this
+    adds only where the value was found and, for the SDK keyword, that nothing will
+    lowercase it.
     """
     kit_dir = Path(kit_dir)
     findings: list[str] = []
     checked = 0
-    for path in _kit_sources(kit_dir):
-        try:
-            source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        label = path.relative_to(kit_dir).as_posix()
-        for lineno, literal in _named_types(source):
+    for label, source in _readable(_shipped_sources(kit_dir), kit_dir):
+        for lineno, keyword, literal in _named_types(source):
             checked += 1
-            if literal.lower() in OBSERVATION_TYPES:
+            written = literal.lower() if keyword == _NORMALISED_KEYWORD else literal
+            if written in OBSERVATION_TYPES:
                 continue
+            verbatim = "" if keyword == _NORMALISED_KEYWORD else (
+                f" `{_VERBATIM_KEYWORD}` reaches Langfuse through the SDK exactly as "
+                f"written, so nothing lowercases this one for you."
+            )
             findings.append(
-                f"at {label}:{lineno}: observation type {literal!r} is not one of the ten "
-                f"Langfuse recognises ({', '.join(OBSERVATION_TYPES)}) — lowercase on the "
-                f"wire, and core lowercases what a kit passes. {SILENT_DEGRADATION} "
+                f"at {label}:{lineno}: {unknown_observation_type(literal)}.{verbatim} "
                 f"({_CITE_SPOOL})"
             )
     notes = [] if checked else [

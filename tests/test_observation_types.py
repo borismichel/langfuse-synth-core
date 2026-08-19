@@ -19,7 +19,7 @@ import pytest
 
 from langfuse_synth_core.seed import otlp, writepath
 from langfuse_synth_core.seed.events import observation_event
-from langfuse_synth_core.seed.otlp import (
+from langfuse_synth_core.observation_types import (
     OBSERVATION_TYPES,
     UnknownObservationType,
     checked_observation_type,
@@ -103,3 +103,34 @@ def test_every_type_the_vocabulary_carries_builds(monkeypatch):
                 obs_id=OID, trace_id=TID, name="x", obs_type=obs_type, start=TS, end=TS,
             )
             assert attrs(span)["langfuse.observation.type"] == obs_type
+
+
+@pytest.mark.parametrize("spelling", ["TOOL", "tool"])
+def test_the_batch_path_spells_the_same_vocabulary_its_own_way(spelling, monkeypatch):
+    """One vocabulary, two spellings: the legacy enum is uppercase where the wire is
+    lowercase. A kit picks either and each path writes the one its target accepts."""
+    from langfuse_synth_core.seed import events as events_mod
+
+    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", True)
+    with writepath.use_spool_write_path(writepath.BATCH):
+        envelope = events_mod.observation_event(
+            obs_id=OID, trace_id=TID, name="lookup", obs_type=spelling, start=TS, end=TS,
+        )
+    assert envelope["body"]["type"] == "TOOL"
+
+
+def test_the_live_seam_refuses_a_type_the_sdk_would_pass_through(monkeypatch):
+    """The other seam: the SDK writes ``as_type`` verbatim and Langfuse takes it, so the
+    live surface is where the spec's `AGENT` → `SPAN` row actually bites. Checked strictly
+    there, because nothing downstream lowercases it."""
+    from langfuse_synth_core.live.emit import LiveTrace
+
+    class _Root:
+        def start_as_current_observation(self, **kw):
+            raise AssertionError(f"the SDK should never be reached: {kw}")
+
+    trace = LiveTrace(_Root(), emitter=None)
+    for refused in ("AGENT", "genration"):
+        with pytest.raises(UnknownObservationType):
+            with trace.observation("step", as_type=refused):
+                pass
