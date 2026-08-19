@@ -43,11 +43,15 @@ src/langfuse_synth_core/
   pricing.py        token counts x per-model pricing -> usage/cost details (#31)
   distributions.py  log-normal latency + model-appropriate token sampling (#31)
   lfclient.py       Langfuse v4 SDK client construction (#31)
+  read.py           the READ seam — traces/observations/scores/sessions/experiments,
+                    normalised across the v4 and deprecated read APIs (#208)
+  lfread.py         the raw authenticated GET + the legacy score-row compatibility front (#33, #208)
   config.py         structural Protocols (Config/Model/Target) the core reads against (#31)
   timegen.py        the ISO-8601 formatting primitive event bodies need (#31)
   seed/events.py    event builders — one API, two wire formats (#31, #206)
   seed/writepath.py which wire a Spool is written on: batch | otlp (#206)
   seed/otlp.py      the OTLP wire model + Spool finalisation (#206)
+  live/emit.py      the LIVE-EMISSION seam — wall-clock traces via the Langfuse SDK (#208)
   live/theme.py     Langfuse design tokens + page shell (#31)
   live/paths.py     prefix-aware internal paths (LIVE_BASE_PATH) (#31)
   authoring/        authoring CLI (synth-authoring validate/freeze/new/skills) + scaffold
@@ -55,6 +59,8 @@ src/langfuse_synth_core/
 docs/SEAM.md        the library/kit hand-off rule + the "not a framework" verdict
 docs/INSTALL.md     git-pinned private install + build-secret pattern
 docs/WRITE_PATHS.md the two Spool write paths, the flag, and non-resumable imports
+docs/READ_LIVE_SEAMS.md
+                    the read seam + the live-emission seam, and the line between them
 CONTRACT.md         reserved home for the relocated Contract (#27)
 ```
 

@@ -44,8 +44,8 @@ def test_companion_shell_seam_is_exposed():
     )
 
     # The concrete shell exposes the six-responsibility surface (+ readiness).
-    for method in ("langfuse", "ingestor", "read_json", "llm", "readiness",
-                   "mount_health", "serve", "make_server", "run"):
+    for method in ("langfuse", "emitter", "reader", "ingestor", "read_json", "llm",
+                   "readiness", "mount_health", "serve", "make_server", "run"):
         assert callable(getattr(CompanionAdapter, method))
     # The seam stays a runtime-checkable Protocol the shell structurally satisfies.
     assert isinstance(parse_invocation(["-c", "x.yaml", "--host", "0.0.0.0", "--port", "9"]),
@@ -62,6 +62,24 @@ def test_companion_llm_ships_in_runtime_without_sdks():
 
     for name in ("resolve_provider", "resolve_model", "get_llm", "LLMClient", "ChatResult"):
         assert hasattr(llm, name)
+
+
+def test_the_read_and_live_seams_ship_in_runtime():
+    # Both v4 seams (portal #208) are imported by deployed kit code — `verify` reads through
+    # one and a Companion App emits through the other — so they must resolve on a BARE
+    # runtime install, with the Langfuse SDK imported lazily inside the call that needs it.
+    from langfuse_synth_core.live.emit import LiveEmitter, LiveTrace
+    from langfuse_synth_core.read import LangfuseReader, Observation, Score, Trace
+
+    for method in ("trace", "traces", "observations", "scores", "session", "experiments",
+                   "experiment_items", "read_api"):
+        assert hasattr(LangfuseReader, method)
+    for method in ("trace", "score", "flush", "shutdown"):
+        assert callable(getattr(LiveEmitter, method))
+    for method in ("span", "generation", "event", "update", "score"):
+        assert callable(getattr(LiveTrace, method))
+    assert Score("s", "n").value is None and Trace("t").root is None
+    assert Observation("o").is_root
 
 
 def test_derivation_hook_ships_in_runtime():
