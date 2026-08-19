@@ -1,9 +1,21 @@
-"""Builders for batch-ingestion event envelopes (spec §2, §3).
+"""Builders for the Spool's wire objects — one Python API, two wire formats (spec §2, §3).
 
-Each returns the ``{id, type, timestamp, body}`` envelope the ingestion endpoint
-expects. Envelope ids are derived from the object id + type so re-runs are idempotent.
-Field names match the OpenAPI bodies exactly (TraceBody / CreateSpanBody /
-CreateGenerationBody / CreateEventBody / ScoreBody).
+Each builder keeps its name and its arguments; a kit composes exactly the same call tree
+whichever wire the Spool is written on. What changes is what comes back, selected by
+:mod:`langfuse_synth_core.seed.writepath`:
+
+* **batch** (the default, today's behaviour) — the ``{id, type, timestamp, body}`` envelope
+  ``/api/public/ingestion`` expects. Envelope ids are derived from the object id + type so
+  re-runs are idempotent. Field names match the OpenAPI bodies exactly (TraceBody /
+  CreateSpanBody / CreateGenerationBody / CreateEventBody / ScoreBody).
+* **otlp** (portal #206) — an OTLP span, for Langfuse v4's observations-first model. See
+  :mod:`langfuse_synth_core.seed.otlp` for the mapping and why this is raw OTLP rather than
+  the Langfuse SDK.
+
+**Scores are the exception and stay on one path.** Score creation survives the v4 cutover on
+the legacy ingestion endpoint and is the only envelope type that does, so ``score_event``
+emits the same envelope on both paths. That is a decision, not an oversight: do not "tidy"
+the last legacy call away.
 """
 from __future__ import annotations
 
@@ -11,6 +23,8 @@ import hashlib
 from datetime import datetime
 
 from ..timegen import iso
+from . import otlp
+from .writepath import on_otlp
 
 
 # The metered/billable envelope types, grouped by Langfuse's line items (traces,
@@ -51,6 +65,17 @@ def trace_event(
     input=None,
     output=None,
 ) -> dict:
+    """The trace shell. On the OTLP path there is no trace entity to ingest, so this mints
+    the trace's **root observation**: it carries the shell fields as trace-level attributes
+    (copied onto every span of the trace at finalisation) and the overall input and output,
+    which v4 reads from the root observation. Deprecated trace input/output is never used,
+    and its SDK compatibility helpers are deliberately not introduced."""
+    if on_otlp():
+        return otlp.trace_root_span(
+            trace_id=trace_id, timestamp=timestamp, name=name, user_id=user_id,
+            session_id=session_id, tags=tags, environment=environment, metadata=metadata,
+            input=input, output=output,
+        )
     body = _clean(
         {
             "id": trace_id,
@@ -84,6 +109,12 @@ def span_event(
     status_message: str | None = None,
     metadata: dict | None = None,
 ) -> dict:
+    if on_otlp():
+        return otlp.observation_span(
+            obs_id=obs_id, trace_id=trace_id, name=name, obs_type="span", start=start,
+            end=end, parent_id=parent_id, environment=environment, input=input,
+            output=output, level=level, status_message=status_message, metadata=metadata,
+        )
     body = _clean(
         {
             "id": obs_id,
@@ -108,11 +139,14 @@ def span_event(
 # OTel-only feature: they're set via the ``langfuse.observation.type`` span attribute on
 # the ``/api/public/otel`` endpoint. The batch ``/api/public/ingestion`` API we use (for
 # backdating) rejects them — its ObservationBody.type accepts only SPAN | GENERATION |
-# EVENT (confirmed 400 on server 3.179.1). We deliberately keep the batch path: routing
-# every observation through OTLP would add the OTel→Langfuse mapping layer and load to a
-# small self-hosted ClickHouse backend. So emit these as SPAN, carrying the intended type
+# EVENT (confirmed 400 on server 3.179.1). So emit these as SPAN, carrying the intended type
 # and tool-call links in ``metadata`` (named, nested, filterable — just no native badge).
-# Flip True only if a future batch ingestion gains the richer ObservationType enum.
+#
+# The OTLP write path (portal #206) DOES support them — an agent-typed span lands as an
+# AGENT observation — so this switch is no longer blocked on the transport. It stays False
+# anyway: turning it on moves observation counts, and doing that inside the v4 migration
+# would confound the one golden re-bless each kit gets. It is its own change, after the
+# goldens settle. Until then both paths degrade identically, so the flag is invisible here.
 RICH_OBSERVATION_TYPES = False
 
 
@@ -137,6 +171,20 @@ def observation_event(
     ``span-create`` that records the intended type in ``metadata.observation_type`` so the
     structure (agent nesting, tool calls) and filterability survive on older servers."""
     md = dict(metadata or {})
+    if on_otlp():
+        # Same degrade rule as the batch path: rich types stay off until their own change
+        # (turning them on moves observation counts and would confound this migration's
+        # golden re-bless), so the intended type rides metadata and the span stays a span.
+        if RICH_OBSERVATION_TYPES:
+            emitted_type = obs_type.lower()
+        else:
+            emitted_type = "span"
+            md.setdefault("observation_type", obs_type.lower())
+        return otlp.observation_span(
+            obs_id=obs_id, trace_id=trace_id, name=name, obs_type=emitted_type, start=start,
+            end=end, parent_id=parent_id, environment=environment, input=input,
+            output=output, level=level, status_message=status_message, metadata=md,
+        )
     base = {
         "id": obs_id,
         "traceId": trace_id,
@@ -182,6 +230,17 @@ def generation_event(
     prompt_version: int | None = None,
     model_parameters: dict | None = None,
 ) -> dict:
+    if on_otlp():
+        return otlp.observation_span(
+            obs_id=obs_id, trace_id=trace_id, name=name, obs_type="generation", start=start,
+            end=end, parent_id=parent_id, environment=environment, input=input,
+            output=output, level=level, status_message=status_message, metadata=metadata,
+            extra=otlp.generation_extra_attrs(
+                model=model, usage_details=usage_details, cost_details=cost_details,
+                completion_start=completion_start or start, model_parameters=model_parameters,
+                prompt_name=prompt_name, prompt_version=prompt_version,
+            ),
+        )
     body = _clean(
         {
             "id": obs_id,
@@ -223,6 +282,12 @@ def event_event(
     output=None,
 ) -> dict:
     """Zero-duration discrete marker (cache hit, guardrail trip) — spec §3."""
+    if on_otlp():
+        return otlp.observation_span(
+            obs_id=obs_id, trace_id=trace_id, name=name, obs_type="event", start=start,
+            parent_id=parent_id, environment=environment, input=input, output=output,
+            level=level, metadata=metadata,
+        )
     body = _clean(
         {
             "id": obs_id,
