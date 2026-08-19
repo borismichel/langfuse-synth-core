@@ -67,13 +67,21 @@ def get_all_scores(base: str, name: str, limit_pages: int = 30, *,
 
 
 def _legacy_score_row(score: "read.Score") -> dict:
-    """Render a normalised score as the row shape the deprecated scores APIs returned."""
+    """Render a normalised score as the row shape the deprecated scores APIs returned.
+
+    Faithfully, including the parts that were never useful: a categorical score came back
+    as ``value: 0`` **beside** its ``stringValue``, so that is what a caller gets here. A
+    kit doing ``float(row["value"])`` on one was already reading a placeholder; it must not
+    start raising on the day its target cuts over. Reading a categorical score correctly is
+    what the seam's :attr:`~langfuse_synth_core.read.Score.string_value` is for.
+    """
     row = dict(score.raw)
     row.update({
         "id": score.id,
         "name": score.name,
         "dataType": score.data_type,
-        "value": score.numeric_value if score.numeric_value is not None else score.string_value,
+        "value": score.numeric_value if score.numeric_value is not None else (
+            0 if score.string_value is not None else None),
         "stringValue": score.string_value,
         "comment": score.comment,
         "timestamp": score.timestamp.isoformat() if score.timestamp else None,
@@ -87,5 +95,9 @@ def _legacy_score_row(score: "read.Score") -> dict:
 
 
 def parse_ts(s: str) -> datetime:
-    """Parse a Langfuse ISO timestamp (``...Z``) into an aware :class:`datetime`."""
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    """Parse a Langfuse ISO timestamp (``...Z``) into an aware :class:`datetime`.
+
+    One implementation, in the read seam — the two must never drift, because a `verify` that
+    parsed timestamps differently from the seam that fetched them would compare a demo's
+    story against itself and lose."""
+    return read.parse_ts(s)

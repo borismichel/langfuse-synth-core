@@ -74,6 +74,14 @@ Whoever cuts the next version ships these; delete each entry when its tag lands.
   the unresolvable ref, which is the loud failure we want over an `ImportError` at seed
   time. `tests/test_scaffold_image.py` skips itself while the newest published tag is
   below `MIN_CORE_REF`, and returns by itself when v2.0.0 lands.
+- **The read seam and the live-emission seam are on `main` too** (portal #208) — `read.py`
+  (traces, observations, scores, sessions and experiments, normalised across the v4 and the
+  deprecated read APIs), `live/emit.py` (wall-clock emission on the Langfuse SDK),
+  `adapter.reader()` / `adapter.emitter()`, and the backdate probe reading back through the
+  seam. **Breaking beyond the Spool format:** `lfread.scores_path()` is removed — it chose
+  between two endpoints platform v4 deletes. `lfread.get_all_scores()` keeps its signature
+  and its row shape, and now answers on either generation, so an un-rewired kit reads a
+  cut-over project unchanged. See [`docs/READ_LIVE_SEAMS.md`](docs/READ_LIVE_SEAMS.md).
 
 ## Release checklist
 

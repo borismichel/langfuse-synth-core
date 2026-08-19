@@ -43,9 +43,19 @@ The library was cut **`v1.0.0`** on that ratification, both kits golden-green. F
 
 ### `verify` is split — **done (Ring 2, #33 EV · #34 Lender)**
 Read-helpers (auth, paginated GET of scores / traces across the Langfuse REST API) →
-library read-client (`langfuse_synth_core.lfread`). The `run_verify` body (scenario
-assertions, golden-path) → kit. The split is proven assertion-identical to the pre-split
-`verify` against a seeded env, on **both** kits.
+library read-client. The `run_verify` body (scenario assertions, golden-path) → kit. The
+split is proven assertion-identical to the pre-split `verify` against a seeded env, on
+**both** kits.
+
+**The read-client became the read seam (portal #208).** The substance now lives in
+`langfuse_synth_core.read` — traces, observations, scores, sessions and experiments,
+normalised across the v4 and the deprecated Langfuse read APIs, because platform v4 retires
+every endpoint the kits read and its replacements are not drop-in.
+`langfuse_synth_core.lfread` keeps the two primitives that did not change (auth + a single
+authenticated GET) and one compatibility front for the un-rewired kits. The seam rule is
+unchanged and is *why* this landed in the library: speaking the Langfuse data model is the
+machine's job, and the remap would otherwise be written three times. See
+[`READ_LIVE_SEAMS.md`](READ_LIVE_SEAMS.md).
 
 ## Distribution
 

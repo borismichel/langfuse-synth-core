@@ -491,3 +491,56 @@ def test_a_legacy_categorical_score_is_not_reported_as_the_number_zero(monkeypat
     assert score.string_value == "pass"
     assert score.numeric_value is None
     assert score.value == "pass"
+
+
+def test_the_legacy_trace_list_carries_id_strings_not_objects(monkeypatch):
+    """`GET /api/public/traces` answers `TraceWithDetails`, whose `observations` and
+    `scores` are lists of **ids**; only the single-trace GET embeds the objects. Reading the
+    list as though it embedded them crashes on every real project."""
+    routes = dict(LEGACY_EMPTY)
+    routes["/api/public/traces"] = {"data": [{
+        "id": "t0", "name": "answer_question", "timestamp": "2026-06-04T11:59:59.000Z",
+        "sessionId": "sess-0", "tags": ["golden"],
+        "observations": ["obs-1", "obs-2"],      # ids, not bodies
+        "scores": ["s-1"],
+    }], "meta": {"totalItems": 1, "totalPages": 1}}
+    monkeypatch.setattr(read, "request_retry", _transport(routes))
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
+
+    traces = reader.traces(limit=10)
+
+    assert [t.id for t in traces] == ["t0"]
+    assert traces[0].observations == []          # the list endpoint carries no bodies
+    assert traces[0].session_id == "sess-0"
+
+
+def test_a_session_and_user_read_together_filters_by_both_on_either_arm(monkeypatch):
+    """The legacy observations list has no session filter, so that arm filters client-side —
+    and must apply *every* filter it was given, or the same call answers differently
+    depending on which generation served it."""
+    routes = dict(LEGACY_EMPTY)
+    routes["/api/public/traces"] = {"data": [{"id": "t0", "sessionId": "sess-1",
+                                              "userId": "u-1"}],
+                                    "meta": {"totalItems": 1, "totalPages": 1}}
+    routes["/api/public/traces/t0"] = {
+        "id": "t0", "sessionId": "sess-1", "userId": "u-1",
+        "observations": [dict(LEGACY_GENERATION_ROW, id="o1")]}
+    monkeypatch.setattr(read, "request_retry", _transport(routes))
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
+
+    assert reader.observations(session_id="sess-1", user_id="u-1")
+    assert reader.observations(session_id="sess-1", user_id="someone-else") == []
+
+
+def test_an_unreadable_target_fails_loudly_instead_of_picking_an_arm(monkeypatch):
+    """A 401 is bad keys, not a cut-over target. Guessing "legacy" there would report a
+    credentials failure as an empty demo — the silent degradation this spec treats as a
+    defect in its own right."""
+    routes = {"/api/public/traces": (401, {"message": "Unauthorized"})}
+    monkeypatch.setattr(read, "request_retry", _transport(routes))
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
+
+    with pytest.raises(read.ReadError) as caught:
+        reader.read_api
+
+    assert caught.value.status_code == 401

@@ -32,6 +32,12 @@ exporter that does not send `x-langfuse-ingestion-version: 4` with a delay of up
 minutes, and every Spool written on the batch path is exactly that data. Preferring v4
 before a kit's write path has moved would read a demo back as half-empty.
 
+**On the shape: one method per read, branching on the generation inside it.** That is the
+same shape the write seam took for the same dual-path problem — ``seed/events.py`` branches
+on ``on_otlp()`` inside each builder rather than growing two builder families — and the two
+seams ship in the same release and lose their legacy halves in the same one (#213), where
+the deletion is the branch and its normaliser in one known place.
+
 This module owns **reads only**. Writes are two other seams: the Spool's
 (:mod:`langfuse_synth_core.seed`, deterministic and backdated) and the live surfaces'
 (:mod:`langfuse_synth_core.live.emit`, wall-clock).
@@ -369,7 +375,14 @@ def _trace_from_legacy(body: dict) -> Trace:
     The legacy body embeds its observations and scores, and holds user / session / tags at
     the trace level; the seam pushes those down onto the observations so that an assertion
     about an observation's session reads the same on either generation.
+
+    The *list* endpoint is a different shape from the single-trace GET: it answers
+    ``observations`` and ``scores`` as lists of **ids**, not bodies. Those carry nothing to
+    normalise, so a trace read from a list comes back with an empty observation set — ask
+    :meth:`LangfuseReader.trace` for the bodies.
     """
+    observations = [o for o in (body.get("observations") or []) if isinstance(o, dict)]
+    scores = [s for s in (body.get("scores") or []) if isinstance(s, dict)]
     return Trace(
         id=body.get("id", ""),
         name=body.get("name"),
@@ -381,9 +394,8 @@ def _trace_from_legacy(body: dict) -> Trace:
         input=body.get("input"),
         output=body.get("output"),
         metadata=body.get("metadata"),
-        observations=[_observation_from_legacy(o, trace=body)
-                      for o in (body.get("observations") or [])],
-        scores=[_score_from_legacy(s) for s in (body.get("scores") or [])],
+        observations=[_observation_from_legacy(o, trace=body) for o in observations],
+        scores=[_score_from_legacy(s) for s in scores],
         raw=body,
     )
 
@@ -553,8 +565,19 @@ class LangfuseReader:
         return self._read_api
 
     def _probe_read_api(self) -> str:
+        """Ask the target which generation it serves. A `404` is the answer "v4"; anything
+        other than that or a success is a *failure to read the target at all* — bad keys, a
+        wrong host, a server error — and it is raised rather than resolved into an arm.
+        Guessing here would report a credentials failure as an empty demo."""
         resp = self._request(_PROBE_PATH, {"limit": 1})
-        return V4 if resp.status_code == 404 else LEGACY
+        if resp.status_code == 404:
+            return V4
+        if resp.status_code >= 400:
+            raise ReadError(
+                f"cannot read {self.base_url} — GET {_PROBE_PATH} answered "
+                f"{resp.status_code}; check the keys, the host, and the project.",
+                status_code=resp.status_code)
+        return LEGACY
 
     # -- traces ------------------------------------------------------------
     def trace(self, trace_id: str, *, with_scores: bool = True) -> Trace | None:
@@ -601,7 +624,7 @@ class LangfuseReader:
             for obs in rows:
                 if obs.trace_id:
                     grouped.setdefault(obs.trace_id, []).append(obs)
-            return [_trace_from_observations(tid, obs, []) 
+            return [_trace_from_observations(tid, obs, [])
                     for tid, obs in list(grouped.items())[:limit]]
         params = {"sessionId": session_id, "userId": user_id, "name": name,
                   "environment": environment}
@@ -663,6 +686,7 @@ class LangfuseReader:
                     and (type is None or (o.type or "").upper() == type.upper())
                     and (name is None or o.name == name)
                     and (parent_id is None or o.parent_id == parent_id)
+                    and (user_id is None or o.user_id == user_id)
                     and (environment is None or o.environment == environment)]
         params = {"traceId": trace_id, "type": type, "name": name,
                   "parentObservationId": parent_id, "userId": user_id,

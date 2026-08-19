@@ -154,5 +154,20 @@ proving that live traces land; it gains no golden coverage.
 ## Verified against a real project
 
 Both seams were exercised against a real Langfuse Cloud project on **2026-08-19** with
-`examples/v4_seam_check.py` — see that script's header for what it asserts and how to run
-it. Mocked tests do not prove backend behaviour; that is why the check exists.
+`examples/v4_seam_check.py`. Mocked tests do not prove backend behaviour; that is why the
+check exists. What that run established:
+
+- One trace emitted through the live seam — root observation, nested span, nested
+  generation with model / usage / cost, a numeric trace score and a categorical
+  observation score — read back **identically on both arms**, attribute for attribute.
+- A two-item dataset with one experiment run (`SEAM_CHECK_CREATE_EXPERIMENT=1`) read back
+  through the **Experiments API** on v4 and through `/datasets/{name}/runs` on legacy: the
+  run listed and its items carrying their traces on both.
+- The five wire behaviours above, each of which the seam now handles.
+
+**What it does not establish.** Cloud still dual-serves both generations, so the v4 arm was
+reached by pinning `read_api="v4"` rather than by a project that has actually cut over. The
+*resolution* step — a deprecated endpoint answering `404` and the reader switching arms by
+itself — is unit-tested, not observed on a cut-over server, and no such project exists to
+test against yet (the research notes carry the same gap). That is the one piece of this
+seam that only 2026-11-16, or a self-hosted v4 server, can prove.

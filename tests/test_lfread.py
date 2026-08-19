@@ -90,3 +90,29 @@ def test_the_legacy_scores_path_probe_is_gone():
 def test_parse_ts_handles_the_z_suffix():
     ts = lfread.parse_ts("2026-06-04T12:00:00.000Z")
     assert ts.year == 2026 and ts.tzinfo is not None
+
+
+def test_the_compatibility_front_reproduces_the_legacy_categorical_row_exactly(monkeypatch):
+    """The deprecated scores API sent `value: 0` beside `stringValue` for a categorical
+    score. This front's whole job is to look like that API to a kit that has not been
+    rewired, so it reproduces the placeholder rather than improving on it — a kit doing
+    `float(row["value"])` must not start raising because the target cut over.
+    """
+
+    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0):
+        if url.endswith("/api/public/traces"):
+            return _Resp(404, {"message": "not found"})
+        if url.endswith("/api/public/v3/scores"):
+            return _Resp(200, {"data": [
+                {"id": "s1", "name": "resolution", "dataType": "CATEGORICAL",
+                 "value": "escalated", "timestamp": "2026-06-04T12:00:00.000Z",
+                 "subject": {"kind": "trace", "id": "t1"}},
+            ], "meta": {"limit": 100}})
+        raise AssertionError(f"unexpected read: {url}")
+
+    monkeypatch.setattr(read, "request_retry", fake_request)
+    row = lfread.get_all_scores("http://x", "resolution")[0]
+
+    assert row["stringValue"] == "escalated"
+    assert row["value"] == 0
+    assert float(row["value"]) == 0.0
