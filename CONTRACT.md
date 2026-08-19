@@ -241,7 +241,8 @@ Recovery is to clear that deployment's Langfuse data and import from the top
 (`SYNTH_IMPORT_CONFIRM_CLEARED=1`); re-running `generate-spool` is also a clean slate.
 Core's `docs/WRITE_PATHS.md` carries the mechanism; this is the portal-facing consequence.
 
-Every kit is on the batch path until it is deliberately cut over, one kit at a time.
+The three gold kits are on the batch path until each is deliberately cut over, one
+kit at a time. A kit scaffolded by `synth-authoring new` is born on the OTLP path.
 
 ---
 

@@ -16,6 +16,12 @@ Both are **cursor-paginated and carry no total**, so a floor check asserts *pres
 returned row rather than reading a count out of the response's `meta`. Re-pointing a URL
 does not bring that number back: if the story needs a real total, aggregate it (the Metrics
 API) or count what you actually read.
+
+The paths sit here rather than in the library only because core's read seam is still being
+built: when it lands, these two calls become calls into it and the endpoints stop being the
+kit's business — the same way `Ingestor` already owns the write side. Until then, keep the
+auth and retry behaviour by going through `lfread`, and add scenario reads beside these two
+rather than reaching for an HTTP client of your own.
 """
 from __future__ import annotations
 
@@ -51,6 +57,8 @@ def run_verify(cfg: Config, *, log=print) -> VerifyReport:
     report = VerifyReport()
 
     # A trace is its root observation under v4, so the roots are the trace floor check.
+    # `isRootObservation` is a documented filter on the v2 observations API, as is `name`
+    # on the v3 scores API — both are in Langfuse's public OpenAPI, not inferred here.
     roots = get_json(
         base, "/api/public/v2/observations", {"isRootObservation": "true", "limit": 1}
     ).get("data", [])

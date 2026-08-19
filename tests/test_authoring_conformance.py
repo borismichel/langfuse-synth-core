@@ -546,13 +546,13 @@ def _kit_with_sources(tmp_path, **files: str) -> Path:
 
 
 def test_a_deprecated_read_endpoint_is_an_advisory(tmp_path):
-    from langfuse_synth_core.authoring.conformance import legacy_endpoint_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
 
     kit = _kit_with_sources(
         tmp_path,
         **{"synth/verify.py": 'get_json(base, "/api/public/traces", {"limit": 1})\n'},
     )
-    advisories = legacy_endpoint_advisories(kit)
+    advisories = legacy_langfuse_advisories(kit)
     hit = [a for a in advisories if "/api/public/traces" in a]
     assert hit, advisories
     assert "synth/verify.py:1" in hit[0]
@@ -560,7 +560,7 @@ def test_a_deprecated_read_endpoint_is_an_advisory(tmp_path):
 
 
 def test_the_surviving_endpoints_are_not_flagged(tmp_path):
-    from langfuse_synth_core.authoring.conformance import legacy_endpoint_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
 
     kit = _kit_with_sources(
         tmp_path,
@@ -577,11 +577,11 @@ def test_the_surviving_endpoints_are_not_flagged(tmp_path):
             "synth/seed/path.py": "set_spool_write_path(OTLP)\n",
         },
     )
-    assert legacy_endpoint_advisories(kit) == []
+    assert legacy_langfuse_advisories(kit) == []
 
 
 def test_the_dataset_runs_read_is_flagged_but_the_datasets_list_is_not(tmp_path):
-    from langfuse_synth_core.authoring.conformance import legacy_endpoint_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
 
     kit = _kit_with_sources(
         tmp_path,
@@ -593,24 +593,38 @@ def test_the_dataset_runs_read_is_flagged_but_the_datasets_list_is_not(tmp_path)
             "synth/seed.py": "set_spool_write_path(OTLP)\n",
         },
     )
-    advisories = legacy_endpoint_advisories(kit)
+    advisories = legacy_langfuse_advisories(kit)
     assert len(advisories) == 1, advisories
     assert "/runs" in advisories[0] and "experiment" in advisories[0]
 
 
+def test_the_legacy_rest_create_endpoints_are_flagged(tmp_path):
+    """`POST /spans|/generations|/events` go with batch ingestion — a kit that writes an
+    observation itself, rather than through core's builders, has the same debt."""
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/emit.py": 'post(f"{base}/api/public/generations", body)\n',
+           "synth/seed.py": "set_spool_write_path(OTLP)\n"},
+    )
+    advisories = legacy_langfuse_advisories(kit)
+    assert len(advisories) == 1 and "/api/public/generations" in advisories[0]
+
+
 def test_a_kit_still_on_the_batch_write_path_is_an_advisory(tmp_path):
     """The write half: no kit-set OTLP pin means the Spool is still batch-ingested."""
-    from langfuse_synth_core.authoring.conformance import legacy_endpoint_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
 
     kit = _kit_with_sources(tmp_path, **{"synth/seed.py": "ingestor.import_spool()\n"})
-    assert any("write path" in a and "batch" in a for a in legacy_endpoint_advisories(kit))
+    assert any("write path" in a and "batch" in a for a in legacy_langfuse_advisories(kit))
 
 
 def test_the_totalitems_technique_is_flagged_alongside_a_dying_endpoint(tmp_path):
     """`meta.totalItems` is the counting technique the v4 read APIs do not offer — but
     the endpoints that survive still answer it, so it is only advised where a deprecated
     endpoint is read in the same file."""
-    from langfuse_synth_core.authoring.conformance import legacy_endpoint_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
 
     kit = _kit_with_sources(
         tmp_path,
@@ -626,7 +640,7 @@ def test_the_totalitems_technique_is_flagged_alongside_a_dying_endpoint(tmp_path
             "synth/seed.py": "set_spool_write_path(OTLP)\n",
         },
     )
-    advisories = legacy_endpoint_advisories(kit)
+    advisories = legacy_langfuse_advisories(kit)
     assert any("totalItems" in a and "verify.py" in a for a in advisories)
     assert not any("totalItems" in a and "items.py" in a for a in advisories)
 

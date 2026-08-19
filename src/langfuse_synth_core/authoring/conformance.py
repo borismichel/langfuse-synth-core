@@ -6,7 +6,7 @@ don't document it), generalized. Every finding cites the ``CONTRACT.md`` section
 enforces, so a red check is a pointer into the one authoritative document rather than a
 rule restated in this tool's own words (portal #196).
 
-The four check groups, and where each rule lives:
+The five check groups, and where each rule lives:
 
 * **Manifest declarations** — the live surface declares what the portal relies on
   (ports, health paths; the readiness route must differ from ``/``) and the command
@@ -24,12 +24,22 @@ The four check groups, and where each rule lives:
   ``SYNTH_STATE_DIR`` at *call* time and a fabricated payload really writes/loads there.
   A stateless kit skips these with a note — statelessness is a legitimate contract
   citizen — §"Per-run anchors (opt-in)".
+* **Legacy Langfuse surfaces** (static, *advisory*) — whether the kit still reaches an API
+  Langfuse removes on 2026-11-16: a deprecated endpoint named in its sources, the
+  ``meta.totalItems`` counting technique beside one, and a Spool still written on the batch
+  path — §"Reserved-verb semantics (the pipeline)" / §"The spool".
 
-**Advisory-first for the pre-portal kits** (the #181 runbook-advisories precedent):
-``--advisory`` prints the same findings but always exits 0, so EV/Lender run the suite in
-CI from day one without converged-shape violations blocking them. Post-portal kits run it
-enforcing. This module rides the ``[authoring]`` extra; the companion serve checks
-additionally need the companion web deps and degrade to a printed skip without them.
+**Two channels, and they are not the same thing.** *Findings* block, unless the caller
+passes ``--advisory``; *advisories* never block, in any mode. ``--advisory`` is the
+pre-portal-kit switch (the #181 runbook-advisories precedent): it prints the same findings
+but always exits 0, so EV/Lender run the suite in CI from day one without converged-shape
+violations blocking them, and post-portal kits run it enforcing. The advisory channel is
+per-check and permanent-until-retired: the v4 legacy-endpoint group rides it because every
+kit in the fleet carries some of that debt while the migration is in flight (portal #207),
+so the two print with different markers.
+
+This module rides the ``[authoring]`` extra; the companion serve checks additionally need
+the companion web deps and degrade to a printed skip without them.
 """
 
 from __future__ import annotations
@@ -540,8 +550,14 @@ def _probe_payload(cls: type, label: str, findings: list[str], notes: list[str])
 _DEPRECATED_ENDPOINTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(r"/api/public/ingestion"),
-        "core posts OTLP spans to /api/public/otel/v1/traces on the v4 write path; only "
-        "score creation stays on the ingestion endpoint",
+        "core posts OTLP spans to /api/public/otel/v1/traces on the v4 write path — unless "
+        "what this posts is scores, the one envelope type the ingestion endpoint keeps "
+        "serving past the cutover, in which case it stays exactly where it is",
+    ),
+    (
+        re.compile(r"/api/public/(spans|generations|events)\b"),
+        "the legacy REST create endpoints go with batch ingestion; core writes every "
+        "observation as an OTLP span",
     ),
     (
         re.compile(r"/api/public/traces"),
@@ -576,13 +592,18 @@ _TOTAL_ITEMS = re.compile(r"totalItems")
 
 
 def _kit_sources(kit_dir: Path) -> list[Path]:
-    """The kit's shipped Python sources — what a deployed container actually runs."""
+    """The kit's shipped Python sources — what a deployed container actually runs.
+
+    ``src/`` is the target shape and the whole checkout is the fallback for a kit that
+    keeps its package elsewhere: over-reading (a tool, a test) costs a nudge nobody has to
+    act on, where missing the package would report a legacy kit clean.
+    """
     src = kit_dir / "src"
     root = src if src.is_dir() else kit_dir
     return sorted(path for path in root.rglob("*.py") if ".venv" not in path.parts)
 
 
-def legacy_endpoint_advisories(kit_dir: str | Path) -> list[str]:
+def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
     """Advisory lines for every legacy Langfuse surface the kit still reaches: a deprecated
     endpoint in its sources, the ``meta.totalItems`` counting technique beside one, and a
     Spool still written on the batch path. Empty for a v4-native kit."""
@@ -750,7 +771,7 @@ def run_conformance(
                     "anchors write where the state-dir env points, resolved at call time"
                 )
 
-    report.advisories.extend(legacy_endpoint_advisories(kit_dir))
+    report.advisories.extend(legacy_langfuse_advisories(kit_dir))
     if not report.advisories:
         report.passed.append(
             "no legacy Langfuse endpoint reached: the Spool is written on the OTLP path "
@@ -809,7 +830,7 @@ def execute(args: argparse.Namespace) -> int:
     for line in report.notes:
         print(f"  · {line}")
     for line in report.advisories:
-        print(f"  ⚠ advisory {line}")
+        print(f"  ⚠ v4-advisory {line}")
     marker = "⚠ advisory" if args.advisory else "✗"
     for line in report.findings:
         print(f"  {marker} {line}")
@@ -817,7 +838,7 @@ def execute(args: argparse.Namespace) -> int:
     if report.advisories:
         print(
             f"⚠ conformance: {len(report.advisories)} v4-migration advisory(ies) — "
-            f"reported, never blocking at this stage (portal #207)"
+            f"reported, never blocking in any mode (portal #207)"
         )
     if report.ok:
         print("✓ conformance: the Contract holds")
