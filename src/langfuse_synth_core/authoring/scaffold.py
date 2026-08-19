@@ -55,12 +55,20 @@ from langfuse_synth_core.authoring.knob import inject_target_traces
 # usecase.yaml carries, so an invalid slug is rejected here rather than at validate time.
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
+# The oldest core release an emitted kit can install against. The templates use core APIs
+# that arrived with the v4 OTLP write path (portal #206, released by #209), so a kit pinned
+# below this does not import its own `seed` module. Unlike DEFAULT_CORE_REF this moves only
+# when the scaffold starts using a newer core feature — `tests/test_scaffold_image.py` reads
+# it to tell "the emitted kit needs a core nobody has published yet" from a real failure.
+MIN_CORE_REF = "v2.0.0"
+
 # The default lib pin the emitted kit references (a TAG, never a branch — see
 # RELEASING.md) — both the runtime dependency AND the `publish.yml` -> `kit-publish.yml`
 # workflow_call ref (#102) share this one pin. The author bumps it as the lib releases;
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
-# `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call.
-DEFAULT_CORE_REF = "v1.10.0"
+# `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call, and
+# must be >= MIN_CORE_REF or the emitted kit cannot run at all.
+DEFAULT_CORE_REF = "v2.0.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted
@@ -268,8 +276,10 @@ def build_manifest(slug: str, *, with_companion: bool = False) -> dict:
                     "title": "Generation seed",
                     "description": (
                         "Deterministic RNG seed for the whole dataset. Vary it to mint a "
-                        "distinct trace/id set per deployment; the same seed re-seeds "
-                        "idempotently (upsert)."
+                        "distinct trace/id set per deployment; the same seed always "
+                        "materializes the same Spool, but re-seeding a project that "
+                        "already holds it appends a second copy (the v4 write path has "
+                        "no upsert)."
                     ),
                 },
             },

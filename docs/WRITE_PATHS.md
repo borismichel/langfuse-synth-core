@@ -54,6 +54,17 @@ code change; their numbers move on the commit that flips a kit.
 
 Each kit also re-blesses its golden exactly once, and the diff is reviewed as data.
 
+## Where the fleet stands
+
+`synth-authoring new` emits a kit **on the OTLP path** (portal #207): its `seed` pins it in
+one line, its `verify` reads the v4 APIs, and its blessed golden is a Spool of spans. The
+three gold kits stay on `batch` until each is deliberately cut over (portal #210).
+
+`synth-authoring conformance` reports the difference rather than leaving it to memory: a kit
+whose sources still name a deprecated endpoint, or that carries no OTLP pin, gets an
+**advisory** per site — reported in every mode, blocking in none, because every kit in the
+fleet has some of this debt while the migration is in flight.
+
 ## Non-resumable imports, and how to recover
 
 OTLP has no idempotent upsert. Three identical posts produced three copies of every

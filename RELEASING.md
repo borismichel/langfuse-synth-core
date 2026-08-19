@@ -62,8 +62,18 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-*(nothing pending — v1.10.0 shipped the `verify-version` tag↔pyproject guard in
-`kit-publish.yml`, a CI-only release)*
+- **The next release is `v2.0.0`, and it is a full runtime release** (Spec H — portal
+  #204/#209). Two changes on `main` make it so: core learned to write the Spool over OTLP
+  beside the batch path (portal #206), and the authoring surface now emits kits on that
+  path (portal #207). The Spool's *format* break under the flag is what makes the bump
+  major.
+- **`MIN_CORE_REF` and `DEFAULT_CORE_REF` in `scaffold.py` already name `v2.0.0`.** A kit
+  scaffolded from `main` pins that tag because its emitted `seed` imports the OTLP write
+  path, which no published release carries yet — so `synth-authoring new` produces an
+  installable kit only once the tag is pushed (step 2). Until then `pip install` fails on
+  the unresolvable ref, which is the loud failure we want over an `ImportError` at seed
+  time. `tests/test_scaffold_image.py` skips itself while the newest published tag is
+  below `MIN_CORE_REF`, and returns by itself when v2.0.0 lands.
 
 ## Release checklist
 

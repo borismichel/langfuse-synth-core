@@ -177,6 +177,18 @@ def _ci_doc(kit):
     return yaml.safe_load((kit.dest / ".github" / "workflows" / "ci.yml").read_text())
 
 
+def test_the_default_core_pin_can_actually_run_the_emitted_kit():
+    """`DEFAULT_CORE_REF` moves every release, `MIN_CORE_REF` only when the templates start
+    using a newer core API — but a default below the floor emits a kit that cannot import
+    its own seed, which no other gate would catch until someone deployed it."""
+    from langfuse_synth_core.authoring.scaffold import DEFAULT_CORE_REF, MIN_CORE_REF
+
+    def version(tag: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in tag.removeprefix("v").split("."))
+
+    assert version(DEFAULT_CORE_REF) >= version(MIN_CORE_REF)
+
+
 def test_ci_workflow_runs_on_push_and_pull_request(kit):
     doc = _ci_doc(kit)
     # YAML parses the bare `on:` key as the boolean True.
@@ -486,11 +498,81 @@ def test_scaffolded_seed_passes_the_golden_gate(kit):
 
 
 def test_blessed_golden_is_full_payload(kit):
-    """The blessed golden is the whole Spool — traces, generations, and scores."""
+    """The blessed golden is the whole Spool — trace roots, generations, and scores."""
     blob = kit.golden_path.read_bytes()
-    assert b'"type":"trace-create"' in blob
-    assert b'"type":"generation-create"' in blob
-    assert b'"type":"score-create"' in blob
+    assert b'"langfuse.trace.name"' in blob                  # the trace shell, on its root
+    assert b'"langfuse.observation.usage_details"' in blob   # the generation
+    assert b'"type":"score-create"' in blob                  # scores stay envelopes
+
+
+# --- AC (portal #207): a newly scaffolded kit is born v4-native ---
+# Langfuse Cloud goes v4-only on 2026-11-16. A scaffold left on the legacy path keeps
+# minting kits with a migration to do on day one, so the emitted kit writes its Spool over
+# OTLP and reads the v4 APIs — and says so wherever it describes a re-seed.
+
+
+def test_blessed_golden_is_written_on_the_otlp_path(kit):
+    """The bless ran the emitted seed, so the oracle proves the pin is in force: every
+    observation is an OTLP span, and nothing carries the batch envelope's nesting field."""
+    blob = kit.golden_path.read_bytes()
+    assert b'"spanId"' in blob
+    assert b'"type":"trace-create"' not in blob
+    assert b'"parentObservationId"' not in blob
+
+
+def test_scaffolded_seed_pins_the_otlp_write_path(kit):
+    from langfuse_synth_core.seed import writepath
+
+    seed_src = (kit.dest / "src" / "synth" / "seed.py").read_text()
+    assert "set_spool_write_path(OTLP)" in seed_src
+    # The name the kit imports is core's, not a string the scaffold invented.
+    assert writepath.OTLP == "otlp" and hasattr(writepath, "set_spool_write_path")
+
+
+def test_scaffolded_verify_reads_the_v4_apis(kit):
+    verify_src = (kit.dest / "src" / "synth" / "verify.py").read_text()
+    assert "/api/public/v2/observations" in verify_src
+    assert "/api/public/v3/scores" in verify_src
+    assert "/api/public/traces" not in verify_src
+    assert "totalItems" not in verify_src   # the count the v4 read APIs do not serve
+
+
+def test_the_scaffold_promises_no_idempotent_re_seed(kit):
+    """OTLP appends rather than upserting, so every place the kit describes a re-run —
+    the config comment, the manifest's knob description, the runbook's reset beat — must
+    stop calling it safe (Spec H #204)."""
+    retired = (
+        "re-seeds idempotently",
+        "idempotent upsert",
+        "deterministic upsert",
+        "re-seeding the same project is safe",
+        "re-run to resume",
+    )
+    surfaces = ("config/demo.yaml", "usecase.yaml", "DEMO_SCRIPT.md", "src/synth/seed.py")
+    for rel in surfaces:
+        text = (kit.dest / rel).read_text().lower()
+        for phrase in retired:
+            assert phrase not in text, f"{rel} still promises: {phrase}"
+    runbook = (kit.dest / "DEMO_SCRIPT.md").read_text().lower()
+    assert "append" in runbook and "doubled" in runbook   # and says what happens instead
+
+
+def test_a_freshly_scaffolded_kit_is_runnable_green(kit):
+    """AC: runnable-green. The kit's OWN suite — determinism golden, manifest validity,
+    retargeting — run as its CI would, rather than core re-asserting each gate itself."""
+    import os
+    import subprocess
+    import sys
+
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(kit.dest / "src"), str(kit.dest / "tests")]),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(kit.dest / "tests")],
+        cwd=kit.dest, env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]
 
 
 # --- AC: seed + verify wired through the library; derivation hook pre-wired to identity ---

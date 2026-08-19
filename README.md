@@ -70,10 +70,13 @@ toolchain (namespaced `synth-authoring`, never `synth`, so it can't shadow a kit
 # wired through the library, the identity derivation hook, a render:markdown Presenter
 # Runbook, the reference non-root Dockerfile), then blesses the initial determinism golden
 # so the fresh kit passes `synth-authoring validate` AND the golden gate on first generation.
+# The emitted kit is v4-native (portal #207): its seed pins the OTLP write path
+# (docs/WRITE_PATHS.md) and its verify reads the v4 APIs, so a new kit is never born with a
+# migration already to do.
 synth-authoring new my-kit                 # -> ./my-kit/
 synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
-synth-authoring new my-kit --core-ref v1.10.0   # lib git ref the kit pins to (a tag)
+synth-authoring new my-kit --core-ref v2.0.0    # lib git ref the kit pins to (a tag)
 
 # Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
 synth-authoring validate path/to/usecase.yaml

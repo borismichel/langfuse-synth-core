@@ -43,6 +43,10 @@ fetches current docs rather than reasoning from memory** (Langfuse changes often
   `generation.target_traces` knob, ≥1 `render: markdown` artifact — the validator owns these.
 - **The library seam.** The kit composes the trace tree from library primitives; it does not
   reimplement event emission, backdating, ingest, or the read client. See `docs/SEAM.md`.
+- **The wire.** Which transport the Spool is written on (OTLP under Langfuse v4) and which
+  endpoints a read uses are core's, pinned in one line of the kit's `seed` — never a payload
+  the kit hand-builds. Craft advice about *what* to model never becomes a reason to write
+  *how* it is transmitted. See `docs/WRITE_PATHS.md`.
 
 ## Why delegate instead of duplicate
 

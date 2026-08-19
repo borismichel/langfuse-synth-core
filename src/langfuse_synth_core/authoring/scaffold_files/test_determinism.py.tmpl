@@ -49,8 +49,12 @@ def test_full_payload_golden_is_byte_identical():
 
 
 def test_golden_is_full_payload_not_ids_and_summary():
-    """The blessed oracle is the whole Spool — traces, generations, and scores."""
+    """The blessed oracle is the whole Spool — trace roots, generations, and scores, on the
+    OTLP wire this kit writes (core `docs/WRITE_PATHS.md`). v4 has no trace entity, so a
+    trace is its root observation and every observation is an OTLP span; scores keep the
+    ingestion envelope, the one envelope type that survives the v4 cutover."""
     blob = GOLDEN_PATH.read_bytes()
-    assert b'"type":"trace-create"' in blob
-    assert b'"type":"generation-create"' in blob
-    assert b'"type":"score-create"' in blob
+    assert b'"spanId"' in blob                                   # observations are spans
+    assert b'"langfuse.trace.name"' in blob                      # the trace shell, on its root
+    assert b'"langfuse.observation.usage_details"' in blob       # the generation
+    assert b'"type":"score-create"' in blob                      # scores stay envelopes

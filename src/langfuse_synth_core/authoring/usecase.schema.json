@@ -129,7 +129,7 @@
           },
           "resumable": {
             "type": "string",
-            "description": "Command to re-run this step safely after failure (spool on shared volume + deterministic upsert IDs)."
+            "description": "Command that replays the Spool from the shared volume (CONTRACT.md, The spool): re-runnable after a failure on the batch write path, non-resumable on the OTLP one."
           },
           "timeout_minutes": { "type": "integer", "minimum": 1 }
         }

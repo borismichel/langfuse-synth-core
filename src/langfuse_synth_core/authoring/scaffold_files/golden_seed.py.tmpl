@@ -3,7 +3,7 @@
 The determinism golden gate in `langfuse-synth-core[authoring]` drives a kit through one
 contract — `seed(target_traces, params) -> bytes` (the full materialized Spool). This
 adapter drives the REAL runtime seed path (`synth.seed.run_seed` in dry-run: spool through
-the library's `Ingestor`, no network, no ingestion) and returns the resulting Spool bytes,
+the library's `Ingestor`, no network, no upload) and returns the resulting Spool bytes,
 so the gate proves the actual `synth seed` is deterministic AND model-free — not a parallel
 materializer that could drift from it.
 
@@ -25,7 +25,7 @@ CONFIG = Path(__file__).resolve().parent.parent / "config" / "demo.yaml"
 
 
 def seed(target_traces: int, params: Mapping[str, Any]) -> bytes:
-    """Materialize the full pre-ingestion Spool for `target_traces` through the runtime seed
+    """Materialize the full pre-upload Spool for `target_traces` through the runtime seed
     path; return its bytes.
 
     `target_traces` is set exactly as the portal sets it (`--set generation.target_traces=N`),

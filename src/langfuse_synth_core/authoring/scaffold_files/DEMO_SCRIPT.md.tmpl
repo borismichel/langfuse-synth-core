@@ -31,5 +31,6 @@ lands (tracing, prompt management, LLM-as-judge, datasets, experiments, scores).
 ## 4. Reset
 
 Langfuse ingestion is append-only; teardown is project-level. Delete the Langfuse project
-(or create a fresh one) and re-deploy. Re-seeding the same project is safe (deterministic
-upsert).
+(or create a fresh one) and re-deploy. Do **not** re-seed on top of a project that already
+holds this demo — the v4 write path appends rather than upserting, so the story would come
+back doubled.

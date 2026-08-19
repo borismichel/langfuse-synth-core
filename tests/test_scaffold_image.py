@@ -26,6 +26,12 @@ exist until after the PR merges, so scaffolding with it makes ``pip install`` fa
 the build on every release PR (found cutting v1.7.0). Resolving the newest published
 ``v*`` tag keeps the gate green through a release while still building against a real,
 installable core.
+
+That substitution only works while the scaffold still runs on the previous release. When
+the templates start using a core API no published release carries — the v4 OTLP write path,
+Spec H portal #206/#207 — there is no installable core to build against and the module
+**skips**, naming ``MIN_CORE_REF``. It returns by itself the moment that tag is published;
+a red build here would say "the emitted Dockerfile is broken", which would not be true.
 """
 
 from __future__ import annotations
@@ -97,13 +103,27 @@ def _latest_released_core_ref() -> str:
     return max(versions)[1] if versions else DEFAULT_CORE_REF
 
 
+def _version(tag: str) -> tuple[int, ...]:
+    """``v1.10.0`` -> ``(1, 10, 0)``; an unparseable tag sorts below everything."""
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+    return tuple(int(g) for g in m.groups()) if m else (0, 0, 0)
+
+
 @pytest.fixture(scope="module")
 def image(tmp_path_factory):
     """Scaffold one kit, build its emitted Dockerfile, yield the tag, clean up the image."""
-    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+    from langfuse_synth_core.authoring.scaffold import MIN_CORE_REF, scaffold_kit
+
+    core_ref = _latest_released_core_ref()
+    if _version(core_ref) < _version(MIN_CORE_REF):
+        pytest.skip(
+            f"the scaffold emits a kit that needs core >= {MIN_CORE_REF} (the OTLP write "
+            f"path); the newest published tag is {core_ref}, so there is nothing "
+            f"installable to build against yet — the gate returns when that tag lands"
+        )
 
     dest = tmp_path_factory.mktemp("kits") / "image-gate"
-    scaffold_kit("image-gate", dest, core_ref=_latest_released_core_ref())
+    scaffold_kit("image-gate", dest, core_ref=core_ref)
 
     tag = f"synth-scaffold-gate:{uuid.uuid4().hex[:12]}"
     build = subprocess.run(

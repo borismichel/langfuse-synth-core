@@ -62,7 +62,7 @@ the story and re-bless.
 synth-authoring new my-kit --dir ../kits          # kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion            # also emit the companion stub (Spec G)
 synth-authoring new my-kit --anchors              # also emit per-run anchors wiring (#199)
-synth-authoring new my-kit --core-ref v1.10.0      # lib git tag the kit pins to
+synth-authoring new my-kit --core-ref v2.0.0       # lib git tag the kit pins to
 ```
 
 This emits a **runnable-green walking skeleton**, not a blank template: the plumbing
@@ -75,7 +75,7 @@ file floor you now own:
 | `usecase.yaml` | The portal manifest (schema-valid, canonical `generation.target_traces` knob injected). The *only* portal surface. | Phase 4 (artifacts), as the story lands |
 | `src/synth/materialize.py` | **Deterministic, model-free generation** — the trace tree. | **Phase 2** |
 | `src/synth/config.py` | Config model + the `DERIVATION_HOOK` (identity by default). | **Phase 3** |
-| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library. | Rarely — grow verbs here + in `usecase.yaml` together |
+| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library; `seed.py` pins the kit's **OTLP write path** and `verify.py` reads the **v4** APIs. | Rarely — grow verbs here + in `usecase.yaml` together |
 | `DEMO_SCRIPT.md` | The `render: markdown` Presenter Runbook stub. | **Phase 4** |
 | `tests/` | The determinism golden gate + manifest-validity test + the retargeting gate (all green now). | Never by hand — re-bless via `freeze` |
 | `Dockerfile` | The reference non-root image. | Only for real runtime deps |
@@ -90,7 +90,7 @@ cd ../kits/my-kit && pip install -e '.[dev]' && pytest      # green from the fir
 ### Phase 2 — Model the trace tree
 
 `src/synth/materialize.py::build_events` is where generation lives, and the **only** place
-it lives. It builds Langfuse ingestion events through the library's event builders and its
+it lives. It builds the Spool's wire objects through the library's event builders and its
 deterministic RNG — nothing else. The skeleton emits, per trace: one `trace_event`, one
 `generation_event`, one `score_event`. Grow that into your scenario's tree.
 
@@ -102,6 +102,31 @@ The library gives you the write primitives (import from `langfuse_synth_core.see
 - `event_event` — a point-in-time marker.
 - `observation_event` — the generic escape hatch when none of the above fits.
 - `score_event` — an evaluation/score attached to a trace or observation.
+
+**The wire is core's, and it is OTLP.** Langfuse platform v4 makes the observation the
+primary entity — there is no separately ingested trace — and Cloud goes v4-only on
+**2026-11-16**. The scaffold pins that path in `src/synth/seed.py`
+(`set_spool_write_path(OTLP)`), and the builders above keep one Python API across both
+wires: you compose the same call tree, and core decides what goes on the wire. **Never
+hand-write an OTLP payload or post to Langfuse yourself** — that is the seam (`docs/SEAM.md`),
+and core's `docs/WRITE_PATHS.md` is where the mapping and its rationale live.
+
+Three consequences that change how you author, not what you call:
+
+- **The Spool appends; it does not upsert.** OTLP has no idempotent write, so re-seeding a
+  project that already holds this demo doubles the story, and `import-spool` is
+  non-resumable — it fails loudly and the recovery is to clear that deployment's Langfuse
+  data and import from the top. Say that in the runbook's reset beat; never tell a
+  presenter a re-seed is safe.
+- **Determinism of the *file* is untouched.** `seed + target_traces + params →
+  byte-identical Spool` is the same law, proven by the same golden gate. What is gone is
+  the *replay* guarantee, which was a property of the old transport, not of your code.
+- **A trace is its root observation.** Core mints one root span per `trace_event`, so the
+  Spool carries one more observation per trace than the count you may remember. Nothing to
+  do in `materialize.py`; it is what your kit's billable volume now measures.
+
+*Which* observation type each step should be is still Langfuse craft — ask the `langfuse`
+skill (below), not this one.
 
 **Determinism is the constraint that shapes this code.** Every id, timestamp, and value
 must derive from the seeded RNG (`langfuse_synth_core.rng.Rng`), never from a wall clock,
@@ -235,7 +260,9 @@ synth-authoring freeze golden_seed:seed \
 
 `freeze` re-materializes the Spool under the same deny-LLM egress block and writes it as the
 new oracle — so an accidental drift still fails, but an intended change is a deliberate
-re-bless, reviewable in the diff.
+re-bless, reviewable in the diff. The oracle is the Spool as it goes on the wire: OTLP spans
+for observations, and score envelopes (score creation is the one thing that stays on the
+legacy ingestion endpoint past the v4 cutover — that is a decision, not an oversight).
 
 ## The one law: seed runtime is model-free
 
@@ -278,6 +305,9 @@ runtime, once or per-unit). Full pattern in
   developer-mode section (`validate`'s advisory is silent), and presenter-only controls
   on Companion surfaces are tucked away — recessive, not in the prospect's face.
 - No LLM call at seed runtime; any author-time model use is frozen as a fixture and blessed.
+- The kit writes through core's builders on the OTLP path and reads through core's read
+  helpers — no hand-rolled payload, no legacy endpoint, and no promise anywhere (runbook,
+  config comments, README) that a re-seed upserts.
 
 ## References
 
@@ -288,3 +318,5 @@ runtime, once or per-unit). Full pattern in
 - `CONTRACT.md` (in the library repo) — reserved-verb semantics, filesystem conventions,
   the canonical volume knob, LLM-provider rules.
 - `docs/SEAM.md` — the library/kit hand-off rule (what the lib owns vs. what the kit owns).
+- `docs/WRITE_PATHS.md` (in the library repo) — the Spool's write paths, why the v4 one is
+  raw OTLP rather than the Langfuse SDK, and the non-resumable import and its recovery.
