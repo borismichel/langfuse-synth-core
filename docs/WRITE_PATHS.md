@@ -70,5 +70,11 @@ Recovery, when an import failed part-way:
 
 Re-running `generate-spool` is also a clean slate: a fresh Spool clears the record.
 
+The record is written **before** the first POST, not after, and that is deliberate. A
+request that fails after Langfuse accepted it is indistinguishable from one that never
+arrived, so recording afterwards would let exactly that case retry and duplicate. The cost
+is that an import which posted nothing is locked too — which is cheap, because
+`generate-spool` is the step immediately before and re-running it clears the record.
+
 Spool-side checkpoints and a read-back probe were both considered and declined — they add
 machinery to preserve a property the platform no longer offers.

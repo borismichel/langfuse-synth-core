@@ -121,3 +121,42 @@ def test_the_batch_path_spool_is_written_untouched(tmp_path: Path):
         lines = _spool(tmp_path, _trace_events())
     assert [line["type"] for line in lines] == [
         "trace-create", "span-create", "generation-create"]
+
+
+def test_a_spool_is_finalised_by_what_it_holds_not_by_the_ambient_flag(tmp_path: Path):
+    """``import_spool`` routes by the content of the Spool so a Spool always imports the way
+    it was written; finalisation follows the same rule. A Spool written on OTLP and closed
+    after the pin cleared would otherwise ship un-finalised — no trace attributes copied, no
+    re-parenting, a zero-duration root — and silently, which is the worst kind."""
+    ing = Ingestor(base_url="http://x", public_key="p", secret_key="s",
+                   spool_path=tmp_path / "events.ndjson")
+    ing.open_spool()
+    ing.extend(_trace_events())
+    writepath.set_spool_write_path(writepath.BATCH)   # the pin moves mid-run
+    try:
+        ing.close_spool()
+    finally:
+        writepath.set_spool_write_path(writepath.OTLP)
+
+    lines = [json.loads(line) for line in
+             (tmp_path / "events.ndjson").read_text(encoding="utf-8").splitlines()]
+    assert all(_attrs(s)["langfuse.user.id"] == {"stringValue": "u-7"} for s in lines)
+    root = next(s for s in lines if s["spanId"] == trace_root_span_id(TID))
+    assert int(root["endTimeUnixNano"]) > int(root["startTimeUnixNano"])
+
+
+def test_a_batch_spools_bytes_are_never_rewritten(tmp_path: Path):
+    """The flag-off Spool is the blessed golden of three live kits, so closing it must not
+    re-serialise a single line."""
+    with writepath.use_spool_write_path(writepath.BATCH):
+        events = _trace_events()
+        ing = Ingestor(base_url="http://x", public_key="p", secret_key="s",
+                       spool_path=tmp_path / "events.ndjson")
+        ing.open_spool()
+        ing.extend(events)
+        ing.close_spool()
+    # The exact bytes `add` wrote, re-derived independently — a rewrite pass would reorder
+    # keys or reformat numbers and this would catch it.
+    expected = b"".join(
+        json.dumps(e, separators=(",", ":")).encode() + b"\n" for e in events)
+    assert (tmp_path / "events.ndjson").read_bytes() == expected

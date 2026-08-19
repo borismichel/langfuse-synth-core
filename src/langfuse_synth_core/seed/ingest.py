@@ -6,14 +6,17 @@ everything to "now"). HTTP Basic auth with the project keys; the
 ``x-langfuse-ingestion-version: 4`` header makes the data visible in real time on the v2
 query/metrics endpoints.
 
-Idempotent on re-run: every object carries a deterministic id, so re-seeding upserts within
-Langfuse's 30-day merge window rather than duplicating.
-
 Two-phase by design (hardened): generation **spools every event to an NDJSON file on disk
-first**, then a separate pass **batch-imports** that file in ``chunk_size`` POSTs. Network
-never runs interleaved with generation, so a wedged or slow upload can't lose the
-(expensive, deterministic) generated data — re-run ``import_spool`` against the same file to
-resume. Never one-request-per-event.
+first**, then a separate pass **imports** that file in ``chunk_size`` POSTs. Network never
+runs interleaved with generation, so a wedged or slow upload can't lose the (expensive,
+deterministic) generated data. Never one-request-per-event.
+
+**Re-runnability depends on the write path** (portal #206). On the batch path every object
+carries a deterministic id, so re-seeding upserts within Langfuse's 30-day merge window and
+re-running ``import_spool`` against the same file is the recovery after an interrupted
+upload. On the OTLP path there is no upsert — identical re-posts append — so an import is
+**non-resumable** and says so: see :class:`NonResumableImportError` and
+``docs/WRITE_PATHS.md``.
 
 This is data-model-facing plumbing, not scenario substance: it speaks the Langfuse
 ingestion API in the abstract. The per-kit deltas are *values* (base_url, keys, chunk_size,
@@ -65,6 +68,7 @@ class Ingestor:
     spool_path: Path | None = None
     _events: list[dict] = field(default_factory=list)
     _spool_fh: object = field(default=None, repr=False)
+    _spooled_spans: bool = False
     spooled: int = 0
     sent: int = 0
 
@@ -92,6 +96,7 @@ class Ingestor:
         _import_marker(self.spool_path).unlink(missing_ok=True)
         self._spool_fh = self.spool_path.open("w", encoding="utf-8")
         self.spooled = 0
+        self._spooled_spans = False
 
     def close_spool(self) -> None:
         """Close the spool and, on the OTLP path, finalise it in place.
@@ -108,7 +113,10 @@ class Ingestor:
             self._spool_fh.flush()
             self._spool_fh.close()
             self._spool_fh = None
-        if self.spool_path is not None and on_otlp():
+        # Driven by what was written, not by the ambient flag — the same rule
+        # ``import_spool`` follows, so a Spool is always treated the way it was written and a
+        # batch Spool's bytes are never rewritten.
+        if self.spool_path is not None and self._spooled_spans:
             self._finalize_spool(self.spool_path)
 
     @staticmethod
@@ -119,13 +127,13 @@ class Ingestor:
         with path.open("r", encoding="utf-8") as fh:
             for line in fh:
                 if line.strip():
-                    otlp.scan(json.loads(line), state)
+                    otlp.scan_trace(json.loads(line), state)
         tmp = path.with_name(path.name + ".finalizing")
         with path.open("r", encoding="utf-8") as src, tmp.open("w", encoding="utf-8") as dst:
             for line in src:
                 if not line.strip():
                     continue
-                final = otlp.apply(json.loads(line), state)
+                final = otlp.finalize_span(json.loads(line), state)
                 dst.write(json.dumps(final, separators=(",", ":")) + "\n")
         tmp.replace(path)
 
@@ -133,6 +141,7 @@ class Ingestor:
         if self._spool_fh is not None:
             self._spool_fh.write(json.dumps(event, separators=(",", ":")) + "\n")
             self.spooled += 1
+            self._spooled_spans = self._spooled_spans or otlp.is_span(event)
         else:
             self._events.append(event)
 
@@ -177,6 +186,12 @@ class Ingestor:
                 confirm_cleared = os.environ.get("SYNTH_IMPORT_CONFIRM_CLEARED") == "1"
             if marker.exists() and not confirm_cleared:
                 raise NonResumableImportError(_non_resumable_message(path, marker))
+            # Recorded BEFORE the first POST, deliberately. A request that fails after
+            # Langfuse accepted it is indistinguishable from one that never arrived, so
+            # recording afterwards would let exactly that case retry and duplicate. The cost
+            # is that an import which never posted anything is also locked — which is cheap,
+            # because re-running `generate-spool` is a clean slate and that is already the
+            # step before this one.
             marker.write_text(f"import started for {path.name}\n", encoding="utf-8")
 
         chunk: list[dict] = []
@@ -194,15 +209,22 @@ class Ingestor:
         return self.sent
 
     def _flush_chunk(self, chunk: list[dict], log: Callable[[str], None]) -> None:
-        """Post one chunk, splitting it by the endpoint each line belongs to."""
+        self._post_mixed(chunk)
+        self.sent += len(chunk)
+        log(f"  · imported {self.sent} events")
+
+    def _post_mixed(self, chunk: list[dict]) -> None:
+        """Post one chunk, splitting it by the endpoint each line belongs to.
+
+        A chunk is heterogeneous by design on the OTLP path: spans go to the OTLP traces
+        endpoint while scores stay ingestion envelopes, and both can share a chunk.
+        """
         spans = [line for line in chunk if otlp.is_span(line)]
         envelopes = [line for line in chunk if not otlp.is_span(line)]
         if spans:
             self._post_spans(spans)
         if envelopes:
             self._post_chunk(envelopes)
-        self.sent += len(chunk)
-        log(f"  · imported {self.sent} events")
 
     # -- write-path liveness probe ----------------------------------------
     def write_ping(self) -> None:
@@ -229,19 +251,11 @@ class Ingestor:
         an imported Spool would.
         """
         events, self._events = self._events, []
-        if on_otlp():
-            state: dict = {}
-            for event in events:
-                otlp.scan(event, state)
-            events = [otlp.apply(event, state) for event in events]
+        if any(otlp.is_span(event) for event in events):
+            events = otlp.finalize(events)
         for i in range(0, len(events), self.chunk_size):
             chunk = events[i : i + self.chunk_size]
-            spans = [line for line in chunk if otlp.is_span(line)]
-            envelopes = [line for line in chunk if not otlp.is_span(line)]
-            if spans:
-                self._post_spans(spans)
-            if envelopes:
-                self._post_chunk(envelopes)
+            self._post_mixed(chunk)
             self.sent += len(chunk)
 
     def _post_spans(self, spans: list[dict]) -> None:
@@ -257,7 +271,7 @@ class Ingestor:
             f"{self.base_url}{otlp.OTEL_TRACES_PATH}",
             otlp.payload(spans),
             self._check_rejected_spans,
-            "otlp export",
+            label="otlp export",
         )
 
     def _post_chunk(self, chunk: list[dict]) -> None:
@@ -265,13 +279,13 @@ class Ingestor:
             f"{self.base_url}/api/public/ingestion",
             {"batch": chunk},
             self._check_partial,
-            "ingestion",
+            label="ingestion",
         )
 
-    def _post(self, url: str, body: dict, check, what: str) -> None:
+    def _post(self, url: str, body: dict, check, label: str) -> None:
         if self.dry_run:
             return
-        headers = {"x-langfuse-ingestion-version": self.ingestion_version}
+        headers = {otlp.INGESTION_VERSION_HEADER: self.ingestion_version}
         backoff = 1.0
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -284,7 +298,7 @@ class Ingestor:
                 )
             except requests.RequestException as exc:
                 if attempt == self.max_retries:
-                    raise IngestError(f"{what} request failed: {exc}") from exc
+                    raise IngestError(f"{label} request failed: {exc}") from exc
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 30)
                 continue
@@ -296,7 +310,7 @@ class Ingestor:
                 return
             if resp.status_code in (429, 500, 502, 503, 504):
                 if attempt == self.max_retries:
-                    raise IngestError(f"{what} failed {resp.status_code}: {resp.text[:500]}")
+                    raise IngestError(f"{label} failed {resp.status_code}: {resp.text[:500]}")
                 wait = backoff
                 if resp.status_code == 429:  # Cloud sets Retry-After; honour it
                     try:
@@ -306,7 +320,7 @@ class Ingestor:
                 time.sleep(min(wait, 30))
                 backoff = min(backoff * 2, 30)
                 continue
-            raise IngestError(f"{what} rejected {resp.status_code}: {resp.text[:500]}")
+            raise IngestError(f"{label} rejected {resp.status_code}: {resp.text[:500]}")
 
     @staticmethod
     def _check_rejected_spans(resp: requests.Response) -> None:

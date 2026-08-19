@@ -17,8 +17,8 @@ deliberate. Live, wall-clock surfaces are a different seam and may use the SDK.
 **Two-pass finalisation.** A builder cannot know its trace's whole story at call time — kits
 compose child observations first and prepend the trace shell afterwards, and a root span's
 end time is only known once its last child is built. So a Spool is *finalised* before it is
-posted: :func:`scan` walks the spans once to learn each trace's shell attributes and last
-end time, and :func:`apply` rewrites each span with the trace-level attributes copied on,
+posted: :func:`scan_trace` walks the spans once to learn each trace's shell attributes and last
+end time, and :func:`finalize_span` rewrites each span with the trace-level attributes on,
 parentless observations re-parented to the trace root, and the root stretched to cover its
 children. Both are pure functions of the lines, so the Spool stays byte-deterministic and
 the golden gate still binds.
@@ -268,7 +268,7 @@ def is_trace_root(line: dict) -> bool:
 # ---------------------------------------------------------------------------
 # finalisation — the two passes
 # ---------------------------------------------------------------------------
-def scan(line: dict, state: dict) -> None:
+def scan_trace(line: dict, state: dict) -> None:
     """Pass one. Accumulate, per trace id, the shell attributes to copy onto every span and
     the latest end time seen. ``state`` is mutated in place so a whole Spool can be scanned
     by streaming it, holding only one small record per trace."""
@@ -286,7 +286,7 @@ def scan(line: dict, state: dict) -> None:
         ]
 
 
-def apply(line: dict, state: dict) -> dict:
+def finalize_span(line: dict, state: dict) -> dict:
     """Pass two. Return the span as it goes on the wire: trace-level attributes copied on,
     a parentless observation re-parented to the trace root, and the root stretched to cover
     its children. Non-span lines (scores keep the ingestion endpoint) pass through."""
@@ -311,6 +311,16 @@ def apply(line: dict, state: dict) -> dict:
 # ---------------------------------------------------------------------------
 # the wire payload
 # ---------------------------------------------------------------------------
+def finalize(lines: list[dict]) -> list[dict]:
+    """Both passes over an in-memory batch — the list-shaped twin of the streaming
+    finalisation a spooled run does. Used by the probe and any other flush-without-spool
+    caller, so they produce exactly the wire objects an imported Spool would."""
+    state: dict = {}
+    for line in lines:
+        scan_trace(line, state)
+    return [finalize_span(line, state) for line in lines]
+
+
 def payload(spans: list[dict]) -> dict:
     """Wrap finalised spans as one OTLP ``ExportTraceServiceRequest`` body.
 

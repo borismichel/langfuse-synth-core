@@ -109,15 +109,16 @@ select = ["E", "F"]
 # pricing table and the theme CSS/font blocks are intentionally wide) on the verbatim
 # files. Every pyflakes rule (F: unused/undefined names, bad imports) still applies, so a
 # real extraction defect — e.g. an import that doesn't resolve in the lib — still fails CI.
-# Listed = the seven verbatim core files + `timegen.py` (which carries the verbatim `iso`
+# Listed = the verbatim core files + `timegen.py` (which carries the verbatim `iso`
 # primitive). Only some exceed 100 cols today; listing all of them makes the policy —
 # "verbatim-extracted code is not reformatted" — explicit and re-bless-proof.
+# `seed/events.py` left the list with the v4 write path (portal #206): it is no longer
+# verbatim-extracted code, and it holds the lib's 100-col rule on its own.
 "src/langfuse_synth_core/rng.py" = ["E501"]
 "src/langfuse_synth_core/pricing.py" = ["E501"]
 "src/langfuse_synth_core/distributions.py" = ["E501"]
 "src/langfuse_synth_core/lfclient.py" = ["E501"]
 "src/langfuse_synth_core/timegen.py" = ["E501"]
-"src/langfuse_synth_core/seed/events.py" = ["E501"]
 "src/langfuse_synth_core/live/theme.py" = ["E501"]
 "src/langfuse_synth_core/live/paths.py" = ["E501"]
 # Spec G · G1 (#138) extracted the kits' shared llm.py under the same regime for its

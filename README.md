@@ -45,13 +45,16 @@ src/langfuse_synth_core/
   lfclient.py       Langfuse v4 SDK client construction (#31)
   config.py         structural Protocols (Config/Model/Target) the core reads against (#31)
   timegen.py        the ISO-8601 formatting primitive event bodies need (#31)
-  seed/events.py    batch-ingestion event-envelope builders (#31)
+  seed/events.py    event builders — one API, two wire formats (#31, #206)
+  seed/writepath.py which wire a Spool is written on: batch | otlp (#206)
+  seed/otlp.py      the OTLP wire model + Spool finalisation (#206)
   live/theme.py     Langfuse design tokens + page shell (#31)
   live/paths.py     prefix-aware internal paths (LIVE_BASE_PATH) (#31)
   authoring/        authoring CLI (synth-authoring validate/freeze/new/skills) + scaffold
                     templates + kit-dev skills — import fails without the [authoring] extra
 docs/SEAM.md        the library/kit hand-off rule + the "not a framework" verdict
 docs/INSTALL.md     git-pinned private install + build-secret pattern
+docs/WRITE_PATHS.md the two Spool write paths, the flag, and non-resumable imports
 CONTRACT.md         reserved home for the relocated Contract (#27)
 ```
 

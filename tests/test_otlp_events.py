@@ -159,3 +159,22 @@ def test_an_id_otlp_cannot_carry_fails_at_the_builder():
         span_event(obs_id="nothex-nothex-xx", trace_id=TID, name="x", start=TS, end=TS)
     with pytest.raises(OtlpError, match="span id"):
         span_event(obs_id=OID, trace_id=TID, name="x", start=TS, end=TS, parent_id="short")
+
+
+def test_the_flag_does_not_change_how_rich_observation_types_degrade(monkeypatch):
+    """``RICH_OBSERVATION_TYPES`` is off and stays off through this migration — turning it on
+    moves observation counts and would confound each kit's one golden re-bless. What matters
+    here is that the flag does not change its meaning: both paths degrade identically while
+    it is off, and both honour it when it is on."""
+    from langfuse_synth_core.seed import events as events_mod
+
+    kw = dict(obs_id=OID, trace_id=TID, name="tool_call", obs_type="TOOL", start=TS, end=TS)
+
+    degraded = events_mod.observation_event(**kw)
+    assert attrs(degraded)["langfuse.observation.type"] == "span"
+    assert attrs(degraded)["langfuse.observation.metadata.observation_type"] == "tool"
+
+    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", True)
+    typed = events_mod.observation_event(**kw)
+    assert attrs(typed)["langfuse.observation.type"] == "tool"
+    assert "langfuse.observation.metadata.observation_type" not in attrs(typed)
