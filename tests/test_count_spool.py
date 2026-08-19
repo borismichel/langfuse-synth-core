@@ -108,3 +108,60 @@ def test_counts_real_event_envelopes(tmp_path: Path):
     spool = tmp_path / "events.ndjson"
     _write(spool, events)
     assert count_spool(spool) == {"traces": 1, "observations": 2, "scores": 1}
+
+
+# --- the OTLP path (portal #206) -------------------------------------------
+# Under v4 there is no trace envelope to count, so the trace term is derived from distinct
+# trace ids. The output SHAPE is unchanged, which is what keeps the plan-time estimate, the
+# cap gate and the over-cap halt untouched — but the numbers move, because the OTLP path
+# mints one root observation per trace.
+
+def _otlp_spool(tmp_path: Path, events: list[dict]) -> Path:
+    from langfuse_synth_core.seed.ingest import Ingestor
+
+    spool = tmp_path / "events.ndjson"
+    ing = Ingestor(base_url="http://x", public_key="p", secret_key="s", spool_path=spool)
+    ing.open_spool()
+    ing.extend(events)
+    ing.close_spool()
+    return spool
+
+
+def test_otlp_traces_come_from_distinct_trace_ids(tmp_path: Path):
+    from langfuse_synth_core.seed import writepath
+
+    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
+    tid_a = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
+    tid_b = "1111222233334444555566667777888a"
+    with writepath.use_spool_write_path(writepath.OTLP):
+        events = []
+        for tid in (tid_a, tid_b):
+            events += [
+                trace_event(trace_id=tid, timestamp=ts, name="decision"),
+                span_event(obs_id="aaaa1111bbbb2222", trace_id=tid, name="agent",
+                           start=ts, end=ts),
+                generation_event(obs_id="cccc3333dddd4444", trace_id=tid, name="llm",
+                                 start=ts, end=ts, model="m", usage_details={},
+                                 cost_details={}),
+            ]
+        events.append(score_event(score_id="s1", name="quality", value=1,
+                                  data_type="NUMERIC", timestamp=ts, trace_id=tid_a))
+        spool = _otlp_spool(tmp_path, events)
+
+    # Two distinct trace ids; three observations each (the minted root plus the kit's two);
+    # one score, still a legacy ingestion envelope.
+    assert count_spool(spool) == {"traces": 2, "observations": 6, "scores": 1}
+
+
+def test_the_same_trace_id_across_many_spans_counts_once(tmp_path: Path):
+    from langfuse_synth_core.seed import writepath
+
+    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
+    tid = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
+    with writepath.use_spool_write_path(writepath.OTLP):
+        spool = _otlp_spool(tmp_path, [
+            span_event(obs_id=f"aaaa1111bbbb{n:04d}", trace_id=tid, name="step",
+                       start=ts, end=ts)
+            for n in range(5)
+        ])
+    assert count_spool(spool) == {"traces": 1, "observations": 5, "scores": 0}

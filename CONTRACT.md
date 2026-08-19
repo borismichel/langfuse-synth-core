@@ -195,9 +195,10 @@ One named volume per deployment — `spool-{deployment_id}` — is mounted at
 always points at it. Mount mode is the whole access-control story:
 
 - **Job steps mount it writable.** This is what makes the seed split and resume work
-  across containers: `generate-spool` materializes `events.ndjson` (the Spool — NDJSON,
-  one ingestion envelope per line) and `import-spool` replays those exact bytes from a
-  different container.
+  across containers: `generate-spool` materializes `events.ndjson` (the Spool — NDJSON, one
+  wire object per line: an ingestion envelope on the batch write path, an OTLP span on the
+  OTLP one) and `import-spool` replays those exact bytes from a different container. An
+  OTLP import also writes `events.ndjson.imported` beside the Spool — see below.
 - **Live surfaces and the portal's cap-gate count container mount it read-only**
   (portal #193 / portal PR #194, and Spec D's measured verdict respectively). A live
   surface reads run state; it never writes it — **job steps are the only writers**. A kit
@@ -206,7 +207,19 @@ always points at it. Mount mode is the whole access-control story:
 
 The Spool's billable volume is **measured, not trusted**: the portal counts the actual
 bytes on the volume (`langfuse_synth_core.seed.count.count_spool`) before `import-spool`
-may upload them.
+may upload them. `count_spool` returns the same shape on both write paths, so the plan-time
+estimate, the cap gate and the over-cap halt are unaffected by which path a kit is on.
+
+**Replay is re-runnable only on the batch write path** (portal #206). Batch ingestion
+upserts on a deterministic id, so re-running `import-spool` over a partly uploaded Spool is
+the recovery. OTLP has no upsert — identical re-posts append — so an OTLP `import-spool` is
+**non-resumable**: it records that it ran in `events.ndjson.imported` on this volume and
+fails loudly on a second attempt rather than silently doubling the deployment's volume.
+Recovery is to clear that deployment's Langfuse data and import from the top
+(`SYNTH_IMPORT_CONFIRM_CLEARED=1`); re-running `generate-spool` is also a clean slate.
+Core's `docs/WRITE_PATHS.md` carries the mechanism; this is the portal-facing consequence.
+
+Every kit is on the batch path until it is deliberately cut over, one kit at a time.
 
 ---
 
