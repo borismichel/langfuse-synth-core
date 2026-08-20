@@ -600,6 +600,11 @@ _INGESTION_ENDPOINT = re.compile(r"/api/public/ingestion")
 _DEPRECATED_ENVELOPE_TYPES = re.compile(
     r"""["'](trace-create|span-create|generation-create|event-create|observation-create)["']"""
 )
+#: The one envelope type that keeps this endpoint. A file that posts to ingestion and names
+#: this is visibly posting scores; a file that posts there and names **no** envelope type at
+#: all is building one at runtime, which this scan cannot read — and unreadable is not the
+#: same as clean, so it is reported rather than passed.
+_SCORE_ENVELOPE = re.compile(r"""["']score-create["']""")
 
 #: The counting technique the v4 read APIs cannot serve: they are cursor-paginated and
 #: carry no total. Only advised in a file that also reads a dying endpoint — the endpoints
@@ -655,6 +660,11 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
     and observation events; the `score-create` envelopes core writes there are the supported
     v4 score path, so they come back clean.
 
+    That rule needs to read an envelope *type*, which a kit can build at runtime — so a file
+    posting to ingestion while naming no readable type is reported too. Silent on a value
+    this scan cannot see would be worse than a false positive here: the same endpoint keeps
+    serving one type and refuses the rest, so "which one" is the whole question.
+
     Shipped sources only (:func:`_shipped_sources`), because this blocks: a test that stands
     up a canned deprecated-API server — which every kit's read-seam suite now does, on
     purpose, to prove its `verify` reads the same on both generations — names those
@@ -672,11 +682,13 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
         totals: list[int] = []
         envelopes: list[tuple[int, str]] = []
         posts_to_ingestion = False
+        ingestion_lineno = 0
         for lineno, line in enumerate(lines, start=1):
             if line.lstrip().startswith("#"):
                 continue
             if _INGESTION_ENDPOINT.search(line):
                 posts_to_ingestion = True
+                ingestion_lineno = ingestion_lineno or lineno
             envelope = _DEPRECATED_ENVELOPE_TYPES.search(line)
             if envelope:
                 envelopes.append((lineno, envelope.group(1)))
@@ -693,8 +705,9 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
             if _TOTAL_ITEMS.search(line):
                 totals.append(lineno)
         # The endpoint alone is not the finding — read-side code names event types when it
-        # filters on what landed, and the endpoint is current for scores. It takes both, in
-        # the same file, to be a kit posting something Langfuse removes.
+        # filters on what landed, and the endpoint is current for scores. What makes it one
+        # is a file that *posts* there and either names a dying type, or names no type this
+        # scan can read at all.
         if posts_to_ingestion:
             hits.extend(
                 (
@@ -708,6 +721,17 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
                 )
                 for lineno, etype in envelopes
             )
+            if not envelopes and not _SCORE_ENVELOPE.search(text):
+                hits.append((
+                    ingestion_lineno,
+                    f"at {label}:{ingestion_lineno}: posts to `/api/public/ingestion` and "
+                    f"this scan cannot see which envelope type — no literal one is named in "
+                    f"the file, so it is built at runtime. The endpoint keeps serving "
+                    f"`score-create` past the cutover and refuses trace and observation "
+                    f"events, so which it is decides whether this kit still works on "
+                    f"2026-11-16. Post scores through core's `score_event`, or name the type "
+                    f"where it can be read ({_CITE_SPOOL})",
+                ))
         if hits:
             hits.extend(
                 (

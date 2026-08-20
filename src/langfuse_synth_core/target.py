@@ -38,15 +38,16 @@ CLOUD_POST_THROTTLE_S = 0.35
 class TargetProfile:
     """What a kit knows about its target. Build once with :meth:`detect`, pass it around.
 
-    ``reachable`` is ``None`` until the target has been asked (:meth:`resolved`). That is a
-    third state, not a missing value: "nobody has looked yet" is different from "answers"
-    and from "does not", and a kit that only writes never needs to pay for the answer.
+    ``reachable`` is False until the target has answered, and a kit that only writes never
+    pays to find out. It is deliberately *not* a tri-state: a probe that fails does not
+    record "unreachable", it leaves the profile unresolved and hands the reason back through
+    :meth:`try_resolve`, so a blip is retried rather than remembered as a verdict.
     """
 
     base_url: str
     is_cloud: bool
     post_throttle_s: float
-    reachable: bool | None = None
+    reachable: bool = False
 
     @classmethod
     def detect(cls, base_url: str) -> "TargetProfile":
@@ -67,7 +68,7 @@ class TargetProfile:
         Raises whatever the probe raises. A `verify` that wants to report an unreadable
         target as failing checks rather than as a traceback should use :meth:`try_resolve`.
         """
-        if self.reachable is not None:
+        if self.reachable:
             return self
         (reader or self.reader()).ping()
         return replace(self, reachable=True)
@@ -98,7 +99,7 @@ class TargetProfile:
         target has answered, because "what did we read it through" is the first thing to
         know when a check that passed yesterday fails today."""
         host = "Langfuse Cloud" if self.is_cloud else "self-hosted Langfuse"
-        return host if self.reachable is None else f"{host}, v4 read APIs"
+        return f"{host}, v4 read APIs" if self.reachable else host
 
 
 def post_throttle_seconds(base_url: str) -> float:

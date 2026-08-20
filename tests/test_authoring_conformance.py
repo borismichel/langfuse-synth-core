@@ -645,6 +645,30 @@ def test_a_trace_or_observation_envelope_on_ingestion_is_flagged(tmp_path):
     assert "generation-create" in findings[0] and "synth/emit.py:2" in findings[0]
 
 
+def test_an_envelope_type_this_scan_cannot_read_is_reported_not_passed(tmp_path):
+    """The hole in reading a *type* rather than an endpoint: a kit can build the type at
+    runtime, and the old blanket endpoint rule would have caught what this one misses.
+
+    Silence is the wrong answer here. The same endpoint keeps serving `score-create` past
+    the cutover and refuses trace and observation events, so "which type is this" decides
+    whether the kit still works on 2026-11-16 — and an unreadable value is not a clean one.
+    """
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/emit.py": (
+            'URL = f"{base}/api/public/ingestion"\n'
+            'def post(etype, body):\n'
+            '    return http.post(URL, json={"batch": [{"type": etype, "body": body}]})\n'
+        )},
+    )
+    findings = legacy_langfuse_findings(kit)
+    assert len(findings) == 1, findings
+    assert "cannot see which envelope type" in findings[0]
+    assert "synth/emit.py:1" in findings[0]
+
+
 def test_an_envelope_type_without_the_ingestion_endpoint_is_not_flagged(tmp_path):
     """Read-side code names event types all the time (filtering, asserting on what landed).
     The finding is about *posting* one, so it needs the endpoint in the same file."""

@@ -421,9 +421,11 @@ A kit's live surface (companion) is declared in `live_components[]`: `command`, 
 - **A live surface emits through the live-emission seam** (`adapter.emitter()`,
   `langfuse_synth_core.live.emit`) and reads through the read seam (`adapter.reader()`).
   Both are the determinism line made concrete: the Spool is backdated, deterministic and
-  golden-gated, and a submission is none of those, so a surface never borrows the Spool's
-  `adapter.ingestor()` to emit at *now*. The read seam additionally means kit code names no
-  Langfuse endpoint and so does not have to be edited when a target cuts over to v4.
+  golden-gated, and a submission is none of those. The Spool's writer is therefore **not on
+  the Adapter at all** — it was reachable while a kit might still have wanted it, and came
+  off with the batch path (portal #213), so there is nothing for a surface to borrow. The
+  read seam additionally means kit code names no Langfuse endpoint, and so did not have to
+  be edited when the read APIs cut over.
 - **The Companion Adapter** (`langfuse_synth_core.companion`) is the surface between the
   portal-injected env and kit code: it owns secret intake (kit code never touches a raw
   key — D4), Langfuse client/emitter/reader access, LLM provider resolution (pinned

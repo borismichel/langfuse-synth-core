@@ -36,11 +36,11 @@ def test_self_hosted_is_not_throttled():
     assert post_throttle_seconds("http://langfuse.internal:3000") == 0.0
 
 
-def test_detection_makes_no_request_and_leaves_reachability_unknown():
-    """Unknown is a third state, not a default: a kit that only writes never pays for the
-    probe, and the label must not claim an answer nobody asked for."""
+def test_detection_makes_no_request_and_claims_nothing():
+    """A kit that only writes never pays for the probe, and the label must not claim an
+    answer nobody asked for."""
     profile = TargetProfile.detect("https://cloud.langfuse.com")
-    assert profile.reachable is None
+    assert profile.reachable is False
     assert profile.label == "Langfuse Cloud"
 
 
@@ -122,7 +122,7 @@ def test_an_unreadable_target_reports_its_reason_rather_than_raising(monkeypatch
 
     profile, reason = TargetProfile.detect("https://cloud.langfuse.com").try_resolve()
 
-    assert profile.reachable is None
+    assert profile.reachable is False
     assert "403" in reason
     assert profile.label == "Langfuse Cloud"     # says nothing it does not know
 
