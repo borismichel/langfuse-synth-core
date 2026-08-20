@@ -62,30 +62,20 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **`count_spool` reports the billable `total` beside the dimensions** (portal #220): on
-  an OTLP Spool the derived trace term stays in the breakdown but out of the total (a
-  v4 trace is a view over its minted root, already inside `observations`), so the total
-  is invariant across a kit's cutover. The portal binds a reported total and falls back
-  to the three-term sum only when it is absent — which is why **a kit must not flip to
-  OTLP while pinned at a core ≤ v2.0.0**: those write OTLP but count without a total,
-  and the portal would double-count. The #210 cutover release must carry this entry so
-  the first kit to flip measures honestly.
-- **`RICH_OBSERVATION_TYPES` is now on by default** (portal #210 addendum): a typed
-  observation ships its real type on the wire — `langfuse.observation.type` on the OTLP
-  path, an `observation-create` envelope on batch — instead of degrading into
-  `metadata.observation_type`. Measured to move no counts on either path. Any kit that
-  takes this release re-blesses its Spool golden; #210's cutover PRs do exactly that,
-  together with each kit's `set_spool_write_path(OTLP)` flip. A kit still writing a
-  *batch* Spool must not take this release without flipping to OTLP too — legacy
-  ingestion servers 400 on typed observation bodies.
-- `v2.0.0` (Spec H — portal #204/#209: the OTLP write path #206, the
-  v4-native authoring surface #207, the read + live-emission seams #208, and the
-  observation-type vocabulary guard #217) shipped everything that was queued here. What
-  makes it a major: the Spool *format* under `SYNTH_SPOOL_WRITE_PATH=otlp` is new (see
-  [`docs/WRITE_PATHS.md`](docs/WRITE_PATHS.md)) and `lfread.scores_path()` is removed
-  (see [`docs/READ_LIVE_SEAMS.md`](docs/READ_LIVE_SEAMS.md)). With the flag left at its
-  `batch` default the release is a no-op for every kit — the #209 re-pins proved the
-  goldens byte-identical with no re-bless.
+- Nothing pending. `v2.1.0` (portal #210/#220, the release the kit cutovers repin to)
+  shipped both queued entries:
+  - `RICH_OBSERVATION_TYPES` on by default — typed observations carry their real type
+    on the wire instead of degrading into `metadata.observation_type`. Measured to move
+    no counts on either write path, but the wire bytes change wherever a kit authors a
+    typed observation — so taking this release means re-blessing the kit's Spool
+    golden, and a kit still writing a *batch* Spool must flip to OTLP in the same
+    change (legacy ingestion 400s on typed observation bodies).
+  - `count_spool` reports the billable `total` beside the dimensions (portal #220): on
+    an OTLP Spool the derived trace term stays in the breakdown but out of the total,
+    so the total is invariant across a kit's cutover. A kit must not flip to OTLP
+    while pinned at a core ≤ v2.0.0 — those write OTLP but count without a total, and
+    the portal would double-count. The #210 cutover PRs pair each kit's
+    `set_spool_write_path(OTLP)` flip with the repin to this release for both reasons.
 
 ## Release checklist
 
