@@ -62,35 +62,14 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **The next release is `v2.0.0`, and it is a full runtime release** (Spec H — portal
-  #204/#209). Two changes on `main` make it so: core learned to write the Spool over OTLP
-  beside the batch path (portal #206), and the authoring surface now emits kits on that
-  path (portal #207). The Spool's *format* break under the flag is what makes the bump
-  major.
-- **`MIN_CORE_REF` and `DEFAULT_CORE_REF` in `scaffold.py` already name `v2.0.0`.** A kit
-  scaffolded from `main` pins that tag because its emitted `seed` imports the OTLP write
-  path, which no published release carries yet — so `synth-authoring new` produces an
-  installable kit only once the tag is pushed (step 2). Until then `pip install` fails on
-  the unresolvable ref, which is the loud failure we want over an `ImportError` at seed
-  time. `tests/test_scaffold_image.py` skips itself while the newest published tag is
-  below `MIN_CORE_REF`, and returns by itself when v2.0.0 lands.
-- **The read seam and the live-emission seam are on `main` too** (portal #208) — `read.py`
-  (traces, observations, scores, sessions and experiments, normalised across the v4 and the
-  deprecated read APIs), `live/emit.py` (wall-clock emission on the Langfuse SDK),
-  `adapter.reader()` / `adapter.emitter()`, and the backdate probe reading back through the
-  seam. **Breaking beyond the Spool format:** `lfread.scores_path()` is removed — it chose
-  between two endpoints platform v4 deletes. `lfread.get_all_scores()` keeps its signature
-  and its row shape, and now answers on either generation, so an un-rewired kit reads a
-  cut-over project unchanged. See [`docs/READ_LIVE_SEAMS.md`](docs/READ_LIVE_SEAMS.md).
-- **The observation-type vocabulary is guarded** (portal #217) — the new
-  `langfuse_synth_core.observation_types` module is the vocabulary's home above both seams,
-  and `observation_event`, the OTLP span builder and the live seam's `as_type` all refuse a
-  value outside it, where before each passed anything through to a target that accepts it
-  and silently shows something else. **Breaking only for a kit that was already mistyping a
-  type**; all three gold kits pass unchanged. The matching `synth-authoring conformance`
-  check blocks, so re-pinning a kit to this release can turn a typo it has always carried
-  into a red CI run — which is the point. Note the live seam is checked *case-sensitively*
-  (the SDK writes `as_type` verbatim) where the Spool builders lowercase first.
+- Nothing pending. `v2.0.0` (Spec H — portal #204/#209: the OTLP write path #206, the
+  v4-native authoring surface #207, the read + live-emission seams #208, and the
+  observation-type vocabulary guard #217) shipped everything that was queued here. What
+  makes it a major: the Spool *format* under `SYNTH_SPOOL_WRITE_PATH=otlp` is new (see
+  [`docs/WRITE_PATHS.md`](docs/WRITE_PATHS.md)) and `lfread.scores_path()` is removed
+  (see [`docs/READ_LIVE_SEAMS.md`](docs/READ_LIVE_SEAMS.md)). With the flag left at its
+  `batch` default the release is a no-op for every kit — the #209 re-pins proved the
+  goldens byte-identical with no re-bless.
 
 ## Release checklist
 
