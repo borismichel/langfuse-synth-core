@@ -1,12 +1,19 @@
-"""The read seam — one place any kit reads Langfuse, on either API generation (portal #208).
+"""The read seam — the one place any kit reads Langfuse (portal #208, v4-only since #213).
 
-These pin the seam at its own boundary: a faked HTTP transport answers the shapes the two
-API generations really return (captured from the Langfuse SDK's generated client, which is
-the wire contract), and the assertions are about the *normalised* rows the seam hands a
-kit — never about which endpoint served them.
+These pin the seam at its own boundary: a faked HTTP transport answers the shapes the v4
+read APIs really return (captured from a live Cloud project and from the Langfuse SDK's
+generated client, which is the wire contract), and the assertions are about the *normalised*
+rows the seam hands a kit.
+
+The seam carried a second arm through the migration, reading the deprecated endpoints and
+probing for which generation to use. #213 removed it, and the tests for it went with it —
+what is left is the v4 half plus a guard that the module names no deprecated endpoint at
+all.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 
@@ -84,70 +91,8 @@ def test_v4_scores_normalise_the_single_typed_value_and_subject(monkeypatch):
     assert numeric.trace_id == "t2"
 
 
-LEGACY_EMPTY = {
-    "/api/public/traces": {"data": [], "meta": {"totalItems": 0, "totalPages": 1}},
-    "/api/public/v2/scores": {"data": [], "meta": {"totalPages": 1}},
-}
-
-
-def test_legacy_scores_normalise_onto_the_same_row_and_follow_numbered_pages(monkeypatch):
-    pages = {
-        1: {"data": [{"id": "a", "name": "resolution", "dataType": "CATEGORICAL",
-                      "value": "self_served", "stringValue": "self_served",
-                      "timestamp": "2026-06-04T12:00:00.000Z", "traceId": "t1"}],
-            "meta": {"totalPages": 2}},
-        2: {"data": [{"id": "b", "name": "resolution", "dataType": "NUMERIC", "value": 1,
-                      "timestamp": "2026-06-05T12:00:00.000Z", "sessionId": "sess-1"}],
-            "meta": {"totalPages": 2}},
-    }
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/v2/scores"] = lambda params: pages[params.get("page", 1)]
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    rows = reader.scores(name="resolution")
-
-    assert reader.read_api == read.LEGACY
-    assert [r.id for r in rows] == ["a", "b"]
-    assert rows[0].string_value == "self_served" and rows[0].trace_id == "t1"
-    assert rows[1].numeric_value == 1.0 and rows[1].session_id == "sess-1"
-
-
-def test_the_read_api_generation_is_probed_once_and_reused(monkeypatch):
-    calls: list = []
-    monkeypatch.setattr(read, "request_retry", _transport(dict(LEGACY_EMPTY), calls=calls))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    reader.scores(name="a")
-    reader.scores(name="b")
-
-    assert [p for p, _ in calls].count("/api/public/traces") == 1
-
-
-def test_a_cut_over_target_selects_the_v4_arm_without_configuration(monkeypatch):
-    monkeypatch.setattr(read, "request_retry", _transport(dict(V4_ONLY)))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    assert reader.read_api == read.V4
-
-
-def test_a_pinned_generation_skips_the_probe(monkeypatch):
-    calls: list = []
-    monkeypatch.setattr(read, "request_retry", _transport(dict(V4_ONLY), calls=calls))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"), read_api="v4")
-
-    reader.scores(name="a")
-
-    assert "/api/public/traces" not in [p for p, _ in calls]
-
-
-def test_an_unknown_pinned_generation_raises_rather_than_guessing():
-    with pytest.raises(ValueError):
-        read.LangfuseReader("http://lf", read_api="v5")
-
-
-# The two generations name the same columns differently — these rows are shaped exactly as
-# the SDK's generated client documents them (ObservationV2 vs the legacy ObservationsView).
+# Shaped exactly as the SDK's generated client documents ObservationV2, with the two
+# corrections a live Cloud project forced (see the fixtures at the foot of this file).
 V4_GENERATION_ROW = {
     "id": "o1", "traceId": "t1", "type": "GENERATION", "name": "answer",
     "startTime": "2026-06-04T12:00:00.000Z", "endTime": "2026-06-04T12:00:03.000Z",
@@ -158,15 +103,6 @@ V4_GENERATION_ROW = {
     "userId": "u-1", "sessionId": "sess-1", "tags": ["golden"], "traceName": "answer_question",
     "environment": "production",
 }
-LEGACY_GENERATION_ROW = {
-    "id": "o1", "traceId": "t1", "type": "GENERATION", "name": "answer",
-    "startTime": "2026-06-04T12:00:00.000Z", "endTime": "2026-06-04T12:00:03.000Z",
-    "parentObservationId": "root1", "input": [{"role": "system", "content": "you are"}],
-    "output": {"text": "ok"}, "model": "claude-sonnet-4",
-    "usageDetails": {"input": 100, "output": 20}, "costDetails": {"total": 0.004},
-    "calculatedTotalCost": 0.004, "promptName": "analyst-copilot", "promptVersion": 3,
-    "environment": "production",
-}
 
 
 def test_v4_observations_normalise_the_model_usage_cost_and_prompt_columns(monkeypatch):
@@ -174,7 +110,7 @@ def test_v4_observations_normalise_the_model_usage_cost_and_prompt_columns(monke
     routes["/api/public/v2/observations"] = {"data": [V4_GENERATION_ROW], "meta": {}}
     calls: list = []
     monkeypatch.setattr(read, "request_retry", _transport(routes, calls=calls))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"), read_api="v4")
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
     obs = reader.observations(trace_id="t1", type="GENERATION")
 
@@ -190,21 +126,6 @@ def test_v4_observations_normalise_the_model_usage_cost_and_prompt_columns(monke
     # for observations without asking for them returns a row with none of them populated.
     _path, params = calls[-1]
     assert "io" in params["fields"] and "usage" in params["fields"] and "prompt" in params["fields"]
-
-
-def test_legacy_observations_normalise_onto_the_same_row(monkeypatch):
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/observations"] = {"data": [LEGACY_GENERATION_ROW],
-                                          "meta": {"totalPages": 1}}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    o = reader.observations(trace_id="t1", type="GENERATION")[0]
-
-    assert o.model == "claude-sonnet-4"          # legacy calls this model
-    assert o.total_cost == 0.004                  # legacy calls this calculatedTotalCost
-    assert (o.prompt_name, o.prompt_version) == ("analyst-copilot", 3)
-    assert o.parent_id == "root1"
 
 
 V4_ROOT_ROW = {
@@ -243,33 +164,9 @@ def test_v4_assembles_a_trace_out_of_the_observations_that_share_its_id(monkeypa
     assert [s.name for s in trace.scores] == ["answer_quality"]
 
 
-def test_legacy_reads_a_trace_as_the_entity_it_still_is(monkeypatch):
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/traces/t1"] = {
-        "id": "t1", "name": "answer_question", "timestamp": "2026-06-04T11:59:59.000Z",
-        "userId": "u-1", "sessionId": "sess-1", "tags": ["golden"],
-        "input": {"question": "why?"}, "output": {"text": "ok"},
-        "observations": [LEGACY_GENERATION_ROW],
-        "scores": [{"id": "s1", "name": "answer_quality", "dataType": "NUMERIC", "value": 0.9,
-                    "timestamp": "2026-06-04T12:00:00.000Z", "traceId": "t1"}],
-    }
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    trace = reader.trace("t1")
-
-    assert (trace.user_id, trace.session_id, trace.tags) == ("u-1", "sess-1", ["golden"])
-    assert trace.input == {"question": "why?"}
-    assert [s.name for s in trace.scores] == ["answer_quality"]
-    # Trace-level attributes reach the observations, as they do natively under v4.
-    assert trace.observations[0].session_id == "sess-1"
-    assert trace.observations[0].tags == ["golden"]
-
-
-@pytest.mark.parametrize("routes", [dict(LEGACY_EMPTY), dict(V4_ONLY)])
-def test_an_absent_trace_reads_as_none_on_either_generation(monkeypatch, routes):
-    if "/api/public/v2/observations" not in routes:
-        routes["/api/public/v2/observations"] = {"data": [], "meta": {}}
+def test_an_absent_trace_reads_as_none(monkeypatch):
+    routes = dict(V4_ONLY)
+    routes["/api/public/v2/observations"] = {"data": [], "meta": {}}
     monkeypatch.setattr(read, "request_retry", _transport(routes))
     reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
@@ -298,33 +195,12 @@ def test_v4_derives_the_trace_list_from_observations_and_bounds_it(monkeypatch):
     assert len(traces[0].observations) == 2
 
 
-def test_legacy_lists_traces_through_the_deprecated_endpoint(monkeypatch):
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/traces"] = {
-        "data": [{"id": "t0", "name": "answer_question", "sessionId": "sess-0",
-                  "timestamp": "2026-06-04T11:59:59.000Z", "tags": ["golden"]}],
-        "meta": {"totalItems": 1, "totalPages": 1}}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    traces = reader.traces(limit=100)
-
-    assert [t.id for t in traces] == ["t0"]
-    assert traces[0].session_id == "sess-0"
-
-
-@pytest.mark.parametrize("arm", ["legacy", "v4"])
-def test_a_session_reads_as_its_trace_ids_on_either_generation(monkeypatch, arm):
-    if arm == "v4":
-        routes = dict(V4_ONLY)
-        routes["/api/public/v2/observations"] = {
-            "data": [{**V4_ROOT_ROW, "id": "root0", "traceId": "t0", "sessionId": "sess-1"},
-                     {**V4_ROOT_ROW, "id": "root1", "traceId": "t1", "sessionId": "sess-1"}],
-            "meta": {}}
-    else:
-        routes = dict(LEGACY_EMPTY)
-        routes["/api/public/sessions/sess-1"] = {
-            "id": "sess-1", "traces": [{"id": "t0"}, {"id": "t1"}]}
+def test_a_session_reads_as_its_trace_ids(monkeypatch):
+    routes = dict(V4_ONLY)
+    routes["/api/public/v2/observations"] = {
+        "data": [{**V4_ROOT_ROW, "id": "root0", "traceId": "t0", "sessionId": "sess-1"},
+                 {**V4_ROOT_ROW, "id": "root1", "traceId": "t1", "sessionId": "sess-1"}],
+        "meta": {}}
     monkeypatch.setattr(read, "request_retry", _transport(routes))
     reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
@@ -367,47 +243,14 @@ def test_v4_reads_dataset_runs_through_the_experiments_api(monkeypatch):
     assert items[0].id == "ri-1"
 
 
-def test_legacy_reads_dataset_runs_through_the_deprecated_dataset_endpoints(monkeypatch):
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/datasets/certification-suite/runs"] = {
-        "data": [{"id": "run-1", "name": "candidate-a - 2026-06-04",
-                  "createdAt": "2026-06-04T10:00:00.000Z"}],
-        "meta": {"totalPages": 1}}
-    routes["/api/public/datasets/certification-suite/runs/candidate-a - 2026-06-04"] = {
-        "id": "run-1", "name": "candidate-a - 2026-06-04",
-        "datasetRunItems": [{"id": "ri-1", "datasetRunId": "run-1", "datasetItemId": "di-1",
-                             "traceId": "t-1", "observationId": "obs-1"}]}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    runs = reader.experiments(dataset_name="certification-suite")
-    items = reader.experiment_items(runs[0])
-
-    assert [r.name for r in runs] == ["candidate-a - 2026-06-04"]
-    assert [i.trace_id for i in items] == ["t-1"]
-    assert items[0].id == "ri-1" and items[0].dataset_item_id == "di-1"
-    # A run's item count is what a kit asserts ("every run carries the full suite"), so the
-    # seam reports it on either generation — derived from the items where the list omits it.
-    assert reader.experiments(dataset_name="certification-suite")[0].name == runs[0].name
-
-
-@pytest.mark.parametrize("arm", ["legacy", "v4"])
-def test_run_level_scores_read_by_experiment_on_either_generation(monkeypatch, arm):
+def test_run_level_scores_read_by_experiment(monkeypatch):
     calls: list = []
-    if arm == "v4":
-        routes = dict(V4_ONLY)
-        routes["/api/public/v3/scores"] = {
-            "data": [{"id": "s1", "name": "rate_numeric_accuracy", "dataType": "NUMERIC",
-                      "value": 0.62, "timestamp": "2026-06-04T10:05:00.000Z",
-                      "subject": {"kind": "experiment", "id": "exp-1"}}],
-            "meta": {"limit": 100}}
-    else:
-        routes = dict(LEGACY_EMPTY)
-        routes["/api/public/v2/scores"] = {
-            "data": [{"id": "s1", "name": "rate_numeric_accuracy", "dataType": "NUMERIC",
-                      "value": 0.62, "timestamp": "2026-06-04T10:05:00.000Z",
-                      "datasetRunId": "exp-1"}],
-            "meta": {"totalPages": 1}}
+    routes = dict(V4_ONLY)
+    routes["/api/public/v3/scores"] = {
+        "data": [{"id": "s1", "name": "rate_numeric_accuracy", "dataType": "NUMERIC",
+                  "value": 0.62, "timestamp": "2026-06-04T10:05:00.000Z",
+                  "subject": {"kind": "experiment", "id": "exp-1"}}],
+        "meta": {"limit": 100}}
     monkeypatch.setattr(read, "request_retry", _transport(routes, calls=calls))
     reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
@@ -417,7 +260,7 @@ def test_run_level_scores_read_by_experiment_on_either_generation(monkeypatch, a
     assert rows[0].numeric_value == pytest.approx(0.62)
     # v3 renamed the filter as well as the field: datasetRunId became experimentId.
     scores_call = next(c for c in calls if "scores" in c[0])
-    assert ("experimentId" in scores_call[1]) == (arm == "v4")
+    assert "experimentId" in scores_call[1]
 
 
 # --- shapes captured from a REAL Langfuse Cloud project, 2026-08-19 -------------------
@@ -436,7 +279,7 @@ def test_v4_io_arrives_as_json_strings_and_is_parsed_back(monkeypatch):
         "output": "the seam holds",          # not JSON — stays the string it is
     }], "meta": {}}
     monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"), read_api="v4")
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
     o = reader.observations(trace_id="t1")[0]
 
@@ -452,7 +295,7 @@ def test_v4_names_the_model_column_model(monkeypatch):
     routes["/api/public/v2/observations"] = {"data": [{**row, "model": "claude-sonnet-4"}],
                                              "meta": {}}
     monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"), read_api="v4")
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
     assert reader.observations(trace_id="t1")[0].model == "claude-sonnet-4"
 
@@ -466,81 +309,31 @@ def test_unset_string_columns_read_as_absent_not_as_empty_strings(monkeypatch):
         **V4_GENERATION_ROW, "promptName": "", "promptVersion": None, "traceName": "",
     }], "meta": {}}
     monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"), read_api="v4")
+    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
 
     o = reader.observations(trace_id="t1")[0]
     assert o.prompt_name is None and o.prompt_version is None
     assert o.trace_name is None
 
 
-def test_a_legacy_categorical_score_is_not_reported_as_the_number_zero(monkeypatch):
-    """The deprecated scores API sends `value: 0` alongside `stringValue` for a categorical
-    score. Reading that as a numeric 0 would turn "pass" into a false zero in any mean or
-    comparison a kit computes."""
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/v2/scores"] = {"data": [
-        {"id": "s1", "name": "seam_verdict", "dataType": "CATEGORICAL", "value": 0,
-         "stringValue": "pass", "timestamp": "2026-06-04T12:00:00.000Z", "traceId": "t1",
-         "observationId": "o1"},
-    ], "meta": {"totalPages": 1}}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    score = reader.scores(name="seam_verdict")[0]
-
-    assert score.string_value == "pass"
-    assert score.numeric_value is None
-    assert score.value == "pass"
 
 
-def test_the_legacy_trace_list_carries_id_strings_not_objects(monkeypatch):
-    """`GET /api/public/traces` answers `TraceWithDetails`, whose `observations` and
-    `scores` are lists of **ids**; only the single-trace GET embeds the objects. Reading the
-    list as though it embedded them crashes on every real project."""
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/traces"] = {"data": [{
-        "id": "t0", "name": "answer_question", "timestamp": "2026-06-04T11:59:59.000Z",
-        "sessionId": "sess-0", "tags": ["golden"],
-        "observations": ["obs-1", "obs-2"],      # ids, not bodies
-        "scores": ["s-1"],
-    }], "meta": {"totalItems": 1, "totalPages": 1}}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
+def test_the_seam_names_no_deprecated_endpoint(monkeypatch):
+    """The contract half of the migration, asserted on the module rather than on a call
+    (portal #213). The seam is the one place a kit reaches Langfuse, so "no legacy endpoint
+    remains" is provable here: if a deprecated path is not written down in this file, no kit
+    can reach one through the seam.
 
-    traces = reader.traces(limit=10)
+    `/api/public/datasets/{name}` is the exception, and it is on no deprecation list — it is
+    the stable bridge from a kit's configured dataset name to the id the Experiments API
+    filters by.
+    """
+    import inspect
 
-    assert [t.id for t in traces] == ["t0"]
-    assert traces[0].observations == []          # the list endpoint carries no bodies
-    assert traces[0].session_id == "sess-0"
-
-
-def test_a_session_and_user_read_together_filters_by_both_on_either_arm(monkeypatch):
-    """The legacy observations list has no session filter, so that arm filters client-side —
-    and must apply *every* filter it was given, or the same call answers differently
-    depending on which generation served it."""
-    routes = dict(LEGACY_EMPTY)
-    routes["/api/public/traces"] = {"data": [{"id": "t0", "sessionId": "sess-1",
-                                              "userId": "u-1"}],
-                                    "meta": {"totalItems": 1, "totalPages": 1}}
-    routes["/api/public/traces/t0"] = {
-        "id": "t0", "sessionId": "sess-1", "userId": "u-1",
-        "observations": [dict(LEGACY_GENERATION_ROW, id="o1")]}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    assert reader.observations(session_id="sess-1", user_id="u-1")
-    assert reader.observations(session_id="sess-1", user_id="someone-else") == []
-
-
-def test_an_unreadable_target_fails_loudly_instead_of_picking_an_arm(monkeypatch):
-    """A 401 is bad keys, not a cut-over target. Guessing "legacy" there would report a
-    credentials failure as an empty demo — the silent degradation this spec treats as a
-    defect in its own right."""
-    routes = {"/api/public/traces": (401, {"message": "Unauthorized"})}
-    monkeypatch.setattr(read, "request_retry", _transport(routes))
-    reader = read.LangfuseReader("http://lf", auth=("pk", "sk"))
-
-    with pytest.raises(read.ReadError) as caught:
-        reader.read_api
-
-    assert caught.value.status_code == 401
+    source = inspect.getsource(read)
+    paths = set(re.findall(r'"(/api/public/[^"{]*)', source))
+    paths |= set(re.findall(r'f"(/api/public/[^"]*)', source))
+    for path in paths:
+        assert not re.match(
+            r"/api/public/(traces|observations|sessions|spans|generations|events|metrics"
+            r"|scores|v2/scores|ingestion)\b", path), path

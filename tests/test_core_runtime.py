@@ -120,20 +120,28 @@ def test_text_tokens_estimate() -> None:
 
 
 # --- event emission ------------------------------------------------------------------
-def test_trace_event_envelope_shape_and_iso_stamp() -> None:
+def test_a_trace_is_minted_as_its_root_observation() -> None:
+    """v4 has no trace entity to ingest, so ``trace_event`` builds the trace's root span
+    rather than a `trace-create` envelope (portal #206, #213)."""
     ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    ev = events.trace_event(trace_id="a" * 32, timestamp=ts, name="decision")
-    assert set(ev) == {"id", "type", "timestamp", "body"}
-    assert ev["type"] == "trace-create"
-    assert ev["timestamp"] == "2026-06-09T12:00:00.000Z"
-    assert ev["body"]["id"] == "a" * 32
+    span = events.trace_event(trace_id="a" * 32, timestamp=ts, name="decision")
+    assert span["traceId"] == "a" * 32
+    assert span["name"] == "decision"
+    assert span["startTimeUnixNano"] == str(int(ts.timestamp() * 1_000_000_000))
 
 
-def test_envelope_ids_are_idempotent() -> None:
+def test_score_envelope_ids_are_idempotent() -> None:
+    """Scores are still `score-create` envelopes — the supported v4 write path — and their
+    envelope id is keyed on object id + type, so a re-post upserts rather than duplicating.
+    That is what exempts a scores-only Spool from the non-resumable import guard."""
     ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    e1 = events.trace_event(trace_id="a" * 32, timestamp=ts, name="x")
-    e2 = events.trace_event(trace_id="a" * 32, timestamp=ts, name="different-name")
-    # envelope id is keyed on object id + type, so re-emits upsert rather than duplicate
+    e1 = events.score_event(score_id="s1", name="q", value=1, data_type="NUMERIC",
+                            timestamp=ts, trace_id="a" * 32)
+    e2 = events.score_event(score_id="s1", name="q", value=0, data_type="NUMERIC",
+                            timestamp=ts, trace_id="a" * 32)
+    assert set(e1) == {"id", "type", "timestamp", "body"}
+    assert e1["type"] == "score-create"
+    assert e1["timestamp"] == "2026-06-09T12:00:00.000Z"
     assert e1["id"] == e2["id"]
 
 
@@ -159,3 +167,54 @@ def test_theme_page_wraps_body() -> None:
 def test_paths_local_is_bare_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LIVE_BASE_PATH", raising=False)
     assert paths.local("/submit") == "/submit"
+
+
+# --- what the contract half of expand-contract removed (portal #213) ------------------
+def test_the_batch_write_path_and_its_flag_are_gone():
+    """Expand–contract's second half, asserted rather than assumed.
+
+    Core spoke two wires for the length of the v4 migration so kits could cut over one at a
+    time. All three did, and this is the deletion. A kit that still pins a write path must
+    fail at import against this core — loudly, at the line that names the missing module —
+    rather than quietly writing envelopes to an endpoint that has stopped taking them.
+    """
+    import importlib
+
+    import pytest
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("langfuse_synth_core.seed.writepath")
+
+    from langfuse_synth_core.seed import events as events_mod
+
+    for retired in ("set_spool_write_path", "use_spool_write_path", "on_otlp",
+                    "RICH_OBSERVATION_TYPES", "TRACE_EVENT_TYPES",
+                    "OBSERVATION_EVENT_TYPES"):
+        assert not hasattr(events_mod, retired), retired
+
+
+def test_no_builder_but_the_score_one_emits_an_ingestion_envelope():
+    """The rule the conformance suite enforces on kits, held here on core's own builders:
+    the ingestion endpoint is deprecated per **event type**, and `score-create` is not one
+    of the deprecated ones. So exactly one builder still produces an envelope."""
+    from datetime import datetime, timezone
+
+    from langfuse_synth_core.seed import events as events_mod
+
+    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
+    tid, oid = "a" * 32, "b" * 16
+    spans = [
+        events_mod.trace_event(trace_id=tid, timestamp=ts, name="d"),
+        events_mod.span_event(obs_id=oid, trace_id=tid, name="s", start=ts, end=ts),
+        events_mod.observation_event(obs_id=oid, trace_id=tid, name="a", obs_type="AGENT",
+                                     start=ts, end=ts),
+        events_mod.generation_event(obs_id=oid, trace_id=tid, name="g", start=ts, end=ts,
+                                    model="m", usage_details={}, cost_details={}),
+        events_mod.event_event(obs_id=oid, trace_id=tid, name="e", start=ts),
+    ]
+    for wire_object in spans:
+        assert "spanId" in wire_object and "type" not in wire_object
+
+    score = events_mod.score_event(score_id="s1", name="q", value=1, data_type="NUMERIC",
+                                   timestamp=ts, trace_id=tid)
+    assert score["type"] == "score-create"

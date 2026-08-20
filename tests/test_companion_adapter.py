@@ -189,10 +189,11 @@ def test_langfuse_sdk_client_bound_to_deployment_connection(adapter, fake_langfu
     assert adapter.langfuse() is client  # cached
 
 
-def test_ingestor_write_path_bound_to_connection(adapter):
-    ing = adapter.ingestor(dry_run=True)
-    assert ing.base_url == BASE_URL
-    assert (ing.public_key, ing.secret_key) == ("pk-seeded", "sk-seeded")
+def test_the_spool_writer_is_not_on_the_adapter_surface(adapter):
+    """A Surface emits at *now* and rides `emitter()`. The Spool's writer backdates weeks of
+    history and has no business on a wall-clock surface, so it is not reachable from the
+    Adapter — the readiness probe constructs its own (portal #213)."""
+    assert not hasattr(adapter, "ingestor")
 
 
 def test_read_path_hits_the_seeded_connection(adapter, monkeypatch):
@@ -260,11 +261,10 @@ def test_deployment_pinned_model_still_wins_over_a_per_call_override(adapter, mo
 # Row: readiness surface — "write ok / llm bound", secret-free, no billable call
 # ---------------------------------------------------------------------------
 def test_readiness_reports_both_paths_ready(adapter, fake_anthropic, monkeypatch):
-    posts = {"count": 0, "url": None, "auth": None, "batch": None}
+    posts = {"count": 0, "url": None, "auth": None, "body": None}
 
     def fake_post(url, json=None, auth=None, headers=None, timeout=None):
-        posts.update(count=posts["count"] + 1, url=url, auth=auth,
-                     batch=(json or {}).get("batch"))
+        posts.update(count=posts["count"] + 1, url=url, auth=auth, body=json)
         return _FakeResp(200, {})
 
     monkeypatch.setattr(requests, "post", fake_post)
@@ -272,10 +272,10 @@ def test_readiness_reports_both_paths_ready(adapter, fake_anthropic, monkeypatch
     report = adapter.readiness()
     assert isinstance(report, ReadinessReport)
     assert report.langfuse_write_ok and report.llm_bound and report.ok
-    # write probe hit the ingestion endpoint with an EMPTY batch (no data emitted).
+    # write probe hit the OTLP traces endpoint with NO spans (no data emitted).
     assert posts["count"] == 1
-    assert posts["url"] == f"{BASE_URL}/api/public/ingestion"
-    assert posts["batch"] == []
+    assert posts["url"] == f"{BASE_URL}/api/public/otel/v1/traces"
+    assert posts["body"] == {"resourceSpans": []}
     # llm bound by construction only — zero completions.
     assert fake_anthropic["completions"] == 0
 
@@ -394,8 +394,8 @@ def test_adapter_hands_out_a_reader_bound_to_the_deployment_connection(adapter):
 
 
 def test_adapter_hands_out_a_wall_clock_emitter_not_the_spools_ingestor(adapter):
-    """A Companion App emits at *now*, so it gets the live-emission seam. The Spool's
-    ``Ingestor`` stays reachable only until the kits are rewired (#211)."""
+    """A Companion App emits at *now*, so it gets the live-emission seam — and only that
+    one: the Spool's ``Ingestor`` came off the Adapter with the batch path (#211, #213)."""
     emitter = adapter.emitter()
 
     assert emitter.base_url == BASE_URL

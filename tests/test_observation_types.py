@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from langfuse_synth_core.seed import otlp, writepath
+from langfuse_synth_core.seed import otlp
 from langfuse_synth_core.seed.events import observation_event
 from langfuse_synth_core.observation_types import (
     OBSERVATION_TYPES,
@@ -69,54 +69,35 @@ def test_the_refusal_names_the_silent_degradation():
     assert "guardrail" in message  # the vocabulary itself is in the message
 
 
-@pytest.mark.parametrize("path", [writepath.BATCH, writepath.OTLP])
-def test_a_mistyped_observation_type_fails_at_the_builder(path):
-    """The kit-facing builder is where an author meets this, and on both write paths: the
-    vocabulary is a property of the target, not of the transport a kit happens to be on."""
-    with writepath.use_spool_write_path(path):
-        with pytest.raises(UnknownObservationType, match="toool"):
-            observation_event(
-                obs_id=OID, trace_id=TID, name="lookup", obs_type="TOOOL",
-                start=TS, end=TS,
-            )
+def test_a_mistyped_observation_type_fails_at_the_builder():
+    """The kit-facing builder is where an author meets this: the vocabulary is a property
+    of the target, and the builder refuses before anything reaches the wire."""
+    with pytest.raises(UnknownObservationType, match="toool"):
+        observation_event(
+            obs_id=OID, trace_id=TID, name="lookup", obs_type="TOOOL",
+            start=TS, end=TS,
+        )
 
 
 @pytest.mark.parametrize("spelling", ["TOOL", "tool"])
 def test_the_builder_takes_either_spelling_and_writes_the_wire_one(spelling):
-    """Kits spell these uppercase (the batch enum's spelling) and core lowercases for the
-    wire. That normalisation stays — what it may not do is normalise a value that is not
-    in the vocabulary at all."""
-    with writepath.use_spool_write_path(writepath.OTLP):
-        span = observation_event(
-            obs_id=OID, trace_id=TID, name="lookup", obs_type=spelling, start=TS, end=TS,
-        )
+    """Kits spell these uppercase and core lowercases for the wire. That normalisation
+    stays — what it may not do is normalise a value that is not in the vocabulary at
+    all."""
+    span = observation_event(
+        obs_id=OID, trace_id=TID, name="lookup", obs_type=spelling, start=TS, end=TS,
+    )
     assert attrs(span)["langfuse.observation.type"] == "tool"
 
 
-def test_every_type_the_vocabulary_carries_builds(monkeypatch):
+def test_every_type_the_vocabulary_carries_builds():
     from langfuse_synth_core.seed import events as events_mod
 
-    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", True)
-    with writepath.use_spool_write_path(writepath.OTLP):
-        for obs_type in OBSERVATION_TYPES:
-            span = events_mod.observation_event(
-                obs_id=OID, trace_id=TID, name="x", obs_type=obs_type, start=TS, end=TS,
-            )
-            assert attrs(span)["langfuse.observation.type"] == obs_type
-
-
-@pytest.mark.parametrize("spelling", ["TOOL", "tool"])
-def test_the_batch_path_spells_the_same_vocabulary_its_own_way(spelling, monkeypatch):
-    """One vocabulary, two spellings: the legacy enum is uppercase where the wire is
-    lowercase. A kit picks either and each path writes the one its target accepts."""
-    from langfuse_synth_core.seed import events as events_mod
-
-    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", True)
-    with writepath.use_spool_write_path(writepath.BATCH):
-        envelope = events_mod.observation_event(
-            obs_id=OID, trace_id=TID, name="lookup", obs_type=spelling, start=TS, end=TS,
+    for obs_type in OBSERVATION_TYPES:
+        span = events_mod.observation_event(
+            obs_id=OID, trace_id=TID, name="x", obs_type=obs_type, start=TS, end=TS,
         )
-    assert envelope["body"]["type"] == "TOOL"
+        assert attrs(span)["langfuse.observation.type"] == obs_type
 
 
 def test_the_live_seam_refuses_a_type_the_sdk_would_pass_through(monkeypatch):

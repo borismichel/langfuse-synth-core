@@ -574,7 +574,6 @@ def test_the_surviving_endpoints_are_not_flagged(tmp_path):
                 'GET("/api/public/v3/scores")\n'
                 'POST("/api/public/otel/v1/traces")\n'
             ),
-            "synth/seed/path.py": "set_spool_write_path(OTLP)\n",
         },
     )
     assert legacy_langfuse_findings(kit) == []
@@ -590,7 +589,6 @@ def test_the_dataset_runs_read_is_flagged_but_the_datasets_list_is_not(tmp_path)
                 'GET(f"/api/public/datasets/{name}/runs", {"limit": 50})\n'
                 'GET("/api/public/v2/datasets")\n'
             ),
-            "synth/seed.py": "set_spool_write_path(OTLP)\n",
         },
     )
     findings = legacy_langfuse_findings(kit)
@@ -605,19 +603,58 @@ def test_the_legacy_rest_create_endpoints_are_flagged(tmp_path):
 
     kit = _kit_with_sources(
         tmp_path,
-        **{"synth/emit.py": 'post(f"{base}/api/public/generations", body)\n',
-           "synth/seed.py": "set_spool_write_path(OTLP)\n"},
+        **{"synth/emit.py": 'post(f"{base}/api/public/generations", body)\n'},
     )
     findings = legacy_langfuse_findings(kit)
     assert len(findings) == 1 and "/api/public/generations" in findings[0]
 
 
-def test_a_kit_still_on_the_batch_write_path_is_a_finding(tmp_path):
-    """The write half: no kit-set OTLP pin means the Spool is still batch-ingested."""
+def test_the_score_write_path_is_not_flagged(tmp_path):
+    """`score-create` on `POST /api/public/ingestion` is the SUPPORTED v4 write path for
+    scores, not tolerated legacy debt (portal #225). Langfuse's deprecated-API migration
+    guide says the ingestion deprecation "applies only to trace and observation events" and
+    that no client change is required for scores — so a kit naming that endpoint beside a
+    score envelope must come back clean."""
     from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
-    kit = _kit_with_sources(tmp_path, **{"synth/seed.py": "ingestor.import_spool()\n"})
-    assert any("write path" in a and "batch" in a for a in legacy_langfuse_findings(kit))
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/scores.py": (
+            'post(f"{base}/api/public/ingestion", {"batch": [score_create_envelope]})\n'
+            'ENVELOPE = {"type": "score-create", "body": body}\n'
+        )},
+    )
+    assert legacy_langfuse_findings(kit) == []
+
+
+def test_a_trace_or_observation_envelope_on_ingestion_is_flagged(tmp_path):
+    """The other half of the same rule: the deprecation is per *event type*, so a kit
+    posting trace or observation envelopes to the same endpoint is reaching for exactly what
+    Langfuse removes, and the finding names the envelope type rather than the endpoint."""
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/emit.py": (
+            'URL = f"{base}/api/public/ingestion"\n'
+            'envelope = {"type": "generation-create", "body": body}\n'
+        )},
+    )
+    findings = legacy_langfuse_findings(kit)
+    assert len(findings) == 1, findings
+    assert "generation-create" in findings[0] and "synth/emit.py:2" in findings[0]
+
+
+def test_an_envelope_type_without_the_ingestion_endpoint_is_not_flagged(tmp_path):
+    """Read-side code names event types all the time (filtering, asserting on what landed).
+    The finding is about *posting* one, so it needs the endpoint in the same file."""
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/verify.py": 'assert seen["type"] == "generation-create"\n'},
+    )
+    assert legacy_langfuse_findings(kit) == []
 
 
 def test_the_totalitems_technique_is_flagged_alongside_a_dying_endpoint(tmp_path):
@@ -637,7 +674,6 @@ def test_the_totalitems_technique_is_flagged_alongside_a_dying_endpoint(tmp_path
                 'items = get_json(base, "/api/public/dataset-items", {"limit": 1})\n'
                 'n = items["meta"]["totalItems"]\n'
             ),
-            "synth/seed.py": "set_spool_write_path(OTLP)\n",
         },
     )
     findings = legacy_langfuse_findings(kit)
@@ -658,12 +694,16 @@ def test_a_deprecated_endpoint_blocks_in_enforcing_mode(tmp_path, capsys):
     (kit / "usecase.yaml").write_text(yaml.safe_dump(_stateless_manifest()))
 
     report = run_conformance(kit)
-    assert any("/api/public/traces" in f for f in report.findings), report.findings
+    assert any("/api/public/traces" in f for f in report.migration_findings), report.all_findings
     assert not report.ok
 
     assert run([str(kit)]) == 1                      # enforcing mode: red
     assert "/api/public/traces" in capsys.readouterr().out
-    assert run([str(kit), "--advisory"]) == 0        # a pre-portal kit still only gets nudged
+    # ...and `--advisory` cannot talk it down. The switch buys a pre-portal kit time on its
+    # own convergence debt; it is not a way to keep calling an endpoint Langfuse removed
+    # (portal #213).
+    assert run([str(kit), "--advisory"]) == 1
+    assert "/api/public/traces" in capsys.readouterr().out
 
 
 def test_a_canned_deprecated_api_in_the_tests_is_not_the_kits_debt(tmp_path):
@@ -675,8 +715,7 @@ def test_a_canned_deprecated_api_in_the_tests_is_not_the_kits_debt(tmp_path):
 
     kit = _kit_with_sources(
         tmp_path,
-        **{"synth/seed.py": "set_spool_write_path(OTLP)\n",
-           "tests/test_verify.py": 'if path == "/api/public/traces": return _Resp(200)\n'},
+        **{"tests/test_verify.py": 'if path == "/api/public/traces": return _Resp(200)\n'},
     )
     assert legacy_langfuse_findings(kit) == []
 
@@ -796,26 +835,27 @@ def test_a_kit_that_types_no_observation_gets_a_note_not_a_tick(tmp_path):
     assert notes and "names none" in notes[0]
 
 
-def test_the_vocabulary_finding_blocks_where_the_v4_advisories_do_not(tmp_path, capsys):
-    """Two channels, and this one is the blocking channel: a mistyped type is a defect in
-    the kit, not migration debt the fleet is working through."""
+def test_the_vocabulary_finding_rides_the_non_downgradable_channel(tmp_path, capsys):
+    """The migration channel, which `--advisory` cannot reach: a mistyped type is a defect
+    in the kit, not convergence debt it is working through."""
     from langfuse_synth_core.authoring.conformance import run, run_conformance
 
     kit = _kit_with_sources(
         tmp_path,
         **{"synth/seed.py": (
-            "set_spool_write_path(OTLP)\n"
             'observation_event(obs_id=o, trace_id=t, name="x", obs_type="genration")\n'
         )},
     )
     (kit / "usecase.yaml").write_text(yaml.safe_dump(_stateless_manifest()))
 
     report = run_conformance(kit)
-    assert any("genration" in f for f in report.findings), report.findings
+    assert any("genration" in f for f in report.migration_findings), report.all_findings
     assert not report.ok
 
     assert run([str(kit)]) == 1
-    assert run([str(kit), "--advisory"]) == 0     # the pre-portal-kit escape, unchanged
+    # Not downgradable either: a type outside the vocabulary is a defect in THIS kit, and
+    # the wire it rides accepts it silently (portal #213).
+    assert run([str(kit), "--advisory"]) == 1
     assert "genration" in capsys.readouterr().out
 
 
@@ -835,7 +875,7 @@ def test_a_scaffolded_kit_names_a_valid_type_for_every_observation(kit_on_path):
     assert notes and "names none" in notes[0]
 
     report = run_conformance(kit_dir)
-    assert [f for f in report.findings if "observation type" in f] == []
+    assert [f for f in report.all_findings if "observation type" in f] == []
 
 
 def test_the_sdk_keyword_on_the_live_seam_is_read_case_sensitively(tmp_path):

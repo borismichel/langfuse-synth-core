@@ -44,12 +44,11 @@ src/langfuse_synth_core/
   distributions.py  log-normal latency + model-appropriate token sampling (#31)
   lfclient.py       Langfuse v4 SDK client construction (#31)
   read.py           the READ seam — traces/observations/scores/sessions/experiments,
-                    normalised across the v4 and deprecated read APIs (#208)
-  lfread.py         the raw authenticated GET + the legacy score-row compatibility front (#33, #208)
+                    normalised off the v4 read APIs (#208, v4-only since #213)
+  lfread.py         the raw authenticated GET for the endpoints the seam does not model (#33, #208)
   config.py         structural Protocols (Config/Model/Target) the core reads against (#31)
   timegen.py        the ISO-8601 formatting primitive event bodies need (#31)
-  seed/events.py    event builders — one API, two wire formats (#31, #206)
-  seed/writepath.py which wire a Spool is written on: batch | otlp (#206)
+  seed/events.py    the Spool's wire-object builders — OTLP spans, `score-create` (#31, #206)
   seed/otlp.py      the OTLP wire model + Spool finalisation (#206)
   live/emit.py      the LIVE-EMISSION seam — wall-clock traces via the Langfuse SDK (#208)
   live/theme.py     Langfuse design tokens + page shell (#31)
@@ -58,7 +57,7 @@ src/langfuse_synth_core/
                     templates + kit-dev skills — import fails without the [authoring] extra
 docs/SEAM.md        the library/kit hand-off rule + the "not a framework" verdict
 docs/INSTALL.md     git-pinned private install + build-secret pattern
-docs/WRITE_PATHS.md the two Spool write paths, the flag, and non-resumable imports
+docs/WRITE_PATHS.md how the Spool is written, and why an import is non-resumable
 docs/READ_LIVE_SEAMS.md
                     the read seam + the live-emission seam, and the line between them
 CONTRACT.md         reserved home for the relocated Contract (#27)
@@ -76,13 +75,12 @@ toolchain (namespaced `synth-authoring`, never `synth`, so it can't shadow a kit
 # wired through the library, the identity derivation hook, a render:markdown Presenter
 # Runbook, the reference non-root Dockerfile), then blesses the initial determinism golden
 # so the fresh kit passes `synth-authoring validate` AND the golden gate on first generation.
-# The emitted kit is v4-native (portal #207): its seed pins the OTLP write path
-# (docs/WRITE_PATHS.md) and its verify reads the v4 APIs, so a new kit is never born with a
-# migration already to do.
+# The emitted kit is v4-native (portal #207): its Spool is a stream of OTLP spans
+# (docs/WRITE_PATHS.md) and its verify reads the v4 APIs.
 synth-authoring new my-kit                 # -> ./my-kit/
 synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
-synth-authoring new my-kit --core-ref v3.0.0    # lib git ref the kit pins to (a tag)
+synth-authoring new my-kit --core-ref v4.0.0    # lib git ref the kit pins to (a tag)
 
 # Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
 synth-authoring validate path/to/usecase.yaml

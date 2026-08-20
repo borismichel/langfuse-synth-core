@@ -99,22 +99,33 @@ _SCRUB_NAMES = frozenset({"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_META
 
 @dataclass
 class ConformanceReport:
-    """The suite's verdict: blocking findings, notes, green check lines.
+    """The suite's verdict, in two finding channels plus notes and green check lines.
 
-    There was a second, nudge-never-block channel here while the v4 migration was in
-    flight — every kit in the fleet still read a deprecated endpoint, and none of them could
-    be allowed to go red for it (portal #207). #211 moved all three onto the seams, the
-    legacy-endpoint check graduated to a finding, and the channel retired with its last
-    user. ``--advisory`` still turns *every* finding into a nudge for a pre-portal kit.
+    ``findings`` is convergence debt — the shape a kit is growing towards. ``--advisory``
+    turns those into nudges so a pre-portal kit can adopt the suite before it has converged.
+
+    ``migration_findings`` is the v4 channel, and ``--advisory`` does **not** reach it
+    (portal #213). Two rules live here: the kit reaches a Langfuse endpoint that stops
+    answering on 2026-11-16, or it names an observation type outside the vocabulary the wire
+    accepts silently. Neither is debt anyone is working through — the first is a kit that
+    stops working at the cutover, the second is a demo that already tells the wrong story.
+    A switch that let either through would make "conformance is enforcing" untrue of exactly
+    the checks the migration turned it on for.
     """
 
     findings: list[str] = field(default_factory=list)
+    migration_findings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     passed: list[str] = field(default_factory=list)
 
     @property
+    def all_findings(self) -> list[str]:
+        """Every finding, migration channel first — findings are read worst-first."""
+        return [*self.migration_findings, *self.findings]
+
+    @property
     def ok(self) -> bool:
-        return not self.findings
+        return not (self.findings or self.migration_findings)
 
 
 # --------------------------------------------------------------------------------------
@@ -284,9 +295,6 @@ def _offline_adapter(health_path: str) -> Any:
     class _OfflineProbeAdapter(CompanionAdapter):
         def langfuse(self) -> Any:
             raise OfflineDenied("adapter.langfuse() asked for during offline conformance")
-
-        def ingestor(self, **kw: Any) -> Any:
-            raise OfflineDenied("adapter.ingestor() asked for during offline conformance")
 
         def read_json(
             self, path: str, params: dict | None = None, *, throttle: float = 0.0
@@ -556,12 +564,6 @@ def _probe_payload(cls: type, label: str, findings: list[str], notes: list[str])
 #: themselves — never match.
 _DEPRECATED_ENDPOINTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
-        re.compile(r"/api/public/ingestion"),
-        "core posts OTLP spans to /api/public/otel/v1/traces on the v4 write path — unless "
-        "what this posts is scores, the one envelope type the ingestion endpoint keeps "
-        "serving past the cutover, in which case it stays exactly where it is",
-    ),
-    (
         re.compile(r"/api/public/(spans|generations|events)\b"),
         "the legacy REST create endpoints go with batch ingestion; core writes every "
         "observation as an OTLP span",
@@ -589,8 +591,15 @@ _DEPRECATED_ENDPOINTS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
 )
 
-#: The kit-set write-path pin (core ``seed.writepath``) that makes a Spool v4-native.
-_OTLP_PIN = re.compile(r"""set_spool_write_path\(\s*(?:\w+\.)?(?:OTLP|["']otlp["'])""")
+#: ``POST /api/public/ingestion`` is deprecated **per event type**, not as an endpoint.
+#: Langfuse's deprecated-API migration guide states the deprecation "applies only to trace
+#: and observation events" and that `score-create` remains supported with no client change
+#: required (portal #225, 2026-08-20) — so the score write path is current and correct, and
+#: is not something this suite apologises for. These are the types that *are* going.
+_INGESTION_ENDPOINT = re.compile(r"/api/public/ingestion")
+_DEPRECATED_ENVELOPE_TYPES = re.compile(
+    r"""["'](trace-create|span-create|generation-create|event-create|observation-create)["']"""
+)
 
 #: The counting technique the v4 read APIs cannot serve: they are cursor-paginated and
 #: carry no total. Only advised in a file that also reads a dying endpoint — the endpoints
@@ -637,8 +646,14 @@ def _readable(paths: list[Path], kit_dir: Path) -> list[tuple[str, str]]:
     return out
 def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
     """One line for every legacy Langfuse surface the kit still reaches: a deprecated
-    endpoint in its **shipped** sources, the ``meta.totalItems`` counting technique beside
-    one, and a Spool still written on the batch path. Empty for a v4-native kit.
+    endpoint in its **shipped** sources, a deprecated ingestion *envelope type* posted to
+    ``/api/public/ingestion``, and the ``meta.totalItems`` counting technique beside either.
+    Empty for a v4-native kit.
+
+    "Legacy" is assessed against Langfuse's published deprecation list, not against what
+    looks old (portal #213). ``POST /api/public/ingestion`` is on this list only for trace
+    and observation events; the `score-create` envelopes core writes there are the supported
+    v4 score path, so they come back clean.
 
     Shipped sources only (:func:`_shipped_sources`), because this blocks: a test that stands
     up a canned deprecated-API server — which every kit's read-seam suite now does, on
@@ -651,16 +666,20 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
         return []
 
     findings: list[str] = []
-    pinned_otlp = False
     for label, text in sources:
         lines = text.splitlines()
         hits: list[tuple[int, str]] = []
         totals: list[int] = []
+        envelopes: list[tuple[int, str]] = []
+        posts_to_ingestion = False
         for lineno, line in enumerate(lines, start=1):
             if line.lstrip().startswith("#"):
                 continue
-            if _OTLP_PIN.search(line):
-                pinned_otlp = True
+            if _INGESTION_ENDPOINT.search(line):
+                posts_to_ingestion = True
+            envelope = _DEPRECATED_ENVELOPE_TYPES.search(line)
+            if envelope:
+                envelopes.append((lineno, envelope.group(1)))
             for pattern, replacement in _DEPRECATED_ENDPOINTS:
                 match = pattern.search(line)
                 if match:
@@ -673,6 +692,22 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
                     ))
             if _TOTAL_ITEMS.search(line):
                 totals.append(lineno)
+        # The endpoint alone is not the finding — read-side code names event types when it
+        # filters on what landed, and the endpoint is current for scores. It takes both, in
+        # the same file, to be a kit posting something Langfuse removes.
+        if posts_to_ingestion:
+            hits.extend(
+                (
+                    lineno,
+                    f"at {label}:{lineno}: posts a `{etype}` envelope to "
+                    f"`/api/public/ingestion` — the ingestion deprecation applies to trace "
+                    f"and observation events, which stop being accepted once the target is "
+                    f"v4-only (Langfuse Cloud, 2026-11-16). Core writes every observation as "
+                    f"an OTLP span to /api/public/otel/v1/traces; only `score-create` stays "
+                    f"on this endpoint, and it stays there deliberately ({_CITE_SPOOL})",
+                )
+                for lineno, etype in envelopes
+            )
         if hits:
             hits.extend(
                 (
@@ -686,13 +721,6 @@ def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
             )
             findings.extend(text for _, text in sorted(hits, key=lambda h: h[0]))
 
-    if not pinned_otlp:
-        findings.append(
-            "the Spool is still written on the batch write path (legacy ingestion) — no "
-            "kit-set `set_spool_write_path(OTLP)` in the kit's sources. Langfuse rejects every "
-            "envelope type but `score-create` once the target is v4-only "
-            f"(2026-11-16); core's docs/WRITE_PATHS.md carries the cutover ({_CITE_SPOOL})"
-        )
     return findings
 
 
@@ -911,7 +939,7 @@ def run_conformance(
                 )
 
     obs_findings, obs_notes = observation_type_findings(kit_dir)
-    report.findings.extend(obs_findings)
+    report.migration_findings.extend(obs_findings)
     report.notes.extend(obs_notes)
     if not (obs_findings or obs_notes):
         report.passed.append(
@@ -919,11 +947,11 @@ def run_conformance(
         )
 
     legacy = legacy_langfuse_findings(kit_dir)
-    report.findings.extend(legacy)
+    report.migration_findings.extend(legacy)
     if not legacy:
         report.passed.append(
-            "no legacy Langfuse endpoint reached: the Spool is written on the OTLP path "
-            "and every read goes through the read seam"
+            "no deprecated Langfuse endpoint reached: observations go out as OTLP spans, "
+            "scores as `score-create`, and every read goes through the read seam"
         )
     return report
 
@@ -939,8 +967,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--advisory", action="store_true",
-        help="report findings without failing (exit 0) — the pre-portal-kit mode: "
-        "adoption never blocks CI before a kit has converged (portal #198)",
+        help="report convergence findings without failing — the pre-portal-kit mode: "
+        "adoption never blocks CI before a kit has converged (portal #198). Does NOT "
+        "cover the v4-migration checks, which always block (portal #213)",
     )
     parser.add_argument(
         "--companion-app", default=DEFAULT_COMPANION_FACTORY, metavar="module:factory",
@@ -954,8 +983,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def execute(args: argparse.Namespace) -> int:
-    """Run the suite and print the verdict. Enforcing mode exits 1 on findings;
-    ``--advisory`` always exits 0 (the #181 nudge-never-block channel)."""
+    """Run the suite and print the verdict.
+
+    Enforcing mode exits 1 on any finding. ``--advisory`` downgrades the convergence
+    findings to nudges (the #181 nudge-never-block channel) but never the v4-migration
+    ones — see :class:`ConformanceReport`.
+    """
     kit_dir = Path(args.kit)
     src = kit_dir / "src"
     inserted: str | None = None
@@ -977,6 +1010,8 @@ def execute(args: argparse.Namespace) -> int:
         print(f"  ✓ {line}")
     for line in report.notes:
         print(f"  · {line}")
+    for line in report.migration_findings:
+        print(f"  ✗ {line}")
     marker = "⚠ advisory" if args.advisory else "✗"
     for line in report.findings:
         print(f"  {marker} {line}")
@@ -984,6 +1019,17 @@ def execute(args: argparse.Namespace) -> int:
     if report.ok:
         print("✓ conformance: the Contract holds")
         return 0
+    if report.migration_findings:
+        print(
+            f"✗ conformance: {len(report.migration_findings)} v4-migration finding(s)"
+            + (
+                f" (plus {len(report.findings)} advisory)" if args.advisory and report.findings
+                else f" of {len(report.all_findings)} finding(s)" if report.findings
+                else ""
+            )
+            + " — the migration checks do not take --advisory (portal #213)"
+        )
+        return 1
     if args.advisory:
         print(
             f"⚠ conformance: {len(report.findings)} finding(s) — advisory-first kit, "

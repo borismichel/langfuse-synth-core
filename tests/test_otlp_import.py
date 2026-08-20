@@ -20,18 +20,11 @@ from pathlib import Path
 import pytest
 
 import langfuse_synth_core.seed.ingest as ingest_mod
-from langfuse_synth_core.seed import writepath
 from langfuse_synth_core.seed.events import score_event, span_event, trace_event
 from langfuse_synth_core.seed.ingest import Ingestor, IngestError, NonResumableImportError
 
 TS = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
 TID = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
-
-
-@pytest.fixture(autouse=True)
-def _on_otlp():
-    with writepath.use_spool_write_path(writepath.OTLP):
-        yield
 
 
 class _Recorder:
@@ -149,14 +142,19 @@ def test_regenerating_the_spool_clears_the_refusal(tmp_path: Path, monkeypatch):
     assert fresh.import_spool() == 2
 
 
-def test_the_batch_path_stays_idempotently_re_runnable(tmp_path: Path, monkeypatch):
+def test_a_scores_only_spool_stays_idempotently_re_runnable(tmp_path: Path, monkeypatch):
+    """The guard is about OTLP's missing upsert, so it is scoped to Spools that carry spans.
+    `score-create` envelopes carry deterministic ids and upsert, so a Spool of nothing but
+    scores has nothing for a re-post to duplicate and is not locked."""
+    from langfuse_synth_core.seed.events import score_event
+
     monkeypatch.setattr(ingest_mod.requests, "post", _Recorder())
-    with writepath.use_spool_write_path(writepath.BATCH):
-        ing = _spooled(tmp_path, _one_trace())
-        ing.import_spool()
-        again = Ingestor(base_url="http://lf.local", public_key="pk", secret_key="sk",
-                         spool_path=tmp_path / "events.ndjson")
-        assert again.import_spool() == 2
+    scores = [score_event(score_id="a1b2c3d4e5f60718", name="q", value=1,
+                          data_type="NUMERIC", timestamp=TS, trace_id=TID)]
+    _spooled(tmp_path, scores).import_spool()
+    again = Ingestor(base_url="http://lf.local", public_key="pk", secret_key="sk",
+                     spool_path=tmp_path / "events.ndjson")
+    assert again.import_spool() == 1
 
 
 def test_the_write_ping_exercises_the_otlp_endpoint_without_emitting_a_span(monkeypatch):

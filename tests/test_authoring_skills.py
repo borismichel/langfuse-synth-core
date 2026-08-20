@@ -77,11 +77,14 @@ def test_skill_delegates_langfuse_craft(skill_body: str):
 
 
 def test_skill_teaches_the_v4_write_path_without_restating_the_observation_model(skill_body):
-    """AC (portal #207): the skill teaches the new write path — the kit-set OTLP pin, the
-    append-not-upsert consequence, and where the wire is documented — while the split it
-    was built on holds: *which* observation type a step is stays the `langfuse` skill's."""
+    """AC (portal #207, revised by #213): the skill teaches the write path — OTLP, the
+    score exception, the append-not-upsert consequence, and where the wire is documented —
+    while the split it was built on holds: *which* observation type a step is stays the
+    `langfuse` skill's. There is no pin to teach any more: the batch path is gone, so the
+    skill must NOT still be telling authors to select one."""
     lowered = skill_body.lower()
-    assert "set_spool_write_path(otlp)" in lowered
+    assert "set_spool_write_path" not in lowered
+    assert "score-create" in lowered
     assert "docs/write_paths.md" in lowered
     assert "otlp" in lowered and "2026-11-16" in lowered
     assert "appends" in lowered and "non-resumable" in lowered

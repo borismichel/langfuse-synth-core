@@ -8,13 +8,11 @@ locked at the lib level too.
 
 from __future__ import annotations
 
-import pytest
 
 import langfuse_synth_core.probe as probe_mod
 from langfuse_synth_core import read as read_mod
 from langfuse_synth_core.probe import probe_ids
 from langfuse_synth_core.rng import Rng
-from langfuse_synth_core.seed import writepath
 from langfuse_synth_core.seed.otlp import trace_root_span_id
 
 
@@ -39,11 +37,11 @@ def test_probe_ids_are_not_the_fixed_deterministic_id():
         assert tid != old_collision
 
 
-# --- the probe on both write paths (portal #206) ---------------------------
+# --- the probe end to end (portal #206, #213) ------------------------------
 # The probe is the migration's smoke test: it seeds ONE backdated trace and reads it back to
 # assert the timestamp round-tripped. Backdating is the single riskiest property of the
-# whole Spool, and the OTLP path is where it could silently die — so the probe has to run
-# on whichever path the deployment is about to seed on.
+# whole Spool and the OTLP wire is where it could silently die, so the probe writes exactly
+# what a seed writes and reads it back through exactly the seam a `verify` reads through.
 
 def _capture_probe_run(monkeypatch) -> dict:
     """Run the probe against a fake host; return what it posted and what it asked back."""
@@ -63,21 +61,12 @@ def _capture_probe_run(monkeypatch) -> dict:
 
     monkeypatch.setattr(ingest_mod.requests, "post", fake_post)
 
-    # The read-back goes through the read seam (portal #208), so the fake answers whichever
-    # generation the target is pretending to serve — the probe never names an endpoint.
+    # The read-back goes through the read seam (portal #208), which reads v4 and only v4 —
+    # the probe never names an endpoint itself.
     def fake_read(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0, **kw):
         posted.setdefault("read_urls", []).append(url)
-        legacy = posted.get("read_api", "legacy") == "legacy"
-        if url.endswith("/api/public/traces"):                       # the generation probe
-            return _read_resp(200 if legacy else 404, {"data": [], "meta": {"totalPages": 1}})
-        if "/api/public/traces/" in url:
-            if not legacy:
-                return _read_resp(404, {})
-            return _read_resp(200, {
-                "id": url.rsplit("/", 1)[-1], "timestamp": posted["expect_iso"],
-                "observations": [{"id": "x", "startTime": posted["expect_iso"]}]})
         if url.endswith("/api/public/v2/observations"):
-            return _read_resp(200 if not legacy else 404, {
+            return _read_resp(200, {
                 "data": [{"id": "x", "traceId": params.get("traceId"), "type": "SPAN",
                           "name": "probe", "startTime": posted["expect_iso"]}],
                 "meta": {}})
@@ -104,32 +93,21 @@ def _run(posted, monkeypatch) -> bool:
     return probe_mod.run_backdate_probe("http://lf.local", "demo", 42, log=lambda _m: None)
 
 
-def test_the_probe_passes_on_the_batch_path(monkeypatch):
+def test_the_probe_reads_its_backdate_back_through_the_v4_apis(monkeypatch):
+    """The probe reads through the seam and never names an endpoint itself (#208), so a
+    target with no trace entity — where a trace *is* its set of observations — answers it
+    the same way. It must also name no deprecated endpoint at all (#213)."""
     posted = _capture_probe_run(monkeypatch)
-    with writepath.use_spool_write_path(writepath.BATCH):
-        assert _run(posted, monkeypatch) is True
-    urls = {c["url"] for c in posted["calls"]}
-    assert urls == {"http://lf.local/api/public/ingestion"}
-
-
-@pytest.mark.parametrize("read_api", ["legacy", "v4"])
-def test_the_probe_reads_its_backdate_back_on_either_read_api(monkeypatch, read_api):
-    """The probe is the migration's smoke test, so it must keep working on a target that has
-    cut over — where `/api/public/traces/{id}` is a 404 and the trace is a set of
-    observations. It reads through the seam and never names an endpoint itself (#208)."""
-    posted = _capture_probe_run(monkeypatch)
-    posted["read_api"] = read_api
-    with writepath.use_spool_write_path(writepath.OTLP):
-        assert _run(posted, monkeypatch) is True
+    assert _run(posted, monkeypatch) is True
 
     read_urls = " ".join(posted["read_urls"])
-    assert ("/api/public/v2/observations" in read_urls) == (read_api == "v4")
+    assert "/api/public/v2/observations" in read_urls
+    assert "/api/public/traces" not in read_urls
 
 
 def test_the_probe_writes_a_backdated_span_over_otlp(monkeypatch):
     posted = _capture_probe_run(monkeypatch)
-    with writepath.use_spool_write_path(writepath.OTLP):
-        assert _run(posted, monkeypatch) is True
+    assert _run(posted, monkeypatch) is True
 
     export = next(c for c in posted["calls"]
                   if c["url"] == "http://lf.local/api/public/otel/v1/traces")
@@ -144,9 +122,8 @@ def test_the_probe_writes_a_backdated_span_over_otlp(monkeypatch):
 
 def test_the_probe_reports_a_collapsed_timestamp_as_a_failure(monkeypatch):
     posted = _capture_probe_run(monkeypatch)
-    with writepath.use_spool_write_path(writepath.OTLP):
-        real_now = probe_mod.now_utc()
-        posted["expect_iso"] = real_now.isoformat()   # host normalised it onto today
-        monkeypatch.setattr(probe_mod, "now_utc", lambda: real_now)
-        assert probe_mod.run_backdate_probe("http://lf.local", "demo", 42,
-                                            log=lambda _m: None) is False
+    real_now = probe_mod.now_utc()
+    posted["expect_iso"] = real_now.isoformat()   # host normalised it onto today
+    monkeypatch.setattr(probe_mod, "now_utc", lambda: real_now)
+    assert probe_mod.run_backdate_probe("http://lf.local", "demo", 42,
+                                        log=lambda _m: None) is False

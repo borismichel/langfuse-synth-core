@@ -44,7 +44,9 @@ def test_companion_shell_seam_is_exposed():
     )
 
     # The concrete shell exposes the six-responsibility surface (+ readiness).
-    for method in ("langfuse", "emitter", "reader", "ingestor", "read_json", "llm",
+    # (`ingestor` was in this list until #213: the Spool's backdating writer came off the
+    # Adapter with the batch path — a live surface stamps wall-clock.)
+    for method in ("langfuse", "emitter", "reader", "read_json", "llm",
                    "readiness", "mount_health", "serve", "make_server", "run"):
         assert callable(getattr(CompanionAdapter, method))
     # The seam stays a runtime-checkable Protocol the shell structurally satisfies.
@@ -72,7 +74,7 @@ def test_the_read_and_live_seams_ship_in_runtime():
     from langfuse_synth_core.read import LangfuseReader, Observation, Score, Trace
 
     for method in ("trace", "traces", "observations", "scores", "session", "experiments",
-                   "experiment_items", "read_api"):
+                   "experiment_items", "ping"):
         assert hasattr(LangfuseReader, method)
     for method in ("trace", "score", "flush", "shutdown"):
         assert callable(getattr(LiveEmitter, method))

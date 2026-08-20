@@ -62,31 +62,45 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **`v3.0.0` — the read seam retires its compatibility front (portal #211).** This is
-  the release the three kit read-seam cutovers repin to, and it is **major** because it
-  removes a public function:
-  - `lfread.get_all_scores` is **gone**. It rendered the read seam's rows back into the
-    deprecated `value` / `stringValue` / `traceId` dict shape so a kit that had not been
-    rewired kept reading a v4 project. All three kits read `reader.scores(...)` now, so
-    it retires with its last caller — as `docs/READ_LIVE_SEAMS.md` said it would. A kit
-    pinned below v3.0.0 is unaffected; a kit that takes this release and still calls it
-    fails at import.
-  - `langfuse_synth_core.target` is new: the Cloud/self-hosted profile both kits carried
-    a byte-identical copy of, plus `resolved()` — the probe that makes a v4 host
-    something a kit *recognises*. Kit-side `target.py` re-exports it.
-  - The **Langfuse SDK floor moves to `>=4.14`**, deliberately: 4.14.0 is the first SDK
-    with a client for `/api/public/experiments`, which is where a dataset run lives under
-    v4. Taking this release upgrades the SDK in every kit image.
-  - The live-emission seam now sends `x-langfuse-ingestion-version: 4` on its SDK
-    client, so a live trace is readable in seconds rather than up to fifteen minutes.
-    The header constant moved above the determinism line (`langfuse_synth_core.ingestion`)
-    because both write paths send it and neither may import the other.
-  - The scaffold's `verify.py` template is born on the read seam, so `MIN_CORE_REF` moves
-    to `v3.0.0`: a freshly scaffolded kit no longer runs on an older core.
-  - `synth-authoring conformance` **blocks** on a deprecated Langfuse endpoint now
-    (it was a nudge while the fleet still carried that debt), reading the kit's shipped
-    sources only. The nudge-never-block channel retired with it; `--advisory` is
-    unchanged. Any kit that has not moved onto the seam sees this as a new CI failure.
+- **`v4.0.0` — the contract half of expand–contract (portal #213).** The v4 migration ran
+  as expand–contract: core learned every v4 wire *beside* the one it replaced, kits cut over
+  one at a time, and this release deletes what they cut over from. It is **major** because
+  it removes public surface a kit could still be calling, and every removal is load-bearing:
+
+  - **The batch write path is gone.** `langfuse_synth_core.seed.writepath` — `BATCH`,
+    `OTLP`, `set_spool_write_path`, `use_spool_write_path`, `SYNTH_SPOOL_WRITE_PATH` — no
+    longer exists. Every observation is an OTLP span and a trace is its minted root; there
+    is nothing to select. A kit that still pins the path fails at import, which is the
+    intended way to find out. `RICH_OBSERVATION_TYPES` went with it: its off position
+    existed for batch servers that accepted only `SPAN | GENERATION | EVENT`.
+  - **Scores are unchanged, and are not an exception.** They are still `score-create`
+    envelopes on `POST /api/public/ingestion`. Langfuse's deprecated-API migration guide
+    scopes the ingestion deprecation to trace and observation events and says `score-create`
+    needs no client change (portal #225, closed no-change). `docs/WRITE_PATHS.md` says so
+    where the next reader looks.
+  - **The read seam reads v4 and only v4.** Every deprecated branch, its normalisers, the
+    generation probe and `SYNTH_LANGFUSE_READ_API` are gone, and `LangfuseReader(read_api=…)`
+    no longer takes that argument. The probe mattered most: it called a deprecated endpoint
+    once per reader, which made the seam's own liveness check the last legacy call in the
+    stack. `LangfuseReader.ping()` asks the same question on `/v2/observations`.
+  - **`TargetProfile` resolves reachability, not a generation.** `read_api` and `is_v4` are
+    replaced by `reachable`; `resolved()` / `try_resolve()` / `label` keep their names and
+    shapes, so a kit's call sites do not move.
+  - **`CompanionAdapter.ingestor()` is gone**, from the shell and from the Protocol. A live
+    surface stamps wall-clock and rides `emitter()`; the readiness probe builds its own
+    writer. No kit called it.
+  - **`synth-authoring conformance` is enforcing where it matters.** The v4 checks — a
+    deprecated endpoint, and an observation type outside the vocabulary — ride a channel
+    `--advisory` cannot downgrade. `--advisory` still covers a pre-portal kit's convergence
+    debt. The ingestion rule is now stated per **event type**: a trace or observation
+    envelope posted to `/api/public/ingestion` is a finding, a `score-create` one is not.
+  - **`MIN_CORE_REF` and `DEFAULT_CORE_REF` move to `v4.0.0`.** The `seed` template no
+    longer pins a write path, so on an older core a freshly scaffolded kit would write
+    envelopes to an endpoint that has stopped taking them.
+  - `x-langfuse-ingestion-version: 4` is now **asserted**, not merely sent:
+    `tests/test_ingestion_version_header.py` walks every writer. Without the header a v4
+    target files the write on the legacy read path, where it is invisible to every v4 query
+    endpoint and dashboard while the legacy ones answer it happily.
 
 ## Release checklist
 

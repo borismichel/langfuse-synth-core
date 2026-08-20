@@ -13,7 +13,6 @@ wherever the lib runs, exactly like the ``target_traces`` derivation hook.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -78,23 +77,28 @@ def test_advisory_never_binds_the_measured_count(tmp_path: Path):
     """The heart of the contract: a wildly wrong ``units_per_trace`` moves the ESTIMATE
     but never the MEASURED count. The bytes on disk are the ground truth ``count_spool``
     reads; the advisory is decoupled from them, so its inaccuracy is harmless."""
+    from langfuse_synth_core.seed.ingest import Ingestor
+
     ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    # A real spool: 2 traces, each with 1 generation + 1 score → measured {2, 2, 2}.
+    # A real spool: 2 traces, each with 1 generation + 1 score. Core mints a root
+    # observation per trace, so measured = {traces 2, observations 4, scores 2}.
     events = []
-    for t in ("t1", "t2"):
+    for t in ("1" * 32, "2" * 32):
         events.append(trace_event(trace_id=t, timestamp=ts, name="d"))
-        events.append(generation_event(obs_id=f"{t}o", trace_id=t, name="llm",
+        events.append(generation_event(obs_id=t[:16], trace_id=t, name="llm",
                                         start=ts, end=ts, model="m",
                                         usage_details={}, cost_details={}))
-        events.append(score_event(score_id=f"{t}s", name="q", value=1,
+        events.append(score_event(score_id=f"s{t[:4]}", name="q", value=1,
                                   data_type="NUMERIC", timestamp=ts, trace_id=t))
     spool = tmp_path / "events.ndjson"
-    spool.write_text("".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events),
-                     encoding="utf-8")
+    ing = Ingestor(base_url="http://x", public_key="p", secret_key="s", spool_path=spool)
+    ing.open_spool()
+    ing.extend(events)
+    ing.close_spool()
 
     measured = count_spool(spool)
     measured_total = measured["total"]
-    assert measured == {"traces": 2, "observations": 2, "scores": 2, "total": 6}
+    assert measured == {"traces": 2, "observations": 4, "scores": 2, "total": 6}
 
     # A deliberately absurd advisory: the estimate is off by orders of magnitude...
     absurd = advisory_estimate(target_traces=2, units_per_trace=1_000)

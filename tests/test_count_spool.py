@@ -1,20 +1,22 @@
 """Spool-count primitive (#35) — the measured billable set read off a materialized Spool.
 
 ``count_spool`` is the read-side sibling of ``import_spool``: it walks the same NDJSON
-spool and tallies the events Langfuse actually meters — traces, observations, scores —
-by envelope ``type``. Experiment runs and dataset items are not billed as line items and
-never appear as billable envelope types (they go through separate REST endpoints), so a
-whitelist excludes them by construction. These lock that contract offline, no network.
+spool and tallies what Langfuse actually meters — observations (OTLP spans), scores
+(`score-create` envelopes), and a *derived* trace term. Experiment runs and dataset items
+are not billed as line items and never appear in a Spool (they go through separate REST
+endpoints), so they are excluded by construction. These lock that contract offline, no
+network.
 
-Since portal #220 the count also carries ``total`` — the billable volume the cap gate
-measures against. Only the primitive knows which write path it read, so only it can say
-whether the trace term is an object (batch) or a view over a minted root that is already
-inside ``observations`` (OTLP).
+The count carries ``total`` — the billable volume the cap gate measures against (portal
+#220). Only the primitive can say that the trace term is a **view** over a minted root
+observation that is already inside ``observations``, rather than an ingested object, so
+``total`` is its to define and not the caller's to sum.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -22,65 +24,93 @@ import pytest
 from langfuse_synth_core.seed.count import count_spool
 from langfuse_synth_core.seed.events import (
     generation_event,
+    observation_event,
     score_event,
     span_event,
     trace_event,
 )
-from datetime import datetime, timezone
+
+TS = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
+TID_A = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
+TID_B = "1111222233334444555566667777888a"
 
 
-def _write(path: Path, events: list[dict]) -> None:
-    path.write_text(
-        "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events),
-        encoding="utf-8",
-    )
+def _spool(tmp_path: Path, events: list[dict]) -> Path:
+    """A real Spool, written and finalised by the real ``Ingestor``."""
+    from langfuse_synth_core.seed.ingest import Ingestor
 
-
-def test_tallies_billable_types(tmp_path: Path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     spool = tmp_path / "events.ndjson"
-    _write(spool, [
-        {"type": "trace-create", "id": "t1"},
-        {"type": "trace-create", "id": "t2"},
-        {"type": "span-create", "id": "o1"},
-        {"type": "generation-create", "id": "o2"},
-        {"type": "event-create", "id": "o3"},
-        {"type": "score-create", "id": "s1"},
+    ing = Ingestor(base_url="http://x", public_key="p", secret_key="s", spool_path=spool)
+    ing.open_spool()
+    ing.extend(events)
+    ing.close_spool()
+    return spool
+
+
+def _story(tid: str) -> list[dict]:
+    """One trace shaped like a real kit's: a shell, two observations, one score."""
+    return [
+        trace_event(trace_id=tid, timestamp=TS, name="decision"),
+        span_event(obs_id="aaaa1111bbbb2222", trace_id=tid, name="agent",
+                   start=TS, end=TS),
+        generation_event(obs_id="cccc3333dddd4444", trace_id=tid, name="llm",
+                         start=TS, end=TS, model="m", usage_details={}, cost_details={}),
+        score_event(score_id=f"s-{tid[:4]}", name="quality", value=1,
+                    data_type="NUMERIC", timestamp=TS, trace_id=tid),
+    ]
+
+
+def test_tallies_the_metered_set(tmp_path: Path):
+    """Two traces, three observations each (the kit's two plus the root core mints), one
+    score each. The trace term is derived from distinct trace ids and is NOT in ``total``."""
+    spool = _spool(tmp_path, _story(TID_A) + _story(TID_B))
+    assert count_spool(spool) == {"traces": 2, "observations": 6, "scores": 2, "total": 8}
+
+
+def test_the_same_trace_id_across_many_spans_counts_once(tmp_path: Path):
+    spool = _spool(tmp_path, [
+        span_event(obs_id=f"aaaa1111bbbb{n:04d}", trace_id=TID_A, name="step",
+                   start=TS, end=TS)
+        for n in range(5)
     ])
-    assert count_spool(spool) == {"traces": 2, "observations": 3, "scores": 1, "total": 6}
+    assert count_spool(spool) == {"traces": 1, "observations": 5, "scores": 0, "total": 5}
 
 
-def test_all_observation_subtypes_count_as_observations(tmp_path: Path):
-    """span / generation / event / observation -create all meter as observations."""
-    spool = tmp_path / "events.ndjson"
-    _write(spool, [
-        {"type": "span-create", "id": "a"},
-        {"type": "generation-create", "id": "b"},
-        {"type": "event-create", "id": "c"},
-        {"type": "observation-create", "id": "d"},
+def test_a_typed_observation_counts_like_any_other(tmp_path: Path):
+    """The agent-graph types are a property of the span, not a separate metered kind."""
+    spool = _spool(tmp_path, [
+        trace_event(trace_id=TID_A, timestamp=TS, name="decision"),
+        observation_event(obs_id="aaaa1111bbbb2222", trace_id=TID_A, name="agent",
+                          obs_type="AGENT", start=TS, end=TS),
     ])
-    assert count_spool(spool) == {"traces": 0, "observations": 4, "scores": 0, "total": 4}
+    assert count_spool(spool) == {"traces": 1, "observations": 2, "scores": 0, "total": 2}
 
 
-def test_excludes_experiment_runs_and_dataset_items(tmp_path: Path):
+def test_excludes_non_billable_lines(tmp_path: Path):
     """Dataset items / experiment (dataset-run) items are not metered line items — they
-    ride separate REST endpoints and must never inflate the measured billable set."""
+    ride separate REST endpoints and must never inflate the measured billable set. Nor may
+    an `sdk-log`, or an envelope type the Spool no longer writes at all."""
     spool = tmp_path / "events.ndjson"
-    _write(spool, [
-        {"type": "trace-create", "id": "t1"},
-        {"type": "generation-create", "id": "o1"},
-        {"type": "score-create", "id": "s1"},
-        # non-billable noise that a naive line-count would wrongly include:
-        {"type": "dataset-item-create", "id": "d1"},
-        {"type": "dataset-run-item-create", "id": "r1"},
-        {"type": "sdk-log", "id": "l1"},
-    ])
-    assert count_spool(spool) == {"traces": 1, "observations": 1, "scores": 1, "total": 3}
+    spool.write_text("".join(
+        json.dumps(e, separators=(",", ":")) + "\n" for e in [
+            {"type": "score-create", "id": "s1"},
+            {"type": "dataset-item-create", "id": "d1"},
+            {"type": "dataset-run-item-create", "id": "r1"},
+            {"type": "sdk-log", "id": "l1"},
+            # The retired batch envelope types are not smuggled back in through the tally.
+            {"type": "trace-create", "id": "t1"},
+            {"type": "span-create", "id": "o1"},
+        ]
+    ), encoding="utf-8")
+    assert count_spool(spool) == {"traces": 0, "observations": 0, "scores": 1, "total": 1}
 
 
 def test_ignores_blank_lines_and_empty_spool(tmp_path: Path):
-    spool = tmp_path / "events.ndjson"
-    spool.write_text('{"type":"trace-create","id":"t"}\n\n   \n', encoding="utf-8")
-    assert count_spool(spool) == {"traces": 1, "observations": 0, "scores": 0, "total": 1}
+    spool = _spool(tmp_path, [span_event(obs_id="aaaa1111bbbb2222", trace_id=TID_A,
+                                         name="step", start=TS, end=TS)])
+    spool.write_text(spool.read_text(encoding="utf-8") + "\n   \n", encoding="utf-8")
+    assert count_spool(spool) == {"traces": 1, "observations": 1, "scores": 0, "total": 1}
 
     empty = tmp_path / "empty.ndjson"
     empty.write_text("", encoding="utf-8")
@@ -93,151 +123,18 @@ def test_missing_file_raises(tmp_path: Path):
 
 
 def test_accepts_str_path(tmp_path: Path):
-    spool = tmp_path / "events.ndjson"
-    _write(spool, [{"type": "trace-create", "id": "t"}])
-    assert count_spool(str(spool)) == {"traces": 1, "observations": 0, "scores": 0, "total": 1}
+    spool = _spool(tmp_path, [span_event(obs_id="aaaa1111bbbb2222", trace_id=TID_A,
+                                         name="step", start=TS, end=TS)])
+    assert count_spool(str(spool))["total"] == 1
 
 
-def test_counts_real_event_envelopes(tmp_path: Path):
-    """Cross-check against envelopes built by the real events.py builders: whatever the
-    builders emit as trace/observation/score is exactly what count_spool tallies."""
-    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    events = [
-        trace_event(trace_id="t1", timestamp=ts, name="decision"),
-        span_event(obs_id="o1", trace_id="t1", name="retrieve", start=ts, end=ts),
-        generation_event(obs_id="o2", trace_id="t1", name="llm", start=ts, end=ts,
-                         model="m", usage_details={}, cost_details={}),
-        score_event(score_id="s1", name="quality", value=1, data_type="NUMERIC",
-                    timestamp=ts, trace_id="t1"),
-    ]
-    spool = tmp_path / "events.ndjson"
-    _write(spool, events)
-    assert count_spool(spool) == {"traces": 1, "observations": 2, "scores": 1, "total": 4}
-
-
-# --- the OTLP path (portal #206, total per portal #220) ---------------------
-# Under v4 there is no trace envelope to count, so the trace term is derived from distinct
-# trace ids — reported, because it reads well in the estimate breakdown, but NOT added to
-# ``total``: the OTLP path mints one root observation per trace, so the roots are already
-# inside the observations tally and a separate trace term would count the same things
-# twice. ``total`` is therefore invariant across a kit's cutover.
-
-def _otlp_spool(tmp_path: Path, events: list[dict]) -> Path:
-    from langfuse_synth_core.seed.ingest import Ingestor
-
-    spool = tmp_path / "events.ndjson"
-    ing = Ingestor(base_url="http://x", public_key="p", secret_key="s", spool_path=spool)
-    ing.open_spool()
-    ing.extend(events)
-    ing.close_spool()
-    return spool
-
-
-def test_otlp_traces_come_from_distinct_trace_ids(tmp_path: Path):
-    from langfuse_synth_core.seed import writepath
-
-    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    tid_a = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
-    tid_b = "1111222233334444555566667777888a"
-    with writepath.use_spool_write_path(writepath.OTLP):
-        events = []
-        for tid in (tid_a, tid_b):
-            events += [
-                trace_event(trace_id=tid, timestamp=ts, name="decision"),
-                span_event(obs_id="aaaa1111bbbb2222", trace_id=tid, name="agent",
-                           start=ts, end=ts),
-                generation_event(obs_id="cccc3333dddd4444", trace_id=tid, name="llm",
-                                 start=ts, end=ts, model="m", usage_details={},
-                                 cost_details={}),
-            ]
-        events.append(score_event(score_id="s1", name="quality", value=1,
-                                  data_type="NUMERIC", timestamp=ts, trace_id=tid_a))
-        spool = _otlp_spool(tmp_path, events)
-
-    # Two distinct trace ids; three observations each (the minted root plus the kit's two);
-    # one score, still a legacy ingestion envelope. The trace term is derived (not an
-    # object), so total = observations + scores.
-    assert count_spool(spool) == {"traces": 2, "observations": 6, "scores": 1, "total": 7}
-
-
-def test_the_same_trace_id_across_many_spans_counts_once(tmp_path: Path):
-    from langfuse_synth_core.seed import writepath
-
-    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    tid = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
-    with writepath.use_spool_write_path(writepath.OTLP):
-        spool = _otlp_spool(tmp_path, [
-            span_event(obs_id=f"aaaa1111bbbb{n:04d}", trace_id=tid, name="step",
-                       start=ts, end=ts)
-            for n in range(5)
-        ])
-    assert count_spool(spool) == {"traces": 1, "observations": 5, "scores": 0, "total": 5}
-
-
-@pytest.mark.parametrize("path_name", ["batch", "otlp"])
-def test_rich_observation_types_move_no_counts(tmp_path: Path, path_name, monkeypatch):
-    """The #210 addendum's measured fact, locked as a regression: flipping
-    ``RICH_OBSERVATION_TYPES`` changes the wire kind of a typed observation and nothing
-    about the tally, on either write path. ``observation-create`` was already in the
-    observation whitelist for exactly this moment."""
-    from langfuse_synth_core.seed import writepath
-    from langfuse_synth_core.seed import events as events_mod
-
-    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    tid = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
-
-    def story() -> list[dict]:
-        return [
-            trace_event(trace_id=tid, timestamp=ts, name="decision"),
-            events_mod.observation_event(
-                obs_id="aaaa1111bbbb2222", trace_id=tid, name="agent",
-                obs_type="AGENT", start=ts, end=ts,
-            ),
-            generation_event(obs_id="cccc3333dddd4444", trace_id=tid, name="llm",
-                             start=ts, end=ts, model="m", usage_details={},
-                             cost_details={}),
-            score_event(score_id="s1", name="quality", value=1,
-                        data_type="NUMERIC", timestamp=ts, trace_id=tid),
-        ]
-
-    with writepath.use_spool_write_path(path_name):
-        rich = count_spool(_otlp_spool(tmp_path / "rich", story()))
-        monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", False)
-        degraded = count_spool(_otlp_spool(tmp_path / "degraded", story()))
-
-    assert rich == degraded
-
-
-def test_same_demo_same_total_across_write_paths(tmp_path: Path):
-    """The #220 invariant: the SAME demo measures the SAME billable total on both write
-    paths. OTLP raises ``observations`` by the trace count (the minted roots) and drops
-    the trace term from ``total``; the two moves cancel exactly."""
-    from langfuse_synth_core.seed import writepath
-
-    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
-    tids = ["5b8aa1cfd0e34f7a9c2b6d15e0473f88", "1111222233334444555566667777888a"]
-
-    def _demo_events() -> list[dict]:
-        events = []
-        for tid in tids:
-            events += [
-                trace_event(trace_id=tid, timestamp=ts, name="decision"),
-                span_event(obs_id="aaaa1111bbbb2222", trace_id=tid, name="agent",
-                           start=ts, end=ts),
-                generation_event(obs_id="cccc3333dddd4444", trace_id=tid, name="llm",
-                                 start=ts, end=ts, model="m", usage_details={},
-                                 cost_details={}),
-                score_event(score_id=f"s-{tid[:4]}", name="quality", value=1,
-                            data_type="NUMERIC", timestamp=ts, trace_id=tid),
-            ]
-        return events
-
-    with writepath.use_spool_write_path(writepath.BATCH):
-        batch = count_spool(_otlp_spool(tmp_path / "batch", _demo_events()))
-    with writepath.use_spool_write_path(writepath.OTLP):
-        otlp = count_spool(_otlp_spool(tmp_path / "otlp", _demo_events()))
-
-    assert batch == {"traces": 2, "observations": 4, "scores": 2, "total": 8}
-    # OTLP: +1 minted root observation per trace, trace term derived and not added.
-    assert otlp == {"traces": 2, "observations": 6, "scores": 2, "total": 8}
-    assert otlp["total"] == batch["total"]
+def test_the_derived_trace_term_is_reported_but_never_billed(tmp_path: Path):
+    """The #220 invariant, stated on its own: a trace is a *view* over the root observation
+    core mints for it, and that root is already inside ``observations``. Adding the trace
+    term to ``total`` would bill every trace twice. This is also why the fleet's cutover off
+    the batch path moved no deployment's measured volume — the minted roots raised
+    ``observations`` by exactly the trace count the retired ``trace-create`` term dropped."""
+    counts = count_spool(_spool(tmp_path, _story(TID_A) + _story(TID_B)))
+    assert counts["traces"] == 2
+    assert counts["total"] == counts["observations"] + counts["scores"]
+    assert counts["total"] != sum(counts[k] for k in ("traces", "observations", "scores"))

@@ -511,8 +511,8 @@ def test_blessed_golden_is_full_payload(kit):
 # OTLP and reads the v4 APIs — and says so wherever it describes a re-seed.
 
 
-def test_blessed_golden_is_written_on_the_otlp_path(kit):
-    """The bless ran the emitted seed, so the oracle proves the pin is in force: every
+def test_blessed_golden_is_written_as_otlp_spans(kit):
+    """The bless ran the emitted seed, so the oracle proves what the Spool really is: every
     observation is an OTLP span, and nothing carries the batch envelope's nesting field."""
     blob = kit.golden_path.read_bytes()
     assert b'"spanId"' in blob
@@ -520,13 +520,12 @@ def test_blessed_golden_is_written_on_the_otlp_path(kit):
     assert b'"parentObservationId"' not in blob
 
 
-def test_scaffolded_seed_pins_the_otlp_write_path(kit):
-    from langfuse_synth_core.seed import writepath
-
+def test_the_scaffolded_seed_selects_no_write_path(kit):
+    """There is one write model since #213, so the template must not still be pinning one —
+    a kit emitted with that line fails at import against the core it pins."""
     seed_src = (kit.dest / "src" / "synth" / "seed.py").read_text()
-    assert "set_spool_write_path(OTLP)" in seed_src
-    # The name the kit imports is core's, not a string the scaffold invented.
-    assert writepath.OTLP == "otlp" and hasattr(writepath, "set_spool_write_path")
+    assert "set_spool_write_path" not in seed_src
+    assert "writepath" not in seed_src
 
 
 def test_scaffolded_verify_reads_through_the_seam_and_names_no_endpoints(kit):

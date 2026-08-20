@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from langfuse_synth_core.seed import writepath
 from langfuse_synth_core.seed.events import (
     event_event,
     generation_event,
@@ -27,12 +26,6 @@ from langfuse_synth_core.seed.events import (
 TS = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
 TID = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
 OID = "a1b2c3d4e5f60718"
-
-
-@pytest.fixture(autouse=True)
-def _on_otlp():
-    with writepath.use_spool_write_path(writepath.OTLP):
-        yield
 
 
 def attrs(span: dict) -> dict:
@@ -139,13 +132,6 @@ def test_deprecated_trace_input_output_is_never_emitted():
     assert "langfuse.trace.output" not in attrs(root)
 
 
-def test_the_batch_path_is_untouched_when_the_flag_is_off():
-    with writepath.use_spool_write_path(writepath.BATCH):
-        env = span_event(obs_id=OID, trace_id=TID, name="retrieve", start=TS, end=TS)
-    assert env["type"] == "span-create"
-    assert env["body"]["id"] == OID
-
-
 def test_an_id_otlp_cannot_carry_fails_at_the_builder():
     """Core's BLAKE2b ids are already the widths OTLP accepts, so this never fires for a
     kit using ``Rng``. It fires for a kit that hand-rolls an id — and it fires at the
@@ -161,31 +147,15 @@ def test_an_id_otlp_cannot_carry_fails_at_the_builder():
         span_event(obs_id=OID, trace_id=TID, name="x", start=TS, end=TS, parent_id="short")
 
 
-def test_rich_observation_types_ship_by_default():
-    """``RICH_OBSERVATION_TYPES`` is on (portal #210): the agent-graph types go out on the
-    wire natively, riding the same core release as the kits' OTLP cutover. Measured before
-    flipping: the flag moves NO counts on either path — only the wire kind changes — so a
-    typed observation needs no ``metadata.observation_type`` fallback any more."""
+def test_the_agent_graph_types_ride_the_wire_natively():
+    """The agent-graph types (AGENT | TOOL | RETRIEVER | …) go out on
+    ``langfuse.observation.type`` verbatim. There was a flag here degrading them into
+    ``metadata.observation_type`` for servers that only accepted SPAN | GENERATION | EVENT
+    — a batch-ingestion constraint, retired with the batch path (portal #213)."""
     from langfuse_synth_core.seed import events as events_mod
-
-    assert events_mod.RICH_OBSERVATION_TYPES is True
 
     typed = events_mod.observation_event(
         obs_id=OID, trace_id=TID, name="tool_call", obs_type="TOOL", start=TS, end=TS,
     )
     assert attrs(typed)["langfuse.observation.type"] == "tool"
     assert "langfuse.observation.metadata.observation_type" not in attrs(typed)
-
-
-def test_turning_the_flag_off_still_degrades_identically(monkeypatch):
-    """The degrade mode survives as the escape hatch: with the flag off both paths emit an
-    untyped span carrying the intended type in ``metadata.observation_type`` — same rule,
-    same spelling — so a revert is a one-line flip, not a format fork."""
-    from langfuse_synth_core.seed import events as events_mod
-
-    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", False)
-    degraded = events_mod.observation_event(
-        obs_id=OID, trace_id=TID, name="tool_call", obs_type="TOOL", start=TS, end=TS,
-    )
-    assert attrs(degraded)["langfuse.observation.type"] == "span"
-    assert attrs(degraded)["langfuse.observation.metadata.observation_type"] == "tool"

@@ -1,27 +1,28 @@
-"""Backdated batch ingestion — the core architectural decision (Ring 2 middle field, #33).
+"""Backdated Spool writing — the core architectural decision (Ring 2 middle field, #33).
 
-We build event objects directly and POST them to ``/api/public/ingestion`` with explicit
-``timestamp`` / ``startTime`` / ``endTime``, bypassing the high-level OTel SDK (which pins
-everything to "now"). HTTP Basic auth with the project keys; the
-``x-langfuse-ingestion-version: 4`` header makes the data visible in real time on the v2
-query/metrics endpoints.
+We build wire objects directly and post them with explicit producer-supplied timestamps,
+bypassing the high-level OTel SDK (which pins everything to "now"). Observations go out as
+OTLP spans to ``/api/public/otel/v1/traces``; scores go out as `score-create` envelopes to
+``/api/public/ingestion``, which is the supported v4 path for scores and not legacy debt
+(see :mod:`langfuse_synth_core.seed.events`). HTTP Basic auth with the project keys, and
+**every** write carries ``x-langfuse-ingestion-version: 4`` — without it a v4 target files
+the data on the legacy read path, where it is invisible to every v4 query endpoint and
+dashboard while looking healthy on the legacy ones (:mod:`langfuse_synth_core.ingestion`).
 
-Two-phase by design (hardened): generation **spools every event to an NDJSON file on disk
-first**, then a separate pass **imports** that file in ``chunk_size`` POSTs. Network never
-runs interleaved with generation, so a wedged or slow upload can't lose the (expensive,
-deterministic) generated data. Never one-request-per-event.
+Two-phase by design (hardened): generation **spools every wire object to an NDJSON file on
+disk first**, then a separate pass **imports** that file in ``chunk_size`` POSTs. Network
+never runs interleaved with generation, so a wedged or slow upload can't lose the
+(expensive, deterministic) generated data. Never one-request-per-event.
 
-**Re-runnability depends on the write path** (portal #206). On the batch path every object
-carries a deterministic id, so re-seeding upserts within Langfuse's 30-day merge window and
-re-running ``import_spool`` against the same file is the recovery after an interrupted
-upload. On the OTLP path there is no upsert — identical re-posts append — so an import is
-**non-resumable** and says so: see :class:`NonResumableImportError` and
-``docs/WRITE_PATHS.md``.
+**An import is not re-runnable.** OTLP has no upsert — identical re-posts append — so
+``import_spool`` records that it ran and refuses a second attempt: see
+:class:`NonResumableImportError` and ``docs/WRITE_PATHS.md``. That is a property the
+platform no longer offers, not a feature that was dropped.
 
-This is data-model-facing plumbing, not scenario substance: it speaks the Langfuse
-ingestion API in the abstract. The per-kit deltas are *values* (base_url, keys, chunk_size,
-the ``project_hint`` guardrail, the score-config bodies), so it moved into the shared core
-parametrized by those. The event *bodies* it ships are composed by the kit from
+This is data-model-facing plumbing, not scenario substance: it speaks the Langfuse write
+model in the abstract. The per-kit deltas are *values* (base_url, keys, chunk_size, the
+``project_hint`` guardrail, the score-config bodies), so it moved into the shared core
+parametrized by those. The wire objects it ships are composed by the kit from
 :mod:`langfuse_synth_core.seed.events` primitives — the kit still owns the scenario tree.
 """
 from __future__ import annotations
@@ -38,7 +39,6 @@ import requests
 from ..http import request_retry
 from ..ingestion import INGESTION_VERSION
 from . import otlp
-from .writepath import on_otlp
 
 
 class IngestError(RuntimeError):
@@ -46,13 +46,13 @@ class IngestError(RuntimeError):
 
 
 class NonResumableImportError(IngestError):
-    """An OTLP Spool import was attempted over a project it has already been posted to.
+    """A Spool import was attempted over a project it has already been posted to.
 
-    OTLP has no idempotent upsert: identical re-posts create duplicate observations where
-    batch ingestion produced one row. So there is no safe resume, and re-running an import
-    silently doubles a demo's volume. The recovery is to clear that deployment's Langfuse
-    data and import from the top; the message says so, and ``confirm_cleared=True`` is how
-    the caller states it has done that.
+    OTLP has no idempotent upsert: identical re-posts create duplicate observations. So
+    there is no safe resume, and re-running an import silently doubles a demo's volume.
+    The recovery is to clear that deployment's Langfuse data and import from the top; the
+    message says so, and ``confirm_cleared=True`` is how the caller states it has done
+    that.
     """
 
 
@@ -100,7 +100,7 @@ class Ingestor:
         self._spooled_spans = False
 
     def close_spool(self) -> None:
-        """Close the spool and, on the OTLP path, finalise it in place.
+        """Close the spool and finalise it in place.
 
         Finalisation is the second half of writing an OTLP Spool (see
         :mod:`langfuse_synth_core.seed.otlp`): a builder cannot know its trace's whole story
@@ -114,9 +114,8 @@ class Ingestor:
             self._spool_fh.flush()
             self._spool_fh.close()
             self._spool_fh = None
-        # Driven by what was written, not by the ambient flag — the same rule
-        # ``import_spool`` follows, so a Spool is always treated the way it was written and a
-        # batch Spool's bytes are never rewritten.
+        # Driven by what was written: a Spool of nothing but scores has no spans to
+        # finalise, and rewriting its bytes would be a no-op with a temp-file round trip.
         if self.spool_path is not None and self._spooled_spans:
             self._finalize_spool(self.spool_path)
 
@@ -154,25 +153,25 @@ class Ingestor:
     def pending(self) -> int:
         return len(self._events)
 
-    # -- phase 2: batch-import --------------------------------------------
+    # -- phase 2: import in chunks ----------------------------------------
     def import_spool(self, path: Path | None = None,
                      log: Callable[[str], None] = lambda _m: None,
                      confirm_cleared: bool | None = None) -> int:
         """Read a spooled NDJSON file and POST it in ``chunk_size`` batches.
 
-        Routing is decided by the **content of the Spool**, not by the ambient flag, so a
-        Spool always imports the way it was written: OTLP spans go to the OTLP traces
-        endpoint, ingestion envelopes (which is where scores stay) go to batch ingestion.
+        Routing is per line: OTLP spans go to the OTLP traces endpoint, `score-create`
+        envelopes go to ``/api/public/ingestion``. A chunk is heterogeneous by design.
 
-        **Re-runnability differs by path.** A batch Spool carries idempotent ids, so a
-        re-import upserts rather than duplicating and is the recovery path after an
-        interrupted upload. An OTLP Spool has no such property: re-posting appends. So an
-        OTLP import is **non-resumable** — it records that it ran beside the Spool and
-        refuses a second attempt with :class:`NonResumableImportError` rather than silently
-        doubling every observation. Recovery is to clear that deployment's Langfuse data and
-        import from the top, stated with ``confirm_cleared=True`` (or
+        **An import is non-resumable.** OTLP has no idempotent upsert — re-posting the same
+        spans appends duplicate observations — so this records that it ran beside the Spool
+        and refuses a second attempt with :class:`NonResumableImportError` rather than
+        silently doubling every observation. Recovery is to clear that deployment's Langfuse
+        data and import from the top, stated with ``confirm_cleared=True`` (or
         ``SYNTH_IMPORT_CONFIRM_CLEARED=1``). Re-running ``generate-spool`` is also a clean
         slate, because a fresh Spool clears the record.
+
+        A Spool carrying **nothing but scores** is exempt: `score-create` envelopes carry
+        deterministic ids and upsert, so there is nothing for a re-post to duplicate.
         """
         path = path or self.spool_path
         if path is None:
@@ -181,8 +180,7 @@ class Ingestor:
             raise IngestError(f"import_spool: spool file not found: {path}")
 
         marker = _import_marker(path)
-        otlp_spool = _spool_has_otlp_spans(path)
-        if otlp_spool:
+        if _spool_has_otlp_spans(path):
             if confirm_cleared is None:
                 confirm_cleared = os.environ.get("SYNTH_IMPORT_CONFIRM_CLEARED") == "1"
             if marker.exists() and not confirm_cleared:
@@ -217,8 +215,8 @@ class Ingestor:
     def _post_mixed(self, chunk: list[dict]) -> None:
         """Post one chunk, splitting it by the endpoint each line belongs to.
 
-        A chunk is heterogeneous by design on the OTLP path: spans go to the OTLP traces
-        endpoint while scores stay ingestion envelopes, and both can share a chunk.
+        A chunk is heterogeneous by design: spans go to the OTLP traces endpoint while
+        scores go out as ingestion envelopes, and both can share a chunk.
         """
         spans = [line for line in chunk if otlp.is_span(line)]
         envelopes = [line for line in chunk if not otlp.is_span(line)]
@@ -229,27 +227,23 @@ class Ingestor:
 
     # -- write-path liveness probe ----------------------------------------
     def write_ping(self) -> None:
-        """Exercise the write path with an EMPTY batch — proves auth + endpoint
-        reachability without emitting a single event, so the seeded pool is untouched.
+        """Exercise the write path with an EMPTY export — proves auth + endpoint
+        reachability without emitting a single span, so the seeded pool is untouched.
 
         The Companion Adapter's readiness surface (Spec G · G2, #140) uses this as its
-        "Langfuse write path ok" probe: a POST of ``{"batch": []}`` round-trips the real
-        ingestion endpoint with the deployment's project keys and raises on any non-2xx, so
-        a missing/wrong key or an unreachable host fails loudly — but nothing is written.
-        A no-op under ``dry_run`` (the network is intentionally not touched). On the OTLP
-        path the same idea applies to the OTLP traces endpoint: an export with no spans."""
-        if on_otlp():
-            self._post_spans([])
-        else:
-            self._post_chunk([])
+        "Langfuse write path ok" probe: an OTLP export carrying no spans round-trips the
+        real traces endpoint with the deployment's project keys and raises on any non-2xx,
+        so a missing/wrong key or an unreachable host fails loudly — but nothing is written.
+        A no-op under ``dry_run`` (the network is intentionally not touched)."""
+        self._post_spans([])
 
     # -- in-memory send (back-compat; the seed path uses spool/import) ----
     def flush(self) -> None:
         """Send all accumulated events in chunks; clears the buffer.
 
-        Finalises first on the OTLP path, exactly as ``close_spool`` does for a spooled run —
-        this is the path the backdate probe takes, so it must produce the same wire objects
-        an imported Spool would.
+        Finalises first, exactly as ``close_spool`` does for a spooled run — this is the
+        path the backdate probe takes, so it must produce the same wire objects an imported
+        Spool would.
         """
         events, self._events = self._events, []
         if any(otlp.is_span(event) for event in events):
@@ -262,11 +256,11 @@ class Ingestor:
     def _post_spans(self, spans: list[dict]) -> None:
         """Export finalised OTLP spans to Langfuse's OTLP/HTTP traces endpoint.
 
-        Same auth and same real-time-ingestion header as batch ingestion; what differs is
-        the failure contract. An OTLP export can return 200 and still have rejected spans,
-        so a clean status is not proof of delivery — :func:`otlp.partial_failure` reads the
-        ``partialSuccess`` report and we raise on it, the way the batch path raised on a
-        207's per-event errors.
+        Same auth and same ``x-langfuse-ingestion-version: 4`` header the score envelopes
+        carry; what differs is the failure contract. An OTLP export can return 200 and still
+        have rejected spans, so a clean status is not proof of delivery —
+        :func:`otlp.partial_failure` reads the ``partialSuccess`` report and we raise on
+        it.
         """
         self._post(
             f"{self.base_url}{otlp.OTEL_TRACES_PATH}",
@@ -305,8 +299,9 @@ class Ingestor:
                 continue
 
             if resp.status_code in (200, 201, 207):
-                # 207 = partial success; surface per-event errors loudly. The OTLP path has
-                # no 207 — its partial failures ride a 200 body — hence the injected check.
+                # 207 = partial success on the score envelopes; surface per-event errors
+                # loudly. An OTLP export has no 207 — its partial failures ride a 200 body —
+                # hence the injected check.
                 check(resp)
                 return
             if resp.status_code in (429, 500, 502, 503, 504):
@@ -349,7 +344,7 @@ class Ingestor:
 # Non-resumability bookkeeping (OTLP path only)
 # ---------------------------------------------------------------------------
 def _import_marker(spool_path: Path) -> Path:
-    """The record that an OTLP Spool has been posted, written beside the Spool.
+    """The record that a Spool has been posted, written beside the Spool.
 
     It lives on the spool volume so it survives the gap between the ``generate-spool`` and
     ``import-spool`` job containers, which is exactly the window a retry would land in.
@@ -358,12 +353,13 @@ def _import_marker(spool_path: Path) -> Path:
 
 
 def _spool_has_otlp_spans(path: Path) -> bool:
-    """Whether these bytes are an OTLP Spool. Read from the Spool rather than the ambient
-    flag so a Spool always imports the way it was written.
+    """Whether these bytes contain any OTLP span — i.e. whether re-posting them could
+    duplicate anything. A Spool of nothing but `score-create` envelopes upserts and needs no
+    guard.
 
-    Scans until it finds a span rather than judging by the first line: scores stay ingestion
-    envelopes on both paths, so a Spool that happens to open with one is still an OTLP Spool
-    — and getting that wrong would quietly disable the non-resumable guard.
+    Scans until it finds a span rather than judging by the first line: a Spool that happens
+    to open with a score envelope still carries spans, and getting that wrong would quietly
+    disable the non-resumable guard.
     """
     with path.open("r", encoding="utf-8") as fh:
         for line in fh:
@@ -375,10 +371,10 @@ def _spool_has_otlp_spans(path: Path) -> bool:
 
 def _non_resumable_message(path: Path, marker: Path) -> str:
     return (
-        f"import-spool is NON-RESUMABLE on the OTLP write path, and {path.name} has already "
-        f"been imported (record: {marker.name}). OTLP has no idempotent upsert — re-posting "
-        "the same spans appends duplicate observations where batch ingestion produced one "
-        "row, so re-running would silently double this deployment's volume.\n"
+        f"import-spool is NON-RESUMABLE, and {path.name} has already been imported "
+        f"(record: {marker.name}). OTLP has no idempotent upsert — re-posting the same spans "
+        "appends duplicate observations, so re-running would silently double this "
+        "deployment's volume.\n"
         "Recovery: CLEAR this deployment's Langfuse data, then re-import from the top with "
         "confirm_cleared=True (or SYNTH_IMPORT_CONFIRM_CLEARED=1). Re-running generate-spool "
         "is also a clean slate."

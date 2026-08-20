@@ -53,7 +53,7 @@ just a label — it selects the **job kind** the portal runs it as:
 | `plan`               | `plan`      | Dry-run that prints the projected volume (parsed into a gate). |
 | `seed`               | `seed`      | Deterministic backdated generation, written to Langfuse — the byte-identical Spool. |
 | `verify`             | `verify`    | Read-back assertions against the seeded project, after the write.                   |
-| `resume`             | `resume`    | Resume a partially-completed run (batch write path only — see §"The spool").        |
+| `resume`             | `resume`    | Resume a partially-completed run. Note the Spool's import is **not** resumable — see §"The spool". |
 | `teardown`           | `teardown`  | Project-level teardown / cleanup.                              |
 
 Any **other** `id` (e.g. `evaluators`, `memo`) maps to `kind=custom_step`. The portal
@@ -78,25 +78,27 @@ Rules the validator enforces:
 
 **What `seed` and `verify` do under the current transport.** Langfuse platform v4 makes the
 *observation* the primary entity — there is no separately ingested trace — and Langfuse
-Cloud removes the legacy batch-ingestion and read APIs on **2026-11-16**. The two mandatory
-verbs are therefore stated against that model:
+Cloud removes the deprecated APIs on **2026-11-16**: the legacy read endpoints, and trace
+and observation events on `POST /api/public/ingestion`. The two mandatory verbs are
+therefore stated against that model:
 
-- **`seed`** materializes the Spool and writes it. On the OTLP write path every observation
-  is a span, a trace *is* its root observation (minted by core), and scores keep the legacy
-  ingestion endpoint — the one envelope type that survives the cutover. What `seed`
-  guarantees is the **file**: `seed + target_traces + declared params → byte-identical
-  Spool`, proven offline by the determinism gate before anything is uploaded. What it no
-  longer guarantees is a repeatable **write**: OTLP appends rather than upserting, so
-  seeding a project that already holds the demo tells the story twice. §"The spool" carries
-  the replay rules; core's `docs/WRITE_PATHS.md` carries the wire.
+- **`seed`** materializes the Spool and writes it. Every observation is an OTLP span, a
+  trace *is* its root observation (minted by core), and scores are `score-create` envelopes
+  on `POST /api/public/ingestion` — the supported v4 write path for them, not a legacy call
+  the depot tolerates (see §"The spool"). What `seed` guarantees is the **file**:
+  `seed + target_traces + declared params → byte-identical Spool`, proven offline by the
+  determinism gate before anything is uploaded. What it does not guarantee is a repeatable
+  **write**: OTLP appends rather than upserting, so seeding a project that already holds the
+  demo tells the story twice. §"The spool" carries the replay rules; core's
+  `docs/WRITE_PATHS.md` carries the wire.
 - **`verify`** reads the seeded project back and asserts what landed — under v4, that is
   observations and scores (a trace being readable as its root observation). Those read APIs
   are cursor-paginated and carry no total, so an assertion counts what it reads rather than
   reaching for a `meta.totalItems` those responses do not carry. The read client itself is
   core's (`docs/SEAM.md`); what belongs in the kit is *which* assertions to make.
 
-Both verbs are declared identically whichever write path a kit is on — the pipeline, the
-job kinds and the invocation are unchanged by the migration.
+The pipeline, the job kinds and the invocation were unchanged by the migration: a kit
+declares these verbs exactly as it always did.
 
 Whether a command receives `--set` overrides depends on the invocation class, not on the
 verb — see "The container invocation" below.
@@ -218,9 +220,9 @@ always points at it. Mount mode is the whole access-control story:
 
 - **Job steps mount it writable.** This is what makes the seed split and resume work
   across containers: `generate-spool` materializes `events.ndjson` (the Spool — NDJSON, one
-  wire object per line: an ingestion envelope on the batch write path, an OTLP span on the
-  OTLP one) and `import-spool` replays those exact bytes from a different container. An
-  OTLP import also writes `events.ndjson.imported` beside the Spool — see below.
+  wire object per line: an OTLP span, or a `score-create` envelope) and `import-spool`
+  replays those exact bytes from a different container. An import also writes
+  `events.ndjson.imported` beside the Spool — see below.
 - **Live surfaces and the portal's cap-gate count container mount it read-only**
   (portal #193 / portal PR #194, and Spec D's measured verdict respectively). A live
   surface reads run state; it never writes it — **job steps are the only writers**. A kit
@@ -229,22 +231,31 @@ always points at it. Mount mode is the whole access-control story:
 
 The Spool's billable volume is **measured, not trusted**: the portal counts the actual
 bytes on the volume (`langfuse_synth_core.seed.count.count_spool`) before `import-spool`
-may upload them. `count_spool` returns the same shape on both write paths — the metered
-dimensions plus the billable `total` — so the plan-time estimate, the cap gate and the
-over-cap halt are unaffected by which path a kit is on. The `total` is the count's to
-define, not the reader's to sum (portal #220): under v4 a trace is a view over its minted
-root observation, not a separately ingested object, so on the OTLP path the derived trace
-term is reported in the breakdown but not added to `total`. The same demo measures the
-same billable total before and after its cutover.
+may upload them. `count_spool` returns the metered dimensions plus the billable `total`. The `total` is the
+count's to define, not the reader's to sum (portal #220): under v4 a trace is a view over its
+minted root observation, not a separately ingested object, so the derived trace term is
+reported in the breakdown but not added to `total`. That is why the fleet's move onto the
+OTLP wire left every deployment's measured volume — and therefore the plan-time estimate,
+the cap gate and the over-cap halt — exactly where it was.
 
-**Replay is re-runnable only on the batch write path** (portal #206). Batch ingestion
-upserts on a deterministic id, so re-running `import-spool` over a partly uploaded Spool is
-the recovery. OTLP has no upsert — identical re-posts append — so an OTLP `import-spool` is
-**non-resumable**: it records that it ran in `events.ndjson.imported` on this volume and
-fails loudly on a second attempt rather than silently doubling the deployment's volume.
-Recovery is to clear that deployment's Langfuse data and import from the top
-(`SYNTH_IMPORT_CONFIRM_CLEARED=1`); re-running `generate-spool` is also a clean slate.
-Core's `docs/WRITE_PATHS.md` carries the mechanism; this is the portal-facing consequence.
+**Replay is not re-runnable** (portal #206). OTLP has no upsert — identical re-posts append
+— so `import-spool` is **non-resumable**: it records that it ran in `events.ndjson.imported`
+on this volume and fails loudly on a second attempt rather than silently doubling the
+deployment's volume. Recovery is to clear that deployment's Langfuse data and import from
+the top (`SYNTH_IMPORT_CONFIRM_CLEARED=1`); re-running `generate-spool` is also a clean
+slate. This is a property the platform no longer offers, not one the depot dropped: the old
+batch transport upserted on a deterministic id, and it is gone. Core's
+`docs/WRITE_PATHS.md` carries the mechanism; this is the portal-facing consequence.
+
+**Scores are the one thing that is not an OTLP span, and that is correct.** They are
+`score-create` envelopes on `POST /api/public/ingestion`. Langfuse's
+[deprecated-API migration guide](https://langfuse.com/faq/all/deprecated-api-migration)
+states that the ingestion deprecation applies **only to trace and observation events**, and
+that `score-create` remains supported after the v4 cutover with no client change required.
+So this is the target architecture — observations over OTLP, scores as `score-create` — and
+not an exception anyone is working through (portal #225, closed no-change 2026-08-20).
+`synth-authoring conformance` encodes the same distinction: an ingestion envelope of a trace
+or observation type is a finding; a `score-create` one is not.
 
 **Observation types are a closed vocabulary, and a wrong one does not fail.** An
 observation's type must be one of ten values — `span`, `generation`, `event`, `agent`,
@@ -254,14 +265,17 @@ unrecognised value is filed as a `SPAN`, or as a `GENERATION` when the observati
 a model, and nothing anywhere reports it (confirmed against Langfuse Cloud, 2026-08-19). So
 a mistyped tool step turns up in the cost and usage views and the demo tells a different
 story than its author wrote. Batch ingestion answered `400` on an unknown type; the OTLP
-wire that replaces it has no such answer, so **core supplies the rejection** — the Spool's
+wire that replaced it has no such answer, so **core supplies the rejection** — the Spool's
 event builders and the live seam both raise on a value outside the vocabulary, and
 `synth-authoring conformance` refuses one named in a kit's sources. A kit may pass either
 spelling to `observation_event`, which lowercases for the wire; a live surface's `as_type`
 reaches Langfuse verbatim through the SDK and is therefore checked case and all.
 
-The three gold kits are on the batch path until each is deliberately cut over, one
-kit at a time. A kit scaffolded by `synth-authoring new` is born on the OTLP path.
+**Every write carries `x-langfuse-ingestion-version: 4`.** Without it a v4 target files the
+write on the legacy read path, where it is invisible to every v4 query endpoint and dashboard
+while the legacy ones answer it happily — a deploy that looks healthy and shows an empty
+project (observed on Cloud, 2026-08-20). Core sets it on every writer and asserts that it
+does; a kit that writes through core's builders inherits it and has nothing to do.
 
 ---
 
