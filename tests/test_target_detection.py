@@ -108,3 +108,32 @@ def test_an_unresolved_profile_probes_through_the_reader_it_builds(monkeypatch):
 
     assert profile.is_v4
     assert calls and calls[0].endswith(read._PROBE_PATH)
+
+
+def test_an_unreadable_target_reports_its_reason_rather_than_raising(monkeypatch):
+    """A `verify` is a report. Bad keys or a wrong host must come back as failed checks
+    with the reason on each line, not as a traceback in place of the report — so the
+    profile stays unresolved and each read fails inside its own check (portal #211)."""
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+
+    class _Resp:
+        status_code = 403
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(read, "request_retry", lambda *a, **k: _Resp())
+
+    profile, reason = TargetProfile.detect("https://cloud.langfuse.com").try_resolve()
+
+    assert profile.read_api is None
+    assert not profile.is_v4
+    assert "403" in reason
+    assert profile.label == "Langfuse Cloud"     # says nothing it does not know
+
+
+def test_try_resolve_is_a_no_op_on_a_reachable_target(monkeypatch):
+    profile, reason = TargetProfile.detect("http://localhost:3000").try_resolve(
+        _StubReader(read.V4))
+    assert profile.is_v4 and reason == ""

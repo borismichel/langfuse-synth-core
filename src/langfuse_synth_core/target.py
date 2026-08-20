@@ -61,10 +61,28 @@ class TargetProfile:
         Takes the reader it should ask, so a caller that already built one does not pay for
         a second probe, and a test can hand in a stub. Already-resolved profiles are
         returned unchanged, so this is safe to call on the way into any read.
+
+        Raises whatever the probe raises. A `verify` that wants to report an unreadable
+        target as failing checks rather than as a traceback should use :meth:`try_resolve`.
         """
         if self.read_api is not None:
             return self
         return replace(self, read_api=(reader or self.reader()).read_api)
+
+    def try_resolve(self, reader: Any = None) -> tuple["TargetProfile", str]:
+        """:meth:`resolved`, or this profile unchanged plus the reason it could not be.
+
+        Bad keys, a wrong host, a server error — the probe cannot tell those apart from
+        each other and must not resolve them into an arm, so it raises. But a `verify` is a
+        **report**: its job is to say which of the demo's anchors are missing, and a caller
+        who typed the wrong key deserves that report with every check failed and the reason
+        on each line, not a traceback in place of it. Unresolved is a fine state to carry
+        forward — each read then probes again inside its own check and fails there.
+        """
+        try:
+            return self.resolved(reader), ""
+        except Exception as exc:  # noqa: BLE001 — the reason travels to the report
+            return self, f"{type(exc).__name__}: {exc}"
 
     @property
     def is_v4(self) -> bool:
