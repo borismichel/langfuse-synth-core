@@ -177,41 +177,49 @@ class LiveEmitter:
         self.client.shutdown()
 
 
-class LiveTrace:
-    """One in-flight live trace: its root observation, and what nests inside it."""
+class LiveObservation:
+    """One in-flight observation, and what nests inside it.
 
-    def __init__(self, root: Any, emitter: LiveEmitter):
-        self._root = root
+    Nesting is explicit — a child is opened *on its parent*, not on whatever the SDK's
+    ambient context happens to be — because a live surface is a web server: two submissions
+    can be in flight in the same process, and an agent graph assembled out of ambient
+    context would interleave them. Every level answers the same four openers, so a tree of
+    any depth is written the way it reads.
+    """
+
+    def __init__(self, obs: Any, emitter: "LiveEmitter"):
+        self._obs = obs
         self._emitter = emitter
 
     @property
     def id(self) -> str:
-        """The trace id — what a surface hands back as a deep link or scores later."""
-        return self._root.trace_id
+        """This observation's id — what a score attaches to."""
+        return self._obs.id
 
     @property
-    def observation_id(self) -> str:
-        """The root observation's own id (the trace's id is :attr:`id`)."""
-        return self._root.id
+    def trace_id(self) -> str:
+        """The id of the trace this observation belongs to."""
+        return self._obs.trace_id
 
-    def update(self, **fields: Any) -> "LiveTrace":
-        """Update the root observation — this is where the trace's overall output goes."""
-        self._root.update(**fields)
+    def update(self, **fields: Any) -> "LiveObservation":
+        """Update this observation — where its output goes once the work has finished."""
+        self._obs.update(**fields)
         return self
 
     @contextmanager
-    def observation(self, name: str, *, as_type: str = "span", **fields: Any) -> Iterator[Any]:
-        """Nest an observation of any v4 type under the current one.
+    def observation(self, name: str, *, as_type: str = "span",
+                    **fields: Any) -> Iterator["LiveObservation"]:
+        """Nest an observation of any v4 type under this one.
 
         ``as_type`` reaches Langfuse exactly as written — the SDK does not normalise it and
         Langfuse does not refuse it, so an unrecognised value (``AGENT`` included) is
         silently shown as something else. Checked here for that reason (portal #217); the
         backdated seam takes the same vocabulary through a case-forgiving door.
         """
-        with self._root.start_as_current_observation(
+        with self._obs.start_as_current_observation(
                 name=name, as_type=checked_observation_type(as_type),
                 **_pruned(fields)) as obs:
-            yield obs
+            yield LiveObservation(obs, self._emitter)
 
     def span(self, name: str, **fields: Any):
         """Nest a plain span — a step of the surface's work."""
@@ -234,7 +242,31 @@ class LiveTrace:
                                 **fields)
 
     def score(self, name: str, value: float | str, **kw: Any) -> None:
-        """Score this trace (the subject defaults to it)."""
+        """Score this observation."""
+        kw.setdefault("observation_id", self.id)
+        kw.setdefault("trace_id", self.trace_id)
+        self._emitter.score(name, value, **kw)
+
+
+class LiveTrace(LiveObservation):
+    """One in-flight live trace: its root observation, and what nests inside it.
+
+    Under v4 the trace *is* that root observation — it carries the overall input and
+    output — so this is a :class:`LiveObservation` with the trace's identity on the front.
+    """
+
+    @property
+    def id(self) -> str:
+        """The trace id — what a surface hands back as a deep link or scores later."""
+        return self._obs.trace_id
+
+    @property
+    def observation_id(self) -> str:
+        """The root observation's own id (the trace's id is :attr:`id`)."""
+        return self._obs.id
+
+    def score(self, name: str, value: float | str, **kw: Any) -> None:
+        """Score this trace (the subject defaults to it, not to the root observation)."""
         kw.setdefault("trace_id", self.id)
         self._emitter.score(name, value, **kw)
 

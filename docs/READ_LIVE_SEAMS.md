@@ -148,6 +148,10 @@ emitter.score("user_disagreement", 1, trace_id=trace.id, data_type="BOOLEAN")
   real parent span context, and the v4 ingestion header for free.
 * **It takes no timestamp.** Deliberately. A live emitter that accepted one would be a
   second, unblessed backdating path.
+* **Nesting is explicit, never ambient.** Every level — the trace and each observation —
+  answers the same `observation` / `span` / `event` / `generation` openers, and a child is
+  opened on its parent. A live surface is a web server with two submissions in flight, so
+  an agent graph assembled out of the SDK's ambient context would interleave them.
 * **Trace attributes are propagated, not set on a trace.** There is no trace body under v4,
   so `trace()` opens the root observation *and* propagates name / user / session / tags /
   environment onto everything nested inside it. Overall input and output go on the root
