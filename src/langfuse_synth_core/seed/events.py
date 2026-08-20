@@ -30,8 +30,8 @@ from .writepath import on_otlp
 # The metered/billable envelope types, grouped by Langfuse's line items (traces,
 # observations, scores). These are exactly the event types this module emits, so they are
 # the single source of truth for the Spool-count primitive (#35). Note ``observation-create``
-# only ships when ``RICH_OBSERVATION_TYPES`` is on (see below), but it stays in the
-# observation set so the count is correct the moment that flag flips.
+# only ships while ``RICH_OBSERVATION_TYPES`` (see below) is on — its default — and it stays
+# in the observation set either way, so the count survives the flag in both directions.
 #
 # Dataset items and experiment (dataset-run) items are deliberately absent: they are NOT
 # metered as line items and are created through the separate ``/api/public/datasets`` and
@@ -135,19 +135,18 @@ def span_event(
             "timestamp": iso(start), "body": body}
 
 
-# The agent-graph observation types (AGENT | TOOL | RETRIEVER | CHAIN | ...) are an
-# OTel-only feature: they're set via the ``langfuse.observation.type`` span attribute on
-# the ``/api/public/otel`` endpoint. The batch ``/api/public/ingestion`` API we use (for
-# backdating) rejects them — its ObservationBody.type accepts only SPAN | GENERATION |
-# EVENT (confirmed 400 on server 3.179.1). So emit these as SPAN, carrying the intended type
-# and tool-call links in ``metadata`` (named, nested, filterable — just no native badge).
-#
-# The OTLP write path (portal #206) DOES support them — an agent-typed span lands as an
-# AGENT observation — so this switch is no longer blocked on the transport. It stays False
-# anyway: turning it on moves observation counts, and doing that inside the v4 migration
-# would confound the one golden re-bless each kit gets. It is its own change, after the
-# goldens settle. Until then both paths degrade identically, so the flag is invisible here.
-RICH_OBSERVATION_TYPES = False
+# The agent-graph observation types (AGENT | TOOL | RETRIEVER | CHAIN | ...) ship natively
+# since the kits' OTLP cutover (portal #210). On the OTLP wire they ride the
+# ``langfuse.observation.type`` span attribute; on the batch path they become an
+# ``observation-create`` envelope whose body carries the typed value. Measured before
+# flipping: the flag moves NO counts on either path — same ``count_spool``, same line count
+# — only the wire kind changes (``observation-create`` was already in
+# ``OBSERVATION_EVENT_TYPES`` for this moment). Beware the batch caveat: legacy
+# ``/api/public/ingestion`` servers accept only SPAN | GENERATION | EVENT bodies (confirmed
+# 400 on server 3.179.1), so a kit still writing a batch Spool must keep this off — after
+# #210 no shipped kit is, and the off position survives as the escape hatch (the intended
+# type then degrades into ``metadata.observation_type``, identically on both paths).
+RICH_OBSERVATION_TYPES = True
 
 
 def observation_event(
@@ -178,9 +177,9 @@ def observation_event(
     wire_type = otlp.checked_observation_type(obs_type.lower())
     md = dict(metadata or {})
     if on_otlp():
-        # Same degrade rule as the batch path: rich types stay off until their own change
-        # (turning them on moves observation counts and would confound this migration's
-        # golden re-bless), so the intended type rides metadata and the span stays a span.
+        # Same rule as the batch path: typed natively while the flag is on (the default),
+        # degrading into ``metadata.observation_type`` identically on both paths when an
+        # operator turns it off.
         if RICH_OBSERVATION_TYPES:
             emitted_type = wire_type
         else:

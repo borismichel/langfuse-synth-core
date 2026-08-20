@@ -161,20 +161,31 @@ def test_an_id_otlp_cannot_carry_fails_at_the_builder():
         span_event(obs_id=OID, trace_id=TID, name="x", start=TS, end=TS, parent_id="short")
 
 
-def test_the_flag_does_not_change_how_rich_observation_types_degrade(monkeypatch):
-    """``RICH_OBSERVATION_TYPES`` is off and stays off through this migration — turning it on
-    moves observation counts and would confound each kit's one golden re-bless. What matters
-    here is that the flag does not change its meaning: both paths degrade identically while
-    it is off, and both honour it when it is on."""
+def test_rich_observation_types_ship_by_default():
+    """``RICH_OBSERVATION_TYPES`` is on (portal #210): the agent-graph types go out on the
+    wire natively, riding the same core release as the kits' OTLP cutover. Measured before
+    flipping: the flag moves NO counts on either path — only the wire kind changes — so a
+    typed observation needs no ``metadata.observation_type`` fallback any more."""
     from langfuse_synth_core.seed import events as events_mod
 
-    kw = dict(obs_id=OID, trace_id=TID, name="tool_call", obs_type="TOOL", start=TS, end=TS)
+    assert events_mod.RICH_OBSERVATION_TYPES is True
 
-    degraded = events_mod.observation_event(**kw)
-    assert attrs(degraded)["langfuse.observation.type"] == "span"
-    assert attrs(degraded)["langfuse.observation.metadata.observation_type"] == "tool"
-
-    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", True)
-    typed = events_mod.observation_event(**kw)
+    typed = events_mod.observation_event(
+        obs_id=OID, trace_id=TID, name="tool_call", obs_type="TOOL", start=TS, end=TS,
+    )
     assert attrs(typed)["langfuse.observation.type"] == "tool"
     assert "langfuse.observation.metadata.observation_type" not in attrs(typed)
+
+
+def test_turning_the_flag_off_still_degrades_identically(monkeypatch):
+    """The degrade mode survives as the escape hatch: with the flag off both paths emit an
+    untyped span carrying the intended type in ``metadata.observation_type`` — same rule,
+    same spelling — so a revert is a one-line flip, not a format fork."""
+    from langfuse_synth_core.seed import events as events_mod
+
+    monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", False)
+    degraded = events_mod.observation_event(
+        obs_id=OID, trace_id=TID, name="tool_call", obs_type="TOOL", start=TS, end=TS,
+    )
+    assert attrs(degraded)["langfuse.observation.type"] == "span"
+    assert attrs(degraded)["langfuse.observation.metadata.observation_type"] == "tool"

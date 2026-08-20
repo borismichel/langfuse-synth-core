@@ -90,7 +90,7 @@ def test_the_builder_takes_either_spelling_and_writes_the_wire_one(spelling):
         span = observation_event(
             obs_id=OID, trace_id=TID, name="lookup", obs_type=spelling, start=TS, end=TS,
         )
-    assert attrs(span)["langfuse.observation.metadata.observation_type"] == "tool"
+    assert attrs(span)["langfuse.observation.type"] == "tool"
 
 
 def test_every_type_the_vocabulary_carries_builds(monkeypatch):
