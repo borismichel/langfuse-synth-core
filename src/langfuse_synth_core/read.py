@@ -544,10 +544,16 @@ class LangfuseReader:
     """Read a Langfuse project through whichever read API generation it serves."""
 
     def __init__(self, base_url: str, *, auth: tuple[str, str] | None = None,
-                 throttle: float = 0.0, read_api: str | None = None):
+                 throttle: float = 0.0, read_api: str | None = None, attempts: int = 8):
         self.base_url = base_url.rstrip("/")
         self.auth = auth if auth is not None else auth_from_env()
         self.throttle = throttle
+        # How hard to try. The default suits a `verify` sweep, where every read is expected
+        # to succeed and Cloud's 429s are the thing being ridden out. A live surface reading
+        # to *render* — one that degrades to an offline view when the instance is not there
+        # — should ask for `attempts=1`: three minutes of backoff before falling back makes
+        # the resilience worse, not better (portal #211).
+        self.attempts = attempts
         pinned = read_api or os.environ.get(READ_API_ENV) or None
         self._read_api = _validated(pinned) if pinned else None
 
@@ -757,7 +763,8 @@ class LangfuseReader:
     # -- HTTP + pagination -------------------------------------------------
     def _request(self, path: str, params: dict | None = None) -> requests.Response:
         return request_retry("GET", f"{self.base_url}{path}", params=_pruned(params or {}),
-                             auth=self.auth, timeout=30, throttle_s=self.throttle)
+                             auth=self.auth, timeout=30, throttle_s=self.throttle,
+                             attempts=self.attempts)
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         resp = self._request(path, params)

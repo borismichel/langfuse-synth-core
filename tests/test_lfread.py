@@ -1,17 +1,15 @@
-"""The Langfuse read client — verify split (Ring 2, #33), now fronting the read seam (#208).
+"""The raw-REST primitives that survive the v4 read migration (#208, retired down in #211).
 
-Auth + paginated GET of scores/traces. These lock pagination-following and the shape kits
-read today without a live server, by faking the transport the read client rides on.
-
-The v2-vs-legacy scores-endpoint probe these tests used to pin is **gone**: platform v4
-`404`s both of those endpoints, so choosing between them is no longer a meaningful
-question. :mod:`langfuse_synth_core.read` resolves the API *generation* instead, and
-``get_all_scores`` is now a thin compatibility front onto it.
+What is left in ``lfread`` is auth, one authenticated GET, and timestamp parsing — the
+endpoints the migration left alone are read with these. Everything with a generation to
+remap lives in :mod:`langfuse_synth_core.read` and is tested in ``test_read_seam.py``.
 """
 
 from __future__ import annotations
 
-from langfuse_synth_core import lfread, read
+import pytest
+
+from langfuse_synth_core import lfread
 
 
 class _Resp:
@@ -36,50 +34,29 @@ def test_auth_from_env_reads_the_standard_vars(monkeypatch):
     assert lfread.auth_from_env() == ("pk", "sk")
 
 
-def test_get_all_scores_follows_pagination(monkeypatch):
-    pages = {
-        1: {"data": [{"id": "a", "value": 1}, {"id": "b", "value": 1}],
-            "meta": {"totalPages": 2}},
-        2: {"data": [{"id": "c", "value": 1}], "meta": {"totalPages": 2}},
-    }
+def test_get_json_authenticates_and_raises_on_a_bad_status(monkeypatch):
+    seen = {}
 
-    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0):
-        params = params or {}
-        if url.endswith("/api/public/traces"):      # the read-generation probe
-            return _Resp(200, {"data": [], "meta": {"totalPages": 1}})
-        return _Resp(200, pages[params["page"]])
+    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0,
+                     attempts=8):
+        seen.update(url=url, params=params, auth=auth)
+        return _Resp(200, {"data": [{"id": "q1"}]})
 
-    monkeypatch.setattr(read, "request_retry", fake_request)
-    rows = lfread.get_all_scores("http://x", "user_disagreement")
-    assert [r["id"] for r in rows] == ["a", "b", "c"]
+    monkeypatch.setattr(lfread, "request_retry", fake_request)
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
 
+    body = lfread.get_json("http://x/", "/api/public/annotation-queues", {"limit": 100})
 
-def test_get_all_scores_serves_the_legacy_row_shape_off_a_v4_target(monkeypatch):
-    """A kit that has not been rewired yet still reads `value` / `stringValue` / `traceId`.
+    assert body["data"] == [{"id": "q1"}]
+    assert seen["url"] == "http://x/api/public/annotation-queues"
+    assert seen["params"] == {"limit": 100}
+    assert seen["auth"] == ("pk", "sk")
 
-    On a cut-over target those columns do not exist — v3 answers one typed `value` and a
-    `subject` object — so the compatibility front rebuilds them. This is what keeps the
-    depot demoable while the kits move one at a time (#210/#211).
-    """
-
-    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0):
-        if url.endswith("/api/public/traces"):
-            return _Resp(404, {"message": "not found"})
-        if url.endswith("/api/public/v3/scores"):
-            return _Resp(200, {"data": [
-                {"id": "s1", "name": "resolution", "dataType": "CATEGORICAL",
-                 "value": "escalated", "timestamp": "2026-06-04T12:00:00.000Z",
-                 "comment": "hand-off", "subject": {"kind": "trace", "id": "t1"}},
-            ], "meta": {"limit": 100}})
-        raise AssertionError(f"unexpected read: {url}")
-
-    monkeypatch.setattr(read, "request_retry", fake_request)
-    rows = lfread.get_all_scores("http://x", "resolution")
-
-    assert rows[0]["stringValue"] == "escalated"
-    assert rows[0]["traceId"] == "t1"
-    assert rows[0]["comment"] == "hand-off"
-    assert rows[0]["timestamp"].startswith("2026-06-04T12:00:00")
+    monkeypatch.setattr(lfread, "request_retry",
+                        lambda *a, **k: _Resp(500, {"message": "boom"}))
+    with pytest.raises(Exception):
+        lfread.get_json("http://x", "/api/public/annotation-queues")
 
 
 def test_the_legacy_scores_path_probe_is_gone():
@@ -87,32 +64,34 @@ def test_the_legacy_scores_path_probe_is_gone():
     assert not hasattr(lfread, "scores_path")
 
 
+def test_the_legacy_score_row_compatibility_front_is_retired():
+    """`get_all_scores` rendered the seam's rows back into the deprecated dict shape so a
+    not-yet-rewired kit kept working. All three kits read `reader.scores(...)` now (#211),
+    so the shim is gone — and with it the categorical score that reported `value: 0`
+    beside its label. This is the breaking change behind core v3.0.0."""
+    assert not hasattr(lfread, "get_all_scores")
+
+
 def test_parse_ts_handles_the_z_suffix():
     ts = lfread.parse_ts("2026-06-04T12:00:00.000Z")
     assert ts.year == 2026 and ts.tzinfo is not None
 
 
-def test_the_compatibility_front_reproduces_the_legacy_categorical_row_exactly(monkeypatch):
-    """The deprecated scores API sent `value: 0` beside `stringValue` for a categorical
-    score. This front's whole job is to look like that API to a kit that has not been
-    rewired, so it reproduces the placeholder rather than improving on it — a kit doing
-    `float(row["value"])` must not start raising because the target cut over.
-    """
+def test_a_capability_probe_can_ask_once(monkeypatch):
+    """`attempts=1` turns the retry off. A caller asking "is this API here?" degrades on the
+    answer, so backing off eight times over three minutes to re-ask would turn a graceful
+    fallback into a hang (portal #211)."""
+    seen = {}
 
-    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0):
-        if url.endswith("/api/public/traces"):
-            return _Resp(404, {"message": "not found"})
-        if url.endswith("/api/public/v3/scores"):
-            return _Resp(200, {"data": [
-                {"id": "s1", "name": "resolution", "dataType": "CATEGORICAL",
-                 "value": "escalated", "timestamp": "2026-06-04T12:00:00.000Z",
-                 "subject": {"kind": "trace", "id": "t1"}},
-            ], "meta": {"limit": 100}})
-        raise AssertionError(f"unexpected read: {url}")
+    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0,
+                     attempts=8):
+        seen["attempts"] = attempts
+        return _Resp(200, {"data": []})
 
-    monkeypatch.setattr(read, "request_retry", fake_request)
-    row = lfread.get_all_scores("http://x", "resolution")[0]
+    monkeypatch.setattr(lfread, "request_retry", fake_request)
 
-    assert row["stringValue"] == "escalated"
-    assert row["value"] == 0
-    assert float(row["value"]) == 0.0
+    lfread.get_json("http://x", "/api/public/unstable/evaluators", attempts=1)
+    assert seen["attempts"] == 1
+
+    lfread.get_json("http://x", "/api/public/dataset-items")
+    assert seen["attempts"] == 8

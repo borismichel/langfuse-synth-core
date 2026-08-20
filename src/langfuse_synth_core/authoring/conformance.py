@@ -27,19 +27,16 @@ The six check groups, and where each rule lives:
 * **The observation-type vocabulary** (static) — every observation type the kit names is
   one of the ten Langfuse recognises. The OTLP wire accepts an unknown value and silently
   files it as something else, where batch ingestion answered ``400`` — §"The spool".
-* **Legacy Langfuse surfaces** (static, *advisory*) — whether the kit still reaches an API
-  Langfuse removes on 2026-11-16: a deprecated endpoint named in its sources, the
+* **Legacy Langfuse surfaces** (static) — whether the kit still reaches an API Langfuse
+  removes on 2026-11-16: a deprecated endpoint named in its shipped sources, the
   ``meta.totalItems`` counting technique beside one, and a Spool still written on the batch
-  path — §"Reserved-verb semantics (the pipeline)" / §"The spool".
+  path — §"Reserved-verb semantics (the pipeline)" / §"The spool". This one shipped as a
+  nudge and **blocks since #211**: all three kits read through the seam now, so a kit that
+  names an endpoint at all is a kit that stops working at the cutover.
 
-**Two channels, and they are not the same thing.** *Findings* block, unless the caller
-passes ``--advisory``; *advisories* never block, in any mode. ``--advisory`` is the
-pre-portal-kit switch (the #181 runbook-advisories precedent): it prints the same findings
-but always exits 0, so EV/Lender run the suite in CI from day one without converged-shape
-violations blocking them, and post-portal kits run it enforcing. The advisory channel is
-per-check and permanent-until-retired: the v4 legacy-endpoint group rides it because every
-kit in the fleet carries some of that debt while the migration is in flight (portal #207),
-so the two print with different markers.
+``--advisory`` is the pre-portal-kit switch (the #181 runbook-advisories precedent): it
+prints the same findings but always exits 0, so EV/Lender run the suite in CI without their
+converged-shape debt blocking them, and post-portal kits run it enforcing.
 
 This module rides the ``[authoring]`` extra; the companion serve checks additionally need
 the companion web deps and degrade to a printed skip without them.
@@ -102,16 +99,16 @@ _SCRUB_NAMES = frozenset({"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_META
 
 @dataclass
 class ConformanceReport:
-    """The suite's verdict: blocking findings, advisories, notes, green check lines.
+    """The suite's verdict: blocking findings, notes, green check lines.
 
-    ``advisories`` is the nudge-never-block channel (the #181 runbook-advisories
-    precedent): reported in every mode, never part of :attr:`ok`. The v4 legacy-endpoint
-    check rides it, because every kit in the fleet still reads a deprecated endpoint while
-    the migration is in flight and none of them may go red for it (portal #207).
+    There was a second, nudge-never-block channel here while the v4 migration was in
+    flight — every kit in the fleet still read a deprecated endpoint, and none of them could
+    be allowed to go red for it (portal #207). #211 moved all three onto the seams, the
+    legacy-endpoint check graduated to a finding, and the channel retired with its last
+    user. ``--advisory`` still turns *every* finding into a nudge for a pre-portal kit.
     """
 
     findings: list[str] = field(default_factory=list)
-    advisories: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     passed: list[str] = field(default_factory=list)
 
@@ -533,17 +530,19 @@ def _probe_payload(cls: type, label: str, findings: list[str], notes: list[str])
 
 
 # --------------------------------------------------------------------------------------
-# Legacy Langfuse endpoints (advisory) — the v4 migration tracker (portal #207)
+# Legacy Langfuse endpoints (blocking) — the v4 migration gate (portal #207, #211)
 # --------------------------------------------------------------------------------------
 # Langfuse Cloud goes v4-only on 2026-11-16: batch ingestion stops accepting everything but
 # scores, and the v3 list endpoints 404. This check answers one question for the whole
 # fleet — *does this kit still reach a legacy Langfuse endpoint?* — so the migration cannot
 # silently regress and a kit's remaining debt is visible in its own CI.
 #
-# ADVISORY at this stage, and that is the point: every gold kit still reads a deprecated
-# endpoint until #211 moves verify onto the read seam, and the suite runs enforcing in at
-# least one kit's CI. A blocking check here would go red across the fleet on the day it
-# shipped and teach people to ignore it.
+# It shipped **advisory** because every gold kit still read a deprecated endpoint, and a
+# blocking check would have gone red across the fleet on the day it landed and taught people
+# to ignore it. #211 moved all three kits onto the read seam and the live-emission seam, so
+# there is nothing left to be lenient about: this **blocks** now. A kit that reaches for a
+# removed endpoint is a kit that stops working on 2026-11-16, and the whole point of the
+# seams is that no kit has to name an endpoint to begin with.
 #
 # Its limit, stated so it is not mistaken for an execution proof (the same house rule as
 # `live_command_findings`): this reads the kit's *sources*. A URL assembled at runtime, or
@@ -636,16 +635,22 @@ def _readable(paths: list[Path], kit_dir: Path) -> list[tuple[str, str]]:
         except (OSError, UnicodeDecodeError):
             continue
     return out
-def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
-    """Advisory lines for every legacy Langfuse surface the kit still reaches: a deprecated
-    endpoint in its sources, the ``meta.totalItems`` counting technique beside one, and a
-    Spool still written on the batch path. Empty for a v4-native kit."""
+def legacy_langfuse_findings(kit_dir: str | Path) -> list[str]:
+    """One line for every legacy Langfuse surface the kit still reaches: a deprecated
+    endpoint in its **shipped** sources, the ``meta.totalItems`` counting technique beside
+    one, and a Spool still written on the batch path. Empty for a v4-native kit.
+
+    Shipped sources only (:func:`_shipped_sources`), because this blocks: a test that stands
+    up a canned deprecated-API server — which every kit's read-seam suite now does, on
+    purpose, to prove its `verify` reads the same on both generations — names those
+    endpoints all over the place and no container ever runs it.
+    """
     kit_dir = Path(kit_dir)
-    sources = _readable(_kit_sources(kit_dir), kit_dir)
+    sources = _readable(_shipped_sources(kit_dir), kit_dir)
     if not sources:
         return []
 
-    advisories: list[str] = []
+    findings: list[str] = []
     pinned_otlp = False
     for label, text in sources:
         lines = text.splitlines()
@@ -679,16 +684,16 @@ def legacy_langfuse_advisories(kit_dir: str | Path) -> list[str]:
                 )
                 for lineno in totals
             )
-            advisories.extend(text for _, text in sorted(hits, key=lambda h: h[0]))
+            findings.extend(text for _, text in sorted(hits, key=lambda h: h[0]))
 
     if not pinned_otlp:
-        advisories.append(
+        findings.append(
             "the Spool is still written on the batch write path (legacy ingestion) — no "
             "kit-set `set_spool_write_path(OTLP)` in the kit's sources. Langfuse rejects every "
             "envelope type but `score-create` once the target is v4-only "
             f"(2026-11-16); core's docs/WRITE_PATHS.md carries the cutover ({_CITE_SPOOL})"
         )
-    return advisories
+    return findings
 
 
 # --------------------------------------------------------------------------------------
@@ -913,11 +918,12 @@ def run_conformance(
             "every observation type the kit names is one Langfuse recognises"
         )
 
-    report.advisories.extend(legacy_langfuse_advisories(kit_dir))
-    if not report.advisories:
+    legacy = legacy_langfuse_findings(kit_dir)
+    report.findings.extend(legacy)
+    if not legacy:
         report.passed.append(
             "no legacy Langfuse endpoint reached: the Spool is written on the OTLP path "
-            "and every read names a v4 API"
+            "and every read goes through the read seam"
         )
     return report
 
@@ -971,17 +977,10 @@ def execute(args: argparse.Namespace) -> int:
         print(f"  ✓ {line}")
     for line in report.notes:
         print(f"  · {line}")
-    for line in report.advisories:
-        print(f"  ⚠ v4-advisory {line}")
     marker = "⚠ advisory" if args.advisory else "✗"
     for line in report.findings:
         print(f"  {marker} {line}")
 
-    if report.advisories:
-        print(
-            f"⚠ conformance: {len(report.advisories)} v4-migration advisory(ies) — "
-            f"reported, never blocking in any mode (portal #207)"
-        )
     if report.ok:
         print("✓ conformance: the Contract holds")
         return 0

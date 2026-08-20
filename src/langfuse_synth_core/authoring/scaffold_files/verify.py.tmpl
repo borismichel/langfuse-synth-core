@@ -1,33 +1,31 @@
 """`synth verify` — read the data back through the library and assert it landed.
 
-The read-client (auth + retrying GETs of the Langfuse public REST API) is the library's
-(`langfuse_synth_core.lfread`); what stays HERE is the scenario talking — which assertions
-to make about what landed. The walking skeleton asserts the floor: the traces are visible
-(as their root observations) and the `quality` score family is present. Grow the checks as
-the story grows.
+The read seam (`langfuse_synth_core.read`) is the read-client: it owns the Langfuse API
+endpoints, follows their pagination to the end, and normalises what comes back. What stays
+HERE is the scenario talking — which assertions to make about what landed. The walking
+skeleton asserts the floor: traces are visible and the `quality` score family is present.
+Grow the checks as the story grows.
 
-**Reads are v4-native.** Langfuse platform v4 makes the observation the primary entity —
-there is no separately ingested trace, so a trace *is* its root observation — and the older
-trace / observation / session / score list endpoints are removed when Cloud goes v4-only on
-2026-11-16. This kit reads the v4 observations and scores APIs below, which Langfuse serves
-today alongside the old ones; they need a v4-capable target.
+**The seam reads whichever generation the target serves.** Langfuse platform v4 makes the
+observation the primary entity — there is no separately ingested trace, so a trace *is* its
+observations — and the older trace / observation / session / score list endpoints are
+removed when Cloud goes v4-only on 2026-11-16. The seam probes the target once, picks the
+arm, and hands back the same rows either way, so nothing below has to know which answered.
+`TargetProfile.resolved()` is what asks; its `label` says so in the log, which is the first
+thing to know when a check that passed yesterday fails today.
 
-Both are **cursor-paginated and carry no total**, so a floor check asserts *presence* of a
-returned row rather than reading a count out of the response's `meta`. Re-pointing a URL
-does not bring that number back: if the story needs a real total, aggregate it (the Metrics
-API) or count what you actually read.
-
-The paths sit here rather than in the library only because core's read seam is still being
-built: when it lands, these two calls become calls into it and the endpoints stop being the
-kit's business — the same way `Ingestor` already owns the write side. Until then, keep the
-auth and retry behaviour by going through `lfread`, and add scenario reads beside these two
-rather than reaching for an HTTP client of your own.
+Add scenario reads as calls on the `reader` — `reader.trace(id)`, `reader.observations(…)`,
+`reader.scores(name=…)`, `reader.experiments(…)` — rather than reaching for an HTTP client
+of your own: that is what keeps this kit off the endpoints and out of the next migration.
+The handful of endpoints the seam does not model (datasets, dataset-items, score-configs,
+prompts, annotation queues) are read with `lfread.get_json`, which carries the same auth and
+the same Retry-After-aware backoff.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from langfuse_synth_core.lfread import get_json
+from langfuse_synth_core.target import TargetProfile
 
 from .config import Config
 
@@ -53,18 +51,16 @@ class VerifyReport:
 
 def run_verify(cfg: Config, *, log=print) -> VerifyReport:
     """Query the target project back and report each floor check pass/fail."""
-    base = cfg.target.base_url
+    profile = TargetProfile.detect(cfg.target.base_url).resolved()
+    reader = profile.reader()
+    log(f"· verifying against {profile.label} ({profile.base_url})")
     report = VerifyReport()
 
-    # A trace is its root observation under v4, so the roots are the trace floor check.
-    # `isRootObservation` is a documented filter on the v2 observations API, as is `name`
-    # on the v3 scores API — both are in Langfuse's public OpenAPI, not inferred here.
-    roots = get_json(
-        base, "/api/public/v2/observations", {"isRootObservation": "true", "limit": 1}
-    ).get("data", [])
-    report.add("traces_present", bool(roots), f"{len(roots)} root observation(s) read back")
+    # A sample of traces, never a project total — under v4 there is no trace list to count.
+    traces = reader.traces(limit=5)
+    report.add("traces_present", bool(traces), f"{len(traces)} trace(s) read back")
 
-    scores = get_json(base, "/api/public/v3/scores", {"name": "quality", "limit": 1}).get("data", [])
+    scores = reader.scores(name="quality", limit_pages=1)
     report.add("quality_scores_present", bool(scores), f"{len(scores)} quality score(s) read back")
 
     for check in report.checks:

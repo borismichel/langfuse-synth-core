@@ -1,6 +1,6 @@
 [project]
 name = "langfuse-synth-core"
-version = "2.1.0"
+version = "3.0.0"
 description = "Shared synthesis library + Authoring SDK for Demo Depot kits (Spec A, #19)."
 requires-python = ">=3.11"
 # Runtime deps. Ring 1 (#31) extracted a byte-identical core that is pure stdlib except
@@ -11,7 +11,16 @@ requires-python = ">=3.11"
 # `jsonschema` (the schema validator) stays authoring-ONLY: it is the boundary marker the
 # runtime-only job asserts is absent, so it must NEVER leak into this runtime list.
 dependencies = [
-    "langfuse>=4.0,<5",
+    # The SDK floor is a DELIBERATE pin, not whatever resolution lands (portal #211). The
+    # v4 read APIs are what a kit's `verify` reads after the cutover, and the SDK only grew
+    # a client for the last of them — the Experiments API, `/api/public/experiments`, which
+    # is where a dataset run lives under v4 — in **4.14.0** (`/api/public/v3/scores` landed
+    # in 4.9.0). Below that floor a kit's dataset-run reads and `run_experiment` fall back
+    # to endpoints a v4 host has removed. The floor also buys `additional_headers` reaching
+    # the SDK's default OTLP exporter, which is how the live-emission seam sends
+    # `x-langfuse-ingestion-version: 4` and keeps a live trace readable in seconds rather
+    # than up to fifteen minutes (`live/emit.py`, `ingestion.py`).
+    "langfuse>=4.14,<5",
     "PyYAML>=6,<7",
     # `requests` is a genuine RUNTIME dep: four runtime modules import it directly
     # (`http`, `lfread`, `seed/ingest`, `probe`) for the raw-REST read/ingest paths. Until

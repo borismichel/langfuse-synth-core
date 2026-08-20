@@ -6,9 +6,9 @@ renders a placeholder page via the runtime theme helpers. Grow it into the kit's
 add routes and forms to `create_app` — while the Adapter keeps owning invocation, bind,
 health, shutdown, secret intake, and the ready Langfuse + LLM clients:
 
-  * the Surface receives the adapter and asks it for ready clients (`adapter.langfuse()`,
-    `adapter.ingestor()`, `adapter.read_json(...)`, `adapter.llm()`); it never reads a raw
-    key, sentinel, or env var — secret intake is the Adapter's job (D4);
+  * the Surface receives the adapter and asks it for ready clients (`adapter.emitter()`
+    to emit, `adapter.reader()` to read, `adapter.langfuse()`, `adapter.llm()`); it never
+    reads a raw key, sentinel, or env var — secret intake is the Adapter's job (D4);
   * `main` is wired to the kit's `synth companion` verb (src/synth/cli.py) and declared under
     `live_components` in usecase.yaml; it parses the fixed `--config/--host/--port` invocation
     with the Adapter's `parse_invocation` helper (never a pipeline `--set`).
@@ -49,8 +49,13 @@ def create_app(adapter: CompanionAdapter) -> Any:
     """Build the live Surface on ``adapter`` (its ready clients) and return a FastAPI app.
 
     Serves the placeholder page at ``/``; the Adapter mounts the health route and owns
-    bind/serve. Grow the scene here — read the seeded pool with ``adapter.read_json(...)``,
-    emit live traces with ``adapter.ingestor()``, call the model with ``adapter.llm()``.
+    bind/serve. Grow the scene here — read the seeded pool with ``adapter.reader()``, emit
+    live traces with ``adapter.emitter()``, call the model with ``adapter.llm()``.
+
+    A live surface emits at *now*, so it rides the live-emission seam and never the Spool's
+    ``adapter.ingestor()``: that writer exists to backdate weeks of history and stamps
+    producer-supplied timestamps, which a submission does not have (CONTRACT.md, the
+    determinism line).
     """
     from fastapi import FastAPI
     from fastapi.responses import HTMLResponse

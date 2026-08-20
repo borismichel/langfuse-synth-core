@@ -181,3 +181,71 @@ def test_a_failing_submission_still_flushes_what_it_emitted(emitter, client):
             raise RuntimeError("the model refused")
 
     assert client.flushes == 1
+
+
+def test_the_sdk_client_is_built_with_the_real_time_ingestion_header(monkeypatch):
+    """Without `x-langfuse-ingestion-version: 4` a v4 target takes the slow ingestion path
+    and the trace is not readable for up to fifteen minutes (portal #205). A live surface
+    hands its user a deep link the moment it answers, so the header is not an optimisation
+    here — it is the difference between that link showing a trace and showing nothing."""
+    from langfuse_synth_core import ingestion
+
+    built = {}
+
+    class _SDK:
+        def __init__(self, **kw):
+            built.update(kw)
+
+    monkeypatch.setitem(__import__("sys").modules, "langfuse",
+                        type("m", (), {"Langfuse": _SDK, "propagate_attributes": None}))
+
+    emitter = emit.LiveEmitter("https://cloud.langfuse.com", public_key="pk", secret_key="sk")
+    assert emitter.client is not None
+
+    assert built["additional_headers"] == {
+        ingestion.INGESTION_VERSION_HEADER: ingestion.INGESTION_VERSION}
+    assert built["host"] == "https://cloud.langfuse.com"
+
+
+def test_both_write_paths_send_the_same_ingestion_version(monkeypatch):
+    """The Spool's exporter and the live seam's SDK client are on opposite sides of the
+    determinism line and may not import one another, so the constant they share sits above
+    both. This is the test that keeps the two from drifting."""
+    from langfuse_synth_core import ingestion
+    from langfuse_synth_core.seed import ingest, otlp
+
+    assert otlp.INGESTION_VERSION_HEADER == ingestion.INGESTION_VERSION_HEADER
+    assert ingest.Ingestor("http://x", "pk", "sk").ingestion_version == ingestion.INGESTION_VERSION
+
+
+def test_a_grandchild_nests_under_its_own_parent_not_the_root(emitter, client):
+    """An agent graph is more than two levels deep — EV's live submission nests
+    `extract_fields` inside `load_application` — and a live surface is a web server, so a
+    tree assembled out of the SDK's ambient context would interleave two submissions in
+    flight. Every level opens its own children, explicitly (portal #211)."""
+    with emitter.trace("credit_agent.assess_application") as trace:
+        with trace.observation("credit_agent", as_type="agent") as agent:
+            with agent.span("load_application") as load:
+                with load.generation("extract_fields", model="haiku") as gen:
+                    gen.update(output={"ok": True})
+
+    by_name = {s.kw.get("name"): s for s in client.spans if s.kw.get("name")}
+    assert by_name["credit_agent"].parent is client.spans[0]
+    assert by_name["load_application"].parent is by_name["credit_agent"]
+    assert by_name["extract_fields"].parent is by_name["load_application"]
+    assert by_name["extract_fields"].updates == [{"output": {"ok": True}}]
+
+
+def test_scoring_an_observation_names_it_as_the_subject(emitter, client):
+    """A trace-level score and an observation-level score are different subjects, and the
+    demo's story reads both — EV scores the decision generation, not the whole trace."""
+    with emitter.trace("t") as trace:
+        with trace.generation("decision", model="sonnet") as decision:
+            decision.score("answer_quality", 0.9, data_type="NUMERIC")
+        trace.score("user_disagreement", 1, data_type="BOOLEAN")
+
+    obs_score, trace_score = client.scores
+    assert obs_score["name"] == "answer_quality"
+    assert obs_score["observation_id"] and obs_score["trace_id"]
+    assert trace_score["name"] == "user_disagreement"
+    assert "observation_id" not in trace_score

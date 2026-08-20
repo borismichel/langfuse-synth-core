@@ -62,20 +62,31 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- Nothing pending. `v2.1.0` (portal #210/#220, the release the kit cutovers repin to)
-  shipped both queued entries:
-  - `RICH_OBSERVATION_TYPES` on by default — typed observations carry their real type
-    on the wire instead of degrading into `metadata.observation_type`. Measured to move
-    no counts on either write path, but the wire bytes change wherever a kit authors a
-    typed observation — so taking this release means re-blessing the kit's Spool
-    golden, and a kit still writing a *batch* Spool must flip to OTLP in the same
-    change (legacy ingestion 400s on typed observation bodies).
-  - `count_spool` reports the billable `total` beside the dimensions (portal #220): on
-    an OTLP Spool the derived trace term stays in the breakdown but out of the total,
-    so the total is invariant across a kit's cutover. A kit must not flip to OTLP
-    while pinned at a core ≤ v2.0.0 — those write OTLP but count without a total, and
-    the portal would double-count. The #210 cutover PRs pair each kit's
-    `set_spool_write_path(OTLP)` flip with the repin to this release for both reasons.
+- **`v3.0.0` — the read seam retires its compatibility front (portal #211).** This is
+  the release the three kit read-seam cutovers repin to, and it is **major** because it
+  removes a public function:
+  - `lfread.get_all_scores` is **gone**. It rendered the read seam's rows back into the
+    deprecated `value` / `stringValue` / `traceId` dict shape so a kit that had not been
+    rewired kept reading a v4 project. All three kits read `reader.scores(...)` now, so
+    it retires with its last caller — as `docs/READ_LIVE_SEAMS.md` said it would. A kit
+    pinned below v3.0.0 is unaffected; a kit that takes this release and still calls it
+    fails at import.
+  - `langfuse_synth_core.target` is new: the Cloud/self-hosted profile both kits carried
+    a byte-identical copy of, plus `resolved()` — the probe that makes a v4 host
+    something a kit *recognises*. Kit-side `target.py` re-exports it.
+  - The **Langfuse SDK floor moves to `>=4.14`**, deliberately: 4.14.0 is the first SDK
+    with a client for `/api/public/experiments`, which is where a dataset run lives under
+    v4. Taking this release upgrades the SDK in every kit image.
+  - The live-emission seam now sends `x-langfuse-ingestion-version: 4` on its SDK
+    client, so a live trace is readable in seconds rather than up to fifteen minutes.
+    The header constant moved above the determinism line (`langfuse_synth_core.ingestion`)
+    because both write paths send it and neither may import the other.
+  - The scaffold's `verify.py` template is born on the read seam, so `MIN_CORE_REF` moves
+    to `v3.0.0`: a freshly scaffolded kit no longer runs on an older core.
+  - `synth-authoring conformance` **blocks** on a deprecated Langfuse endpoint now
+    (it was a nudge while the fleet still carried that debt), reading the kit's shipped
+    sources only. The nudge-never-block channel retired with it; `--advisory` is
+    unchanged. Any kit that has not moved onto the seam sees this as a new CI failure.
 
 ## Release checklist
 

@@ -404,9 +404,15 @@ A kit's live surface (companion) is declared in `live_components[]`: `command`, 
   degrades gracefully to liveness-only. The target shape points `health_path` at the
   adapter's readiness route (scaffold: `/healthz`), which **must differ from `/`** so it
   never collides with the scene's own index page.
+- **A live surface emits through the live-emission seam** (`adapter.emitter()`,
+  `langfuse_synth_core.live.emit`) and reads through the read seam (`adapter.reader()`).
+  Both are the determinism line made concrete: the Spool is backdated, deterministic and
+  golden-gated, and a submission is none of those, so a surface never borrows the Spool's
+  `adapter.ingestor()` to emit at *now*. The read seam additionally means kit code names no
+  Langfuse endpoint and so does not have to be edited when a target cuts over to v4.
 - **The Companion Adapter** (`langfuse_synth_core.companion`) is the surface between the
   portal-injected env and kit code: it owns secret intake (kit code never touches a raw
-  key — D4), Langfuse client/ingestor/read access, LLM provider resolution (pinned
+  key — D4), Langfuse client/emitter/reader access, LLM provider resolution (pinned
   `LLM_MODEL` > per-request model > kit default > provider built-in), the readiness
   report, and serving. `CompanionAdapterContract` is the structural seam the portal's
   live runtime relies on.
