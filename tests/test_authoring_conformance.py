@@ -545,22 +545,22 @@ def _kit_with_sources(tmp_path, **files: str) -> Path:
     return tmp_path
 
 
-def test_a_deprecated_read_endpoint_is_an_advisory(tmp_path):
-    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+def test_a_deprecated_read_endpoint_is_a_finding(tmp_path):
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
     kit = _kit_with_sources(
         tmp_path,
         **{"synth/verify.py": 'get_json(base, "/api/public/traces", {"limit": 1})\n'},
     )
-    advisories = legacy_langfuse_advisories(kit)
-    hit = [a for a in advisories if "/api/public/traces" in a]
-    assert hit, advisories
+    findings = legacy_langfuse_findings(kit)
+    hit = [a for a in findings if "/api/public/traces" in a]
+    assert hit, findings
     assert "synth/verify.py:1" in hit[0]
     assert "/api/public/v2/observations" in hit[0]  # names the replacement
 
 
 def test_the_surviving_endpoints_are_not_flagged(tmp_path):
-    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
     kit = _kit_with_sources(
         tmp_path,
@@ -577,11 +577,11 @@ def test_the_surviving_endpoints_are_not_flagged(tmp_path):
             "synth/seed/path.py": "set_spool_write_path(OTLP)\n",
         },
     )
-    assert legacy_langfuse_advisories(kit) == []
+    assert legacy_langfuse_findings(kit) == []
 
 
 def test_the_dataset_runs_read_is_flagged_but_the_datasets_list_is_not(tmp_path):
-    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
     kit = _kit_with_sources(
         tmp_path,
@@ -593,38 +593,38 @@ def test_the_dataset_runs_read_is_flagged_but_the_datasets_list_is_not(tmp_path)
             "synth/seed.py": "set_spool_write_path(OTLP)\n",
         },
     )
-    advisories = legacy_langfuse_advisories(kit)
-    assert len(advisories) == 1, advisories
-    assert "/runs" in advisories[0] and "experiment" in advisories[0]
+    findings = legacy_langfuse_findings(kit)
+    assert len(findings) == 1, findings
+    assert "/runs" in findings[0] and "experiment" in findings[0]
 
 
 def test_the_legacy_rest_create_endpoints_are_flagged(tmp_path):
     """`POST /spans|/generations|/events` go with batch ingestion — a kit that writes an
     observation itself, rather than through core's builders, has the same debt."""
-    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
     kit = _kit_with_sources(
         tmp_path,
         **{"synth/emit.py": 'post(f"{base}/api/public/generations", body)\n',
            "synth/seed.py": "set_spool_write_path(OTLP)\n"},
     )
-    advisories = legacy_langfuse_advisories(kit)
-    assert len(advisories) == 1 and "/api/public/generations" in advisories[0]
+    findings = legacy_langfuse_findings(kit)
+    assert len(findings) == 1 and "/api/public/generations" in findings[0]
 
 
-def test_a_kit_still_on_the_batch_write_path_is_an_advisory(tmp_path):
+def test_a_kit_still_on_the_batch_write_path_is_a_finding(tmp_path):
     """The write half: no kit-set OTLP pin means the Spool is still batch-ingested."""
-    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
     kit = _kit_with_sources(tmp_path, **{"synth/seed.py": "ingestor.import_spool()\n"})
-    assert any("write path" in a and "batch" in a for a in legacy_langfuse_advisories(kit))
+    assert any("write path" in a and "batch" in a for a in legacy_langfuse_findings(kit))
 
 
 def test_the_totalitems_technique_is_flagged_alongside_a_dying_endpoint(tmp_path):
     """`meta.totalItems` is the counting technique the v4 read APIs do not offer — but
-    the endpoints that survive still answer it, so it is only advised where a deprecated
+    the endpoints that survive still answer it, so it is only reported where a deprecated
     endpoint is read in the same file."""
-    from langfuse_synth_core.authoring.conformance import legacy_langfuse_advisories
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
 
     kit = _kit_with_sources(
         tmp_path,
@@ -640,14 +640,16 @@ def test_the_totalitems_technique_is_flagged_alongside_a_dying_endpoint(tmp_path
             "synth/seed.py": "set_spool_write_path(OTLP)\n",
         },
     )
-    advisories = legacy_langfuse_advisories(kit)
-    assert any("totalItems" in a and "verify.py" in a for a in advisories)
-    assert not any("totalItems" in a and "items.py" in a for a in advisories)
+    findings = legacy_langfuse_findings(kit)
+    assert any("totalItems" in a and "verify.py" in a for a in findings)
+    assert not any("totalItems" in a and "items.py" in a for a in findings)
 
 
-def test_advisories_never_block_even_in_enforcing_mode(tmp_path, capsys):
-    """AC: the legacy-endpoint check is advisory at this stage — every gold kit still
-    reads a deprecated endpoint, and none of them may go red for it."""
+def test_a_deprecated_endpoint_blocks_in_enforcing_mode(tmp_path, capsys):
+    """The check shipped as a nudge because every gold kit still read a deprecated endpoint
+    (#207). #211 moved all three onto the read seam, so there is nothing left to be lenient
+    about: a kit that names a removed endpoint is a kit that stops working at the cutover,
+    and its CI says so."""
     from langfuse_synth_core.authoring.conformance import run, run_conformance
 
     kit = _kit_with_sources(
@@ -656,13 +658,27 @@ def test_advisories_never_block_even_in_enforcing_mode(tmp_path, capsys):
     (kit / "usecase.yaml").write_text(yaml.safe_dump(_stateless_manifest()))
 
     report = run_conformance(kit)
-    assert report.advisories, "the deprecated read should surface"
-    assert report.findings == [], report.findings
-    assert report.ok
+    assert any("/api/public/traces" in f for f in report.findings), report.findings
+    assert not report.ok
 
-    assert run([str(kit)]) == 0                      # enforcing mode, still green
-    out = capsys.readouterr().out
-    assert "advisory" in out and "/api/public/traces" in out
+    assert run([str(kit)]) == 1                      # enforcing mode: red
+    assert "/api/public/traces" in capsys.readouterr().out
+    assert run([str(kit), "--advisory"]) == 0        # a pre-portal kit still only gets nudged
+
+
+def test_a_canned_deprecated_api_in_the_tests_is_not_the_kits_debt(tmp_path):
+    """Every kit's read-seam suite now stands up a canned deprecated-API server, on purpose,
+    to prove its `verify` reads the same on both generations. Those files name the dying
+    endpoints all over — and no container runs them, so a blocking check must not see them
+    (the `_shipped_sources` trade)."""
+    from langfuse_synth_core.authoring.conformance import legacy_langfuse_findings
+
+    kit = _kit_with_sources(
+        tmp_path,
+        **{"synth/seed.py": "set_spool_write_path(OTLP)\n",
+           "tests/test_verify.py": 'if path == "/api/public/traces": return _Resp(200)\n'},
+    )
+    assert legacy_langfuse_findings(kit) == []
 
 
 def test_a_scaffolded_kit_reaches_no_legacy_endpoint(kit_on_path):
@@ -672,7 +688,7 @@ def test_a_scaffolded_kit_reaches_no_legacy_endpoint(kit_on_path):
 
     kit_dir = kit_on_path("conf-v4-native")
     report = run_conformance(kit_dir)
-    assert report.advisories == [], "\n".join(report.advisories)
+    assert report.ok, "\n".join(report.findings)
 
 
 # --------------------------------------------------------------------------------------

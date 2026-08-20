@@ -41,12 +41,21 @@ def auth_from_env() -> tuple[str, str]:
     return (os.environ.get("LANGFUSE_PUBLIC_KEY", ""), os.environ.get("LANGFUSE_SECRET_KEY", ""))
 
 
-def get_json(base: str, path: str, params: dict | None = None, *, throttle: float = 0.0) -> dict:
+def get_json(base: str, path: str, params: dict | None = None, *, throttle: float = 0.0,
+             attempts: int = 8) -> dict:
     """GET ``{base}{path}`` and return parsed JSON, raising on non-2xx.
 
-    Retry-After-aware: Cloud 429s the rapid paginated reads the verify sweep fires."""
+    Retry-After-aware: Cloud 429s the rapid paginated reads the verify sweep fires.
+
+    ``attempts=1`` turns the retry off, and a **capability probe should ask for that**.
+    "Does this server have the unstable evaluator API?" is answered by one call: a host that
+    does not have it answers a 404 immediately, and one that is not there at all should fail
+    fast so the caller can degrade. Backing off eight times over three minutes to re-ask a
+    question whose answer will not change turns a graceful fallback into a hang.
+    """
     resp = request_retry("GET", f"{base.rstrip('/')}{path}", params=params or {},
-                         auth=auth_from_env(), timeout=30, throttle_s=throttle)
+                         auth=auth_from_env(), timeout=30, throttle_s=throttle,
+                         attempts=attempts)
     resp.raise_for_status()
     return resp.json()
 

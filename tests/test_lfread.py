@@ -37,7 +37,8 @@ def test_auth_from_env_reads_the_standard_vars(monkeypatch):
 def test_get_json_authenticates_and_raises_on_a_bad_status(monkeypatch):
     seen = {}
 
-    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0):
+    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0,
+                     attempts=8):
         seen.update(url=url, params=params, auth=auth)
         return _Resp(200, {"data": [{"id": "q1"}]})
 
@@ -74,3 +75,23 @@ def test_the_legacy_score_row_compatibility_front_is_retired():
 def test_parse_ts_handles_the_z_suffix():
     ts = lfread.parse_ts("2026-06-04T12:00:00.000Z")
     assert ts.year == 2026 and ts.tzinfo is not None
+
+
+def test_a_capability_probe_can_ask_once(monkeypatch):
+    """`attempts=1` turns the retry off. A caller asking "is this API here?" degrades on the
+    answer, so backing off eight times over three minutes to re-ask would turn a graceful
+    fallback into a hang (portal #211)."""
+    seen = {}
+
+    def fake_request(method, url, *, params=None, auth=None, timeout=30, throttle_s=0.0,
+                     attempts=8):
+        seen["attempts"] = attempts
+        return _Resp(200, {"data": []})
+
+    monkeypatch.setattr(lfread, "request_retry", fake_request)
+
+    lfread.get_json("http://x", "/api/public/unstable/evaluators", attempts=1)
+    assert seen["attempts"] == 1
+
+    lfread.get_json("http://x", "/api/public/dataset-items")
+    assert seen["attempts"] == 8

@@ -83,6 +83,10 @@ Whoever cuts the next version ships these; delete each entry when its tag lands.
     because both write paths send it and neither may import the other.
   - The scaffold's `verify.py` template is born on the read seam, so `MIN_CORE_REF` moves
     to `v3.0.0`: a freshly scaffolded kit no longer runs on an older core.
+  - `synth-authoring conformance` **blocks** on a deprecated Langfuse endpoint now
+    (it was a nudge while the fleet still carried that debt), reading the kit's shipped
+    sources only. The nudge-never-block channel retired with it; `--advisory` is
+    unchanged. Any kit that has not moved onto the seam sees this as a new CI failure.
 
 ## Release checklist
 
