@@ -529,11 +529,21 @@ def test_scaffolded_seed_pins_the_otlp_write_path(kit):
     assert writepath.OTLP == "otlp" and hasattr(writepath, "set_spool_write_path")
 
 
-def test_scaffolded_verify_reads_the_v4_apis(kit):
+def test_scaffolded_verify_reads_through_the_seam_and_names_no_endpoints(kit):
+    """A freshly scaffolded kit is born on the read seam (portal #211).
+
+    The template used to spell the v4 endpoints itself, with a note saying they would
+    become calls into the seam when it landed. It has landed: a kit that names an endpoint
+    is a kit that has to be edited at the next migration, which is the whole thing this
+    seam exists to prevent.
+    """
     verify_src = (kit.dest / "src" / "synth" / "verify.py").read_text()
-    assert "/api/public/v2/observations" in verify_src
-    assert "/api/public/v3/scores" in verify_src
-    assert "/api/public/traces" not in verify_src
+    assert "TargetProfile" in verify_src
+    assert "reader.traces(" in verify_src and "reader.scores(" in verify_src
+    body = "\n".join(line for line in verify_src.splitlines()
+                     if not line.lstrip().startswith("#"))
+    body = body.split('"""', 2)[-1]   # the docstring discusses the migration
+    assert "/api/public/" not in body
     assert "totalItems" not in verify_src   # the count the v4 read APIs do not serve
 
 
@@ -580,7 +590,7 @@ def test_seed_and_verify_wire_through_the_library(kit):
     seed_src = (kit.dest / "src" / "synth" / "seed.py").read_text()
     verify_src = (kit.dest / "src" / "synth" / "verify.py").read_text()
     assert "from langfuse_synth_core.seed.ingest import Ingestor" in seed_src
-    assert "from langfuse_synth_core.lfread import" in verify_src
+    assert "from langfuse_synth_core.target import TargetProfile" in verify_src
 
 
 # --- AC (portal #187): the emitted kit is retargetable, and carries the gate that says so ---

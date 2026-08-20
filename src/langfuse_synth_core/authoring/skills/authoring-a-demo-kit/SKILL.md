@@ -62,7 +62,7 @@ the story and re-bless.
 synth-authoring new my-kit --dir ../kits          # kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion            # also emit the companion stub (Spec G)
 synth-authoring new my-kit --anchors              # also emit per-run anchors wiring (#199)
-synth-authoring new my-kit --core-ref v2.1.0       # lib git tag the kit pins to
+synth-authoring new my-kit --core-ref v3.0.0       # lib git tag the kit pins to
 ```
 
 This emits a **runnable-green walking skeleton**, not a blank template: the plumbing
@@ -75,7 +75,7 @@ file floor you now own:
 | `usecase.yaml` | The portal manifest (schema-valid, canonical `generation.target_traces` knob injected). The *only* portal surface. | Phase 4 (artifacts), as the story lands |
 | `src/synth/materialize.py` | **Deterministic, model-free generation** — the trace tree. | **Phase 2** |
 | `src/synth/config.py` | Config model + the `DERIVATION_HOOK` (identity by default). | **Phase 3** |
-| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library; `seed.py` pins the kit's **OTLP write path** and `verify.py` reads the **v4** APIs. | Rarely — grow verbs here + in `usecase.yaml` together |
+| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library; `seed.py` pins the kit's **OTLP write path** and `verify.py` reads through the **read seam** (whichever generation the target serves). | Rarely — grow verbs here + in `usecase.yaml` together |
 | `DEMO_SCRIPT.md` | The `render: markdown` Presenter Runbook stub. | **Phase 4** |
 | `tests/` | The determinism golden gate + manifest-validity test + the retargeting gate (all green now). | Never by hand — re-bless via `freeze` |
 | `Dockerfile` | The reference non-root image. | Only for real runtime deps |

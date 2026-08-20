@@ -36,6 +36,7 @@ from typing import Callable
 import requests
 
 from ..http import request_retry
+from ..ingestion import INGESTION_VERSION
 from . import otlp
 from .writepath import on_otlp
 
@@ -61,7 +62,7 @@ class Ingestor:
     public_key: str
     secret_key: str
     chunk_size: int = 100
-    ingestion_version: str = "4"
+    ingestion_version: str = INGESTION_VERSION
     dry_run: bool = False
     timeout: int = 30
     max_retries: int = 5

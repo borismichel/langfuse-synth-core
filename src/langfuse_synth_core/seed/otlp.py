@@ -34,6 +34,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+from .. import ingestion as _ingestion
 from ..observation_types import checked_observation_type
 from ..timegen import iso
 
@@ -43,8 +44,10 @@ from ..timegen import iso
 OTEL_TRACES_PATH = "/api/public/otel/v1/traces"
 
 #: Selects the v4 ingestion path so directly-ingested OTEL data is visible in real time
-#: rather than delayed by up to ten minutes.
-INGESTION_VERSION_HEADER = "x-langfuse-ingestion-version"
+#: rather than delayed by up to fifteen minutes. Defined one level up (`..ingestion`) and
+#: re-exported here: the live-emission seam sends the same header and may not import the
+#: Spool, so the constant cannot live on either side of the determinism line (#211).
+INGESTION_VERSION_HEADER = _ingestion.INGESTION_VERSION_HEADER
 
 # -- attribute keys (Langfuse's documented OTEL mapping) ---------------------
 TRACE_NAME = "langfuse.trace.name"

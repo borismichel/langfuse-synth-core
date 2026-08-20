@@ -181,3 +181,38 @@ def test_a_failing_submission_still_flushes_what_it_emitted(emitter, client):
             raise RuntimeError("the model refused")
 
     assert client.flushes == 1
+
+
+def test_the_sdk_client_is_built_with_the_real_time_ingestion_header(monkeypatch):
+    """Without `x-langfuse-ingestion-version: 4` a v4 target takes the slow ingestion path
+    and the trace is not readable for up to fifteen minutes (portal #205). A live surface
+    hands its user a deep link the moment it answers, so the header is not an optimisation
+    here — it is the difference between that link showing a trace and showing nothing."""
+    from langfuse_synth_core import ingestion
+
+    built = {}
+
+    class _SDK:
+        def __init__(self, **kw):
+            built.update(kw)
+
+    monkeypatch.setitem(__import__("sys").modules, "langfuse",
+                        type("m", (), {"Langfuse": _SDK, "propagate_attributes": None}))
+
+    emitter = emit.LiveEmitter("https://cloud.langfuse.com", public_key="pk", secret_key="sk")
+    assert emitter.client is not None
+
+    assert built["additional_headers"] == {
+        ingestion.INGESTION_VERSION_HEADER: ingestion.INGESTION_VERSION}
+    assert built["host"] == "https://cloud.langfuse.com"
+
+
+def test_both_write_paths_send_the_same_ingestion_version(monkeypatch):
+    """The Spool's exporter and the live seam's SDK client are on opposite sides of the
+    determinism line and may not import one another, so the constant they share sits above
+    both. This is the test that keeps the two from drifting."""
+    from langfuse_synth_core import ingestion
+    from langfuse_synth_core.seed import ingest, otlp
+
+    assert otlp.INGESTION_VERSION_HEADER == ingestion.INGESTION_VERSION_HEADER
+    assert ingest.Ingestor("http://x", "pk", "sk").ingestion_version == ingestion.INGESTION_VERSION

@@ -96,13 +96,30 @@ v4, so the seam groups observations by trace id; ask `reader.trace(id)` for one 
 complete set. Counting a *whole project* is a different problem with a different answer —
 the Metrics API — and it belongs to the portal (#205), which is metered for it.
 
+### Which host is this, anyway — `langfuse_synth_core.target`
+
+`TargetProfile.detect(url)` answers the free question (is this Cloud? then space the
+one-at-a-time REST calls out) without a request. `.resolved()` answers the paid one by
+asking the target through the seam's probe, and hands back a profile that knows its
+generation — `is_v4`, and a `label` that says so in the `verify` log. The host name cannot
+answer it: Cloud cuts over on 2026-11-16 and a self-hosted target whenever its operator
+upgrades. `profile.reader()` then builds a reader that inherits both, so nothing probes
+twice.
+
 ### Retired
 
 `lfread.scores_path()` — it probed `/api/public/v2/scores` and fell back to
 `/api/public/scores`. v4 `404`s both, so the question no longer has a right answer.
-`lfread.get_all_scores()` survives as a **compatibility front** that renders the seam's rows
-back into the legacy dict shape, so a kit that has not been rewired yet keeps working —
-including against a cut-over project. It retires with its last caller (#211).
+
+`lfread.get_all_scores()` — the **compatibility front** that rendered the seam's rows back
+into the legacy `value` / `stringValue` / `traceId` dict shape, so a kit that had not been
+rewired kept working on either generation. All three kits read `reader.scores(...)` as of
+#211, so it retired with its last caller in **core v3.0.0**, and the legacy row shape —
+including a categorical score reporting `value: 0` beside its label — is gone from the
+codebase. Read a label with `Score.string_value`.
+
+What is left in `lfread` is auth, one authenticated GET, and timestamp parsing: the way to
+read the endpoints the migration left alone without losing the Retry-After-aware backoff.
 
 ---
 
@@ -141,6 +158,13 @@ emitter.score("user_disagreement", 1, trace_id=trace.id, data_type="BOOLEAN")
 * **Flush is delivery, not readability.** The block flushes on exit so the trace is on its
   way before the surface answers its user; Langfuse's ingestion is asynchronous, so an
   immediate read-back may still miss it.
+* **It sends the real-time ingestion header.** `x-langfuse-ingestion-version: 4`, on the
+  SDK client's OTLP exporter — the same header the Spool's writer sends. Without it a v4
+  target processes the spans on the slow path and the trace is unreadable for up to fifteen
+  minutes, which for a surface that answers with a deep link means answering with a link to
+  nothing. The constant lives in `langfuse_synth_core.ingestion`, above the determinism
+  line, because both writers send it and neither may import the other. Reaching the
+  exporter through `additional_headers` is why the SDK floor is a deliberate pin.
 
 ### The determinism line
 

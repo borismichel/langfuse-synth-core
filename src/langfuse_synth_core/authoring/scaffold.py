@@ -9,7 +9,7 @@ File floor of the emitted kit:
 
 * a schema-valid ``usecase.yaml`` (incl. the canonical ``config_schema.generation.target_traces``
   knob, injected via :func:`langfuse_synth_core.authoring.knob.inject_target_traces`);
-* ``seed`` + ``verify`` wired **through the library** (`Ingestor` write / `lfread` read);
+* ``seed`` + ``verify`` wired **through the library** (`Ingestor` write / the read seam);
 * the ``target_traces`` derivation hook pre-wired to the trivial identity derivation;
 * a ``render: markdown`` Presenter Runbook stub;
 * a ``tests/test_retargeting.py`` gate proving the kit honors ``LANGFUSE_BASE_URL`` — the env
@@ -56,11 +56,12 @@ from langfuse_synth_core.authoring.knob import inject_target_traces
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # The oldest core release an emitted kit can install against. The templates use core APIs
-# that arrived with the v4 OTLP write path (portal #206, released by #209), so a kit pinned
-# below this does not import its own `seed` module. Unlike DEFAULT_CORE_REF this moves only
+# that arrived with the v4 read seam and shared target detection (portal #208/#211, released
+# by v3.0.0), so a kit pinned below this does not import its own `verify` module. Unlike
+# DEFAULT_CORE_REF this moves only
 # when the scaffold starts using a newer core feature — `tests/test_scaffold_image.py` reads
 # it to tell "the emitted kit needs a core nobody has published yet" from a real failure.
-MIN_CORE_REF = "v2.0.0"
+MIN_CORE_REF = "v3.0.0"
 
 # The default lib pin the emitted kit references (a TAG, never a branch — see
 # RELEASING.md) — both the runtime dependency AND the `publish.yml` -> `kit-publish.yml`
@@ -68,7 +69,7 @@ MIN_CORE_REF = "v2.0.0"
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
 # `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call, and
 # must be >= MIN_CORE_REF or the emitted kit cannot run at all.
-DEFAULT_CORE_REF = "v2.1.0"
+DEFAULT_CORE_REF = "v3.0.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted

@@ -53,6 +53,7 @@ import os
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Sequence
 
+from ..ingestion import INGESTION_VERSION, INGESTION_VERSION_HEADER
 from ..observation_types import checked_observation_type
 
 
@@ -87,12 +88,22 @@ class LiveEmitter:
     # -- the SDK, imported lazily so a bare runtime install still imports this module --
     @property
     def client(self) -> Any:
-        """The Langfuse SDK client, constructed once per emitter."""
+        """The Langfuse SDK client, constructed once per emitter.
+
+        Built with the **real-time ingestion header** the Spool's writer already sends
+        (``x-langfuse-ingestion-version: 4``). Without it a v4 target processes exported
+        spans on the slow path — up to 15 minutes before they are readable (portal #205) —
+        and a live surface whose whole promise is "your submission is in Langfuse *now*"
+        would be answering a link to an empty trace. ``additional_headers`` is wired into
+        the SDK's default OTLP exporter, which is why the SDK floor is pinned rather than
+        resolved (``pyproject.toml``).
+        """
         if self._client is None:
             from langfuse import Langfuse
 
-            self._client = Langfuse(host=self.base_url, public_key=self.public_key,
-                                    secret_key=self.secret_key)
+            self._client = Langfuse(
+                host=self.base_url, public_key=self.public_key, secret_key=self.secret_key,
+                additional_headers={INGESTION_VERSION_HEADER: INGESTION_VERSION})
         return self._client
 
     @property
