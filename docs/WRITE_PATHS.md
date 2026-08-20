@@ -72,10 +72,12 @@ live one through the SDK's `as_type`. The table above is what the rule was measu
 
 ## What flipping a kit costs
 
-The OTLP path mints one root observation per trace, so `count_spool`'s `observations` term —
-and a deployment's measured billable volume — rises by the trace count. The *shape* of the
-count is unchanged, so the plan-time estimate, the cap gate and the over-cap halt need no
-code change; their numbers move on the commit that flips a kit.
+The OTLP path mints one root observation per trace, so `count_spool`'s `observations` term
+rises by the trace count. A deployment's measured billable volume does **not** move (portal
+#220): under v4 a trace is a view over its minted root — not a separately ingested object —
+so `count_spool` still reports the derived trace term in the breakdown but excludes it from
+the billable `total` it returns. The same demo measures the same total on both paths, and
+the plan-time estimate, the cap gate and the over-cap halt need no code change.
 
 Each kit also re-blesses its golden exactly once, and the diff is reviewed as data.
 

@@ -229,8 +229,13 @@ always points at it. Mount mode is the whole access-control story:
 
 The Spool's billable volume is **measured, not trusted**: the portal counts the actual
 bytes on the volume (`langfuse_synth_core.seed.count.count_spool`) before `import-spool`
-may upload them. `count_spool` returns the same shape on both write paths, so the plan-time
-estimate, the cap gate and the over-cap halt are unaffected by which path a kit is on.
+may upload them. `count_spool` returns the same shape on both write paths — the metered
+dimensions plus the billable `total` — so the plan-time estimate, the cap gate and the
+over-cap halt are unaffected by which path a kit is on. The `total` is the count's to
+define, not the reader's to sum (portal #220): under v4 a trace is a view over its minted
+root observation, not a separately ingested object, so on the OTLP path the derived trace
+term is reported in the breakdown but not added to `total`. The same demo measures the
+same billable total before and after its cutover.
 
 **Replay is re-runnable only on the batch write path** (portal #206). Batch ingestion
 upserts on a deterministic id, so re-running `import-spool` over a partly uploaded Spool is
