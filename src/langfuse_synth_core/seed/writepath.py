@@ -20,10 +20,11 @@ kit sets nothing, which is how the golden subprocess, the conformance suite and 
 select a path without touching kit code.
 
 **What flipping costs.** The OTLP path mints a root span per trace (there is no trace entity
-under v4), so ``count_spool``'s ``observations`` term — and therefore a deployment's
-measured billable volume — rises by one per trace. The *shape* of the count is unchanged, so
-the plan-time estimate, the cap gate and the over-cap halt need no code change; their
-numbers move on the commit that flips a kit.
+under v4), so ``count_spool``'s ``observations`` term rises by one per trace. The billable
+``total`` does NOT move (portal #220): under v4 a trace is a view over its minted root, not
+a separately ingested object, so ``count_spool`` reports the derived trace term without
+adding it to ``total``. The same demo measures the same billable volume on both paths, and
+the plan-time estimate, the cap gate and the over-cap halt need no code change.
 """
 
 from __future__ import annotations

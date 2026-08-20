@@ -93,8 +93,8 @@ def test_advisory_never_binds_the_measured_count(tmp_path: Path):
                      encoding="utf-8")
 
     measured = count_spool(spool)
-    measured_total = sum(measured.values())
-    assert measured == {"traces": 2, "observations": 2, "scores": 2}
+    measured_total = measured["total"]
+    assert measured == {"traces": 2, "observations": 2, "scores": 2, "total": 6}
 
     # A deliberately absurd advisory: the estimate is off by orders of magnitude...
     absurd = advisory_estimate(target_traces=2, units_per_trace=1_000)

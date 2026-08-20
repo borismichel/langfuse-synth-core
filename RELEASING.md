@@ -62,6 +62,14 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
+- **`count_spool` reports the billable `total` beside the dimensions** (portal #220): on
+  an OTLP Spool the derived trace term stays in the breakdown but out of the total (a
+  v4 trace is a view over its minted root, already inside `observations`), so the total
+  is invariant across a kit's cutover. The portal binds a reported total and falls back
+  to the three-term sum only when it is absent — which is why **a kit must not flip to
+  OTLP while pinned at a core ≤ v2.0.0**: those write OTLP but count without a total,
+  and the portal would double-count. The #210 cutover release must carry this entry so
+  the first kit to flip measures honestly.
 - **`RICH_OBSERVATION_TYPES` is now on by default** (portal #210 addendum): a typed
   observation ships its real type on the wire — `langfuse.observation.type` on the OTLP
   path, an `observation-create` envelope on batch — instead of degrading into
