@@ -165,3 +165,37 @@ def test_the_same_trace_id_across_many_spans_counts_once(tmp_path: Path):
             for n in range(5)
         ])
     assert count_spool(spool) == {"traces": 1, "observations": 5, "scores": 0}
+
+
+@pytest.mark.parametrize("path_name", ["batch", "otlp"])
+def test_rich_observation_types_move_no_counts(tmp_path: Path, path_name, monkeypatch):
+    """The #210 addendum's measured fact, locked as a regression: flipping
+    ``RICH_OBSERVATION_TYPES`` changes the wire kind of a typed observation and nothing
+    about the tally, on either write path. ``observation-create`` was already in the
+    observation whitelist for exactly this moment."""
+    from langfuse_synth_core.seed import writepath
+    from langfuse_synth_core.seed import events as events_mod
+
+    ts = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
+    tid = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
+
+    def story() -> list[dict]:
+        return [
+            trace_event(trace_id=tid, timestamp=ts, name="decision"),
+            events_mod.observation_event(
+                obs_id="aaaa1111bbbb2222", trace_id=tid, name="agent",
+                obs_type="AGENT", start=ts, end=ts,
+            ),
+            generation_event(obs_id="cccc3333dddd4444", trace_id=tid, name="llm",
+                             start=ts, end=ts, model="m", usage_details={},
+                             cost_details={}),
+            score_event(score_id="s1", name="quality", value=1,
+                        data_type="NUMERIC", timestamp=ts, trace_id=tid),
+        ]
+
+    with writepath.use_spool_write_path(path_name):
+        rich = count_spool(_otlp_spool(tmp_path / "rich", story()))
+        monkeypatch.setattr(events_mod, "RICH_OBSERVATION_TYPES", False)
+        degraded = count_spool(_otlp_spool(tmp_path / "degraded", story()))
+
+    assert rich == degraded

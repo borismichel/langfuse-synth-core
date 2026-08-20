@@ -62,7 +62,15 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- Nothing pending. `v2.0.0` (Spec H — portal #204/#209: the OTLP write path #206, the
+- **`RICH_OBSERVATION_TYPES` is now on by default** (portal #210 addendum): a typed
+  observation ships its real type on the wire — `langfuse.observation.type` on the OTLP
+  path, an `observation-create` envelope on batch — instead of degrading into
+  `metadata.observation_type`. Measured to move no counts on either path. Any kit that
+  takes this release re-blesses its Spool golden; #210's cutover PRs do exactly that,
+  together with each kit's `set_spool_write_path(OTLP)` flip. A kit still writing a
+  *batch* Spool must not take this release without flipping to OTLP too — legacy
+  ingestion servers 400 on typed observation bodies.
+- `v2.0.0` (Spec H — portal #204/#209: the OTLP write path #206, the
   v4-native authoring surface #207, the read + live-emission seams #208, and the
   observation-type vocabulary guard #217) shipped everything that was queued here. What
   makes it a major: the Spool *format* under `SYNTH_SPOOL_WRITE_PATH=otlp` is new (see
