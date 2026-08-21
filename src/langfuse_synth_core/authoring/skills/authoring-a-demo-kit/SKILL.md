@@ -62,7 +62,7 @@ the story and re-bless.
 synth-authoring new my-kit --dir ../kits          # kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion            # also emit the companion stub (Spec G)
 synth-authoring new my-kit --anchors              # also emit per-run anchors wiring (#199)
-synth-authoring new my-kit --core-ref v4.0.0       # lib git tag the kit pins to
+synth-authoring new my-kit --core-ref v4.1.0       # lib git tag the kit pins to
 ```
 
 This emits a **runnable-green walking skeleton**, not a blank template: the plumbing
@@ -162,8 +162,13 @@ must derive from the seeded RNG (`langfuse_synth_core.rng.Rng`), never from a wa
 
 - Draw all randomness from `rng.sub("namespace", i)` substreams — stable, independent, and
   reproducible. Use `r.trace_id(i)` / `r.obs_id(i)` / `r.score_id(i)` for W3C-format ids.
-- Backdate from a **fixed anchor** (`RUN_DATE` in the template), never `datetime.now()`.
-  Use `langfuse_synth_core.timegen.sample_timestamps` for a realistic backdated spread.
+- Backdate from the **run anchor `synth.seed` hands in** (`run_date`: the operator's
+  `generation.as_of_date`, or now when none was set — `timegen.resolve_run_date`), never
+  from `datetime.now()` and never from a date constant in `src/`. Every date in the story is
+  an *offset* from `run_date`; the only pinned date is `AS_OF_DATE` in `tests/golden_seed.py`,
+  where the gate owns it. A future as-of date is legitimate (the demo is next week) — do not
+  clamp or reject it. Use `langfuse_synth_core.timegen.sample_timestamps` for a realistic
+  backdated spread.
 - The single operator volume knob flows in as `target_traces` and must pass through
   `DERIVATION_HOOK` (Phase 3) — do not read a bespoke count.
 

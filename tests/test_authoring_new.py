@@ -788,3 +788,62 @@ def test_anchors_companion_page_reads_the_state_back(anchors_kit, monkeypatch, t
     ).save()
     line = app_mod._anchors_line()
     assert "96" in line and "24" in line and "https://cloud.langfuse.com" in line
+
+
+# --- AC (portal #229): an emitted kit honours the operator's as-of date ------------------
+def _seed_spool_newest_day(kit, extra_set: list[str]):
+    """Run the emitted kit's REAL `synth seed --dry-run` in a subprocess (the runtime path,
+    `--set` and all) and return the calendar day of the newest score the Spool carries."""
+    import json
+    import os
+    import subprocess
+    import sys
+    from datetime import date
+
+    env = {**os.environ, "PYTHONPATH": str(kit.dest / "src")}
+    cmd = [sys.executable, "-m", "synth.cli", "seed", "--config", "config/demo.yaml",
+           "--dry-run", *sum((["--set", s] for s in extra_set), [])]
+    subprocess.run(cmd, cwd=kit.dest, env=env, check=True, capture_output=True, text=True)
+    spool = kit.dest / ".synth_spool" / "events.ndjson"
+    stamps = [json.loads(line)["timestamp"] for line in spool.read_text().splitlines()
+              if '"score-create"' in line]
+    assert stamps, "the emitted seed wrote no scores"
+    return date.fromisoformat(max(stamps)[:10])
+
+
+def _assert_window_ends_on(newest, as_of) -> None:
+    """`sample_timestamps` draws whole hours up to the anchor day's midnight, so the newest
+    sample lands late on the eve of the as-of date (or on it) — never after it."""
+    from datetime import timedelta
+
+    assert as_of - timedelta(days=1) <= newest <= as_of, (newest, as_of)
+
+
+def test_emitted_kit_seeds_a_window_ending_on_the_as_of_date(kit):
+    """`--set generation.as_of_date=YYYY-MM-DD` is what the portal sends on every forward
+    generate (portal #72); the window must end on that day — including a date well in the
+    future, which is by design and must not be clamped, rejected or warned about."""
+    from datetime import date
+
+    _assert_window_ends_on(_seed_spool_newest_day(kit, ["generation.as_of_date=2036-03-09"]),
+                           date(2036, 3, 9))
+
+
+def test_emitted_kit_without_an_as_of_date_seeds_up_to_now(kit):
+    from datetime import date
+
+    _assert_window_ends_on(_seed_spool_newest_day(kit, []), date.today())
+
+
+def test_emitted_kit_pins_the_as_of_date_in_the_gate_not_in_src(kit):
+    """Determinism belongs to the gate: the only pinned date is the golden adapter's, and
+    nothing under `src/` carries a date constant (portal #229 — Support's frozen anchor)."""
+    import re
+
+    adapter = (kit.dest / "tests" / "golden_seed.py").read_text()
+    assert 'AS_OF_DATE = "' in adapter and "generation.as_of_date=" in adapter
+    for path in (kit.dest / "src").rglob("*.py"):
+        body = "\n".join(line for line in path.read_text().splitlines()
+                         if not line.lstrip().startswith("#"))
+        assert not re.search(r"datetime\(\s*20\d\d\s*,", body), path
+        assert "RUN_DATE" not in body, path

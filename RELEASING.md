@@ -62,6 +62,24 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
+- **`v4.1.0` — the as-of date reaches the kits (portal #229).** The portal has sent
+  `--set generation.as_of_date=YYYY-MM-DD` on every forward generate since #72, and every
+  kit dropped it at its config model. Minor, additive:
+
+  - **`timegen.resolve_run_date(as_of)` / `timegen.parse_as_of_date(value)`** — the one
+    resolution every kit's seed goes through: a date (or the ISO string the portal sends)
+    anchors at `AS_OF_ANCHOR_HOUR` (noon UTC — the hour every golden adapter already
+    pinned, so a kit that starts honouring the knob keeps its golden bytes); `None` is the
+    wall clock. A future date is by design and is never clamped.
+  - **The scaffold stops teaching the bug.** `materialize.py.tmpl` no longer carries a
+    `RUN_DATE` constant — `build_events(..., run_date=)` takes the anchor `seed.py.tmpl`
+    resolves — and `golden_seed.py.tmpl` pins `AS_OF_DATE` through the real `--set` path.
+    The authoring skill says the same. **`MIN_CORE_REF` moves to `v4.1.0`**: an emitted
+    kit imports the new helper.
+  - Kits re-pinned in the same wave: EV/Lender declare `generation.as_of_date` and route
+    `run_seed`'s default through the resolver (goldens byte-identical); Support drops its
+    frozen anchor and its `verify` derives the re-index boundary from the data it reads.
+
 - **`v4.0.0` — the contract half of expand–contract (portal #213).** The v4 migration ran
   as expand–contract: core learned every v4 wire *beside* the one it replaced, kits cut over
   one at a time, and this release deletes what they cut over from. It is **major** because

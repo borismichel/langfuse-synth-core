@@ -5,9 +5,12 @@ Builds the Spool's wire objects through the shared library's event builders
 The builders keep one Python API across both write paths — core turns these calls into
 OTLP spans for the v4 transport this kit writes (`synth.seed`), so nothing here changes
 with the wire.
-No model calls, no network — so the seed passes the determinism golden gate under the
-deny-LLM egress block. The single operator volume knob `generation.target_traces` flows
-through the kit's `DERIVATION_HOOK` (identity by default) at seed time.
+No model calls, no network, no wall clock — so the seed passes the determinism golden
+gate under the deny-LLM egress block. The single operator volume knob
+`generation.target_traces` flows through the kit's `DERIVATION_HOOK` (identity by default)
+at seed time, and the run anchor `run_date` is handed in by `synth.seed` (the operator's
+as-of date, or now when none was set) — never read here, so the same inputs yield the
+same bytes on any day.
 
 This is the one place generation lives: the runtime `synth seed` spools these events
 through the library's `Ingestor`, and the golden-gate adapter (`tests/golden_seed.py`)
@@ -17,7 +20,7 @@ and the story here; keep it deterministic.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from langfuse_synth_core.rng import Rng
@@ -26,25 +29,28 @@ from langfuse_synth_core.timegen import sample_timestamps
 
 from .config import DERIVATION_HOOK
 
-# Fixed anchor so backdated timestamps are reproducible run-to-run (the gate materializes
-# in a subprocess and may read no wall clock). Grow the window/story as the kit does.
-RUN_DATE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+# The backdated window ends at `run_date` and reaches this many days back. Grow the
+# window/story as the kit does — but keep every date an OFFSET from `run_date`, never a
+# constant: the anchor belongs to the operator (portal #229), and the determinism gate pins
+# it in `tests/golden_seed.py`, not here.
 WINDOW_DAYS = 14
 _TASKS = ("chat", "search", "summarize", "classify")
 
 
-def build_events(target_traces: int, params: Mapping[str, Any]) -> list[dict]:
+def build_events(
+    target_traces: int, params: Mapping[str, Any], *, run_date: datetime
+) -> list[dict]:
     """Materialize the full pre-upload Spool stream, deterministically.
 
     The canonical volume knob flows through `DERIVATION_HOOK` to the kit's internal count;
-    every id, timestamp, and value derives from the seeded `Rng`, so the same inputs yield
-    a byte-identical Spool every run (params-inclusive).
+    every id, timestamp, and value derives from the seeded `Rng` and the `run_date` anchor,
+    so the same inputs yield a byte-identical Spool every run (params-inclusive).
     """
     internal = DERIVATION_HOOK(target_traces, params)
     count = int(internal["target_traces"])
     seed = int(params.get("seed", 42))
     rng = Rng(seed)
-    timestamps = sample_timestamps(rng.sub("timestamps"), RUN_DATE, WINDOW_DAYS, count)
+    timestamps = sample_timestamps(rng.sub("timestamps"), run_date, WINDOW_DAYS, count)
 
     events: list[dict] = []
     for i, ts in enumerate(timestamps):

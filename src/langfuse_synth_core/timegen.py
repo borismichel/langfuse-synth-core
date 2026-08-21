@@ -22,7 +22,8 @@ different curve needs a different algorithm; that would be speculative generalit
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from .rng import Rng
 
@@ -52,9 +53,67 @@ def now_utc() -> datetime:
     """The single wall-clock read in the whole program — the run anchor.
 
     Captured once at the start of a command and threaded through as ``run_date`` so the
-    rest of the seed path stays deterministic.
+    rest of the seed path stays deterministic. Prefer :func:`resolve_run_date`, which reads
+    the clock only when no as-of date was given.
     """
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+# The time of day an as-of *date* anchors at. Noon keeps the newest seeded data "this
+# morning" for a demo held on that day, and it is the hour every kit's golden adapter has
+# pinned since Spec A — so a kit that starts honouring the knob keeps its golden bytes.
+AS_OF_ANCHOR_HOUR = 12
+
+
+def parse_as_of_date(value: Any) -> date | None:
+    """Normalise a config ``generation.as_of_date`` value to a ``date`` (or ``None``).
+
+    The portal sends ``--set generation.as_of_date=YYYY-MM-DD`` (portal #72); the shared
+    loader's YAML coercion turns that into a ``datetime.date``, a kit that keeps the raw
+    string sees ``"YYYY-MM-DD"``, and a YAML file could carry a full timestamp. All three
+    land here. ``None``/empty means "no tether set" — the CLI path and the no-tether portal
+    path both omit the key, and both must keep working.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"generation.as_of_date must be an ISO date (YYYY-MM-DD), got {value!r}"
+            ) from exc
+    raise ValueError(f"generation.as_of_date must be an ISO date (YYYY-MM-DD), got {value!r}")
+
+
+def resolve_run_date(as_of: Any) -> datetime:
+    """The run anchor for a seed: the operator's as-of date, or the wall clock when absent.
+
+    This is the third leg of the determinism law the portal documents — ``seed +
+    target_traces + as-of → byte-identical Spool`` (portal #229). Every kit resolves its
+    ``run_date`` through here so the same three inputs give the same anchor on any day:
+
+    * ``None`` → :func:`now_utc` (the only clock read);
+    * a ``date`` or ISO ``"YYYY-MM-DD"`` string → that day at :data:`AS_OF_ANCHOR_HOUR` UTC;
+    * a ``datetime`` → as given, normalised to UTC (naive is taken as UTC).
+
+    A future as-of date is **by design** — an AE tethers next week's demo to the meeting —
+    so nothing here clamps, warns or rejects; the seeded window simply ends on that date.
+    The portal already validates the field future-only; a kit must not second-guess it.
+    """
+    if as_of is None or as_of == "":
+        return now_utc()
+    if isinstance(as_of, datetime):
+        if as_of.tzinfo is None:
+            return as_of.replace(tzinfo=timezone.utc)
+        return as_of.astimezone(timezone.utc)
+    day = parse_as_of_date(as_of)
+    assert day is not None
+    return datetime(day.year, day.month, day.day, AS_OF_ANCHOR_HOUR, 0, 0, tzinfo=timezone.utc)
 
 
 def hour_weight(dt: datetime) -> float:
