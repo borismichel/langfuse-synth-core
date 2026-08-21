@@ -83,17 +83,17 @@ def test_resolve_run_date_accepts_the_iso_string_the_portal_sends():
     assert timegen.resolve_run_date("2026-09-04") == timegen.resolve_run_date(date(2026, 9, 4))
 
 
-def test_resolve_run_date_keeps_an_explicit_datetime_in_utc():
-    naive = datetime(2026, 9, 4, 8, 30, 0)
-    assert timegen.resolve_run_date(naive) == datetime(2026, 9, 4, 8, 30, 0, tzinfo=timezone.utc)
-    cest = datetime(2026, 9, 4, 10, 30, 0, tzinfo=timezone(timedelta(hours=2)))
-    assert timegen.resolve_run_date(cest) == datetime(2026, 9, 4, 8, 30, 0, tzinfo=timezone.utc)
+def test_resolve_run_date_anchors_a_yaml_timestamp_on_its_day():
+    # A config file could carry a full timestamp; the anchor is the DAY at the fixed hour,
+    # the same as the portal's date string — one entry point, one answer.
+    at_eight = datetime(2026, 9, 4, 8, 30, 0, tzinfo=timezone.utc)
+    assert timegen.resolve_run_date(at_eight) == timegen.resolve_run_date(date(2026, 9, 4))
 
 
 def test_resolve_run_date_never_clamps_a_future_date():
     """A future as-of date is by design (an AE tethers next week's demo); the window simply
     ends on it. No error, no warning, no clamp to today."""
-    far = date.today() + timedelta(days=3650)
+    far = datetime.now(timezone.utc).date() + timedelta(days=3650)
     assert timegen.resolve_run_date(far).date() == far
 
 

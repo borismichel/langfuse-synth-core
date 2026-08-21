@@ -830,9 +830,9 @@ def test_emitted_kit_seeds_a_window_ending_on_the_as_of_date(kit):
 
 
 def test_emitted_kit_without_an_as_of_date_seeds_up_to_now(kit):
-    from datetime import date
+    from datetime import datetime, timezone
 
-    _assert_window_ends_on(_seed_spool_newest_day(kit, []), date.today())
+    _assert_window_ends_on(_seed_spool_newest_day(kit, []), datetime.now(timezone.utc).date())
 
 
 def test_emitted_kit_pins_the_as_of_date_in_the_gate_not_in_src(kit):

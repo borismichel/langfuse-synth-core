@@ -98,21 +98,16 @@ def resolve_run_date(as_of: Any) -> datetime:
     ``run_date`` through here so the same three inputs give the same anchor on any day:
 
     * ``None`` → :func:`now_utc` (the only clock read);
-    * a ``date`` or ISO ``"YYYY-MM-DD"`` string → that day at :data:`AS_OF_ANCHOR_HOUR` UTC;
-    * a ``datetime`` → as given, normalised to UTC (naive is taken as UTC).
+    * anything :func:`parse_as_of_date` accepts (a ``date``, the ISO ``"YYYY-MM-DD"`` string
+      the portal sends, a YAML timestamp) → that day at :data:`AS_OF_ANCHOR_HOUR` UTC.
 
     A future as-of date is **by design** — an AE tethers next week's demo to the meeting —
     so nothing here clamps, warns or rejects; the seeded window simply ends on that date.
     The portal already validates the field future-only; a kit must not second-guess it.
     """
-    if as_of is None or as_of == "":
-        return now_utc()
-    if isinstance(as_of, datetime):
-        if as_of.tzinfo is None:
-            return as_of.replace(tzinfo=timezone.utc)
-        return as_of.astimezone(timezone.utc)
     day = parse_as_of_date(as_of)
-    assert day is not None
+    if day is None:
+        return now_utc()
     return datetime(day.year, day.month, day.day, AS_OF_ANCHOR_HOUR, 0, 0, tzinfo=timezone.utc)
 
 

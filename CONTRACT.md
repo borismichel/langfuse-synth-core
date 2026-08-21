@@ -135,6 +135,18 @@ portal-side mapping table — the zero-code invariant), values YAML-coerced by t
 loader (`800`→int, `true`→bool, `1.5`→float; booleans are emitted lowercased). Kits get
 this for free from `langfuse_synth_core.config.load_config`.
 
+One key rides the same channel **without** appearing in any `config_schema`: the portal
+appends `--set generation.as_of_date=YYYY-MM-DD` to every forward generate whose
+deployment carries an as-of date (portal #72), and a kit **must honour it** (portal #229).
+Declare it on the generation config, resolve the run anchor through
+`langfuse_synth_core.timegen.resolve_run_date` (the date at noon UTC; absent → the wall
+clock, which is the CLI path and the no-tether portal path), and end the seeded window
+there. A future date is by design — the portal validates the field future-only — so a kit
+never clamps, warns on, or rejects it. Pin the date only in the dev-side golden adapter
+(`tests/golden_seed.py`), never as a constant in `src/`: `seed + target_traces + as-of →
+byte-identical Spool` is the determinism law, and a kit whose loader drops the key makes
+its third term a lie silently (unknown keys fall off a config model without error).
+
 The **companion invocation** is its own fixed shape:
 `synth companion --config {config} --host 0.0.0.0 --port <port>` (verb name is
 kit-chosen; EV/Lender use `playground`). The adapter's `parse_invocation` accepts exactly
