@@ -28,10 +28,11 @@ the build on every release PR (found cutting v1.7.0). Resolving the newest publi
 installable core.
 
 That substitution only works while the scaffold still runs on the previous release. When
-the templates start using a core API no published release carries — the v4 read seam,
-Spec H portal #206/#207 — there is no installable core to build against and the module
-**skips**, naming ``MIN_CORE_REF``. It returns by itself the moment that tag is published;
-a red build here would say "the emitted Dockerfile is broken", which would not be true.
+the templates start using a core API no published release carries (the v4 read seam,
+Spec H portal #206/#207; the as-of resolver, portal #229) — there is no installable core
+to build against and the module **skips**, naming ``MIN_CORE_REF``. It returns by itself
+the moment that tag is published; a red build here would say "the emitted Dockerfile is
+broken", which would not be true.
 """
 
 from __future__ import annotations
@@ -117,9 +118,9 @@ def image(tmp_path_factory):
     core_ref = _latest_released_core_ref()
     if _version(core_ref) < _version(MIN_CORE_REF):
         pytest.skip(
-            f"the scaffold emits a kit that needs core >= {MIN_CORE_REF} (the v4 read "
-            f"seam); the newest published tag is {core_ref}, so there is nothing "
-            f"installable to build against yet — the gate returns when that tag lands"
+            f"the scaffold emits a kit that needs core >= {MIN_CORE_REF} (a core API no "
+            f"published release carries); the newest published tag is {core_ref}, so there "
+            f"is nothing installable to build against yet — the gate returns when that tag lands"
         )
 
     dest = tmp_path_factory.mktemp("kits") / "image-gate"

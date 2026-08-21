@@ -61,7 +61,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 # takes them. Unlike DEFAULT_CORE_REF this moves only when the scaffold starts using a newer
 # core feature — `tests/test_scaffold_image.py` reads it to tell "the emitted kit needs a
 # core nobody has published yet" from a real failure.
-MIN_CORE_REF = "v4.0.0"
+MIN_CORE_REF = "v4.1.0"
 
 # The default lib pin the emitted kit references (a TAG, never a branch — see
 # RELEASING.md) — both the runtime dependency AND the `publish.yml` -> `kit-publish.yml`
@@ -69,7 +69,7 @@ MIN_CORE_REF = "v4.0.0"
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
 # `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call, and
 # must be >= MIN_CORE_REF or the emitted kit cannot run at all.
-DEFAULT_CORE_REF = "v4.0.0"
+DEFAULT_CORE_REF = "v4.1.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted
