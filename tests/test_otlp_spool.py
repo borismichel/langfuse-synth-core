@@ -13,21 +13,13 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 
-from langfuse_synth_core.seed import writepath
 from langfuse_synth_core.seed.events import generation_event, score_event, span_event, trace_event
 from langfuse_synth_core.seed.ingest import Ingestor
 from langfuse_synth_core.seed.otlp import trace_root_span_id
 
 TS = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
 TID = "5b8aa1cfd0e34f7a9c2b6d15e0473f88"
-
-
-@pytest.fixture(autouse=True)
-def _on_otlp():
-    with writepath.use_spool_write_path(writepath.OTLP):
-        yield
 
 
 def _trace_events(tid: str = TID) -> list[dict]:
@@ -116,45 +108,19 @@ def test_finalisation_is_a_pure_function_of_the_lines(tmp_path: Path):
     assert a == b
 
 
-def test_the_batch_path_spool_is_written_untouched(tmp_path: Path):
-    with writepath.use_spool_write_path(writepath.BATCH):
-        lines = _spool(tmp_path, _trace_events())
-    assert [line["type"] for line in lines] == [
-        "trace-create", "span-create", "generation-create"]
+def test_a_spool_carrying_no_span_is_never_rewritten(tmp_path: Path):
+    """Finalisation is driven by what was written, not by an assumption. A Spool of nothing
+    but score envelopes has no trace shell to apply and no re-parenting to do, so closing it
+    must not re-serialise a single line."""
+    from langfuse_synth_core.seed.events import score_event
 
-
-def test_a_spool_is_finalised_by_what_it_holds_not_by_the_ambient_flag(tmp_path: Path):
-    """``import_spool`` routes by the content of the Spool so a Spool always imports the way
-    it was written; finalisation follows the same rule. A Spool written on OTLP and closed
-    after the pin cleared would otherwise ship un-finalised — no trace attributes copied, no
-    re-parenting, a zero-duration root — and silently, which is the worst kind."""
+    events = [score_event(score_id="a1b2c3d4e5f60718", name="q", value=1,
+                          data_type="NUMERIC", timestamp=TS, trace_id=TID)]
     ing = Ingestor(base_url="http://x", public_key="p", secret_key="s",
                    spool_path=tmp_path / "events.ndjson")
     ing.open_spool()
-    ing.extend(_trace_events())
-    writepath.set_spool_write_path(writepath.BATCH)   # the pin moves mid-run
-    try:
-        ing.close_spool()
-    finally:
-        writepath.set_spool_write_path(writepath.OTLP)
-
-    lines = [json.loads(line) for line in
-             (tmp_path / "events.ndjson").read_text(encoding="utf-8").splitlines()]
-    assert all(_attrs(s)["langfuse.user.id"] == {"stringValue": "u-7"} for s in lines)
-    root = next(s for s in lines if s["spanId"] == trace_root_span_id(TID))
-    assert int(root["endTimeUnixNano"]) > int(root["startTimeUnixNano"])
-
-
-def test_a_batch_spools_bytes_are_never_rewritten(tmp_path: Path):
-    """The flag-off Spool is the blessed golden of three live kits, so closing it must not
-    re-serialise a single line."""
-    with writepath.use_spool_write_path(writepath.BATCH):
-        events = _trace_events()
-        ing = Ingestor(base_url="http://x", public_key="p", secret_key="s",
-                       spool_path=tmp_path / "events.ndjson")
-        ing.open_spool()
-        ing.extend(events)
-        ing.close_spool()
+    ing.extend(events)
+    ing.close_spool()
     # The exact bytes `add` wrote, re-derived independently — a rewrite pass would reorder
     # keys or reformat numbers and this would catch it.
     expected = b"".join(

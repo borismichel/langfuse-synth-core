@@ -8,9 +8,15 @@ IDs use W3C Trace Context widths so they render like real OTel data:
 - trace id   : 32 lowercase hex chars (16 bytes)
 - observation: 16 lowercase hex chars (8 bytes)
 
-They are derived deterministically from ``(seed, namespace, *keys)`` via BLAKE2b,
-so re-running ``synth seed`` is idempotent: identical IDs upsert rather than
-duplicate within Langfuse's 30-day merge window (spec §2, §11).
+They are derived deterministically from ``(seed, namespace, *keys)`` via BLAKE2b, so
+re-running ``synth seed`` builds the **same Spool** — the same ids, in the same order,
+byte for byte (spec §2, §11).
+
+That is a property of the *file*, and it is the only one determinism buys. It used to buy a
+second one: identical ids upserted rather than duplicating within Langfuse's 30-day merge
+window, so a re-seed converged. **That was the batch transport's property, not this
+module's**, and it is gone with it (portal #206/#213) — OTLP appends. Re-seeding a project
+that already holds the demo tells the story twice, whatever the ids say.
 """
 from __future__ import annotations
 

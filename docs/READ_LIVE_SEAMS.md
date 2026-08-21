@@ -6,17 +6,20 @@ spec H #204):
 
 | Seam | Module | Timestamps | Transport | Golden-gated |
 | ---- | ------ | ---------- | --------- | ------------ |
-| Spool write | `seed.events` + `seed.ingest` | producer-supplied, **backdated** | raw OTLP / batch | yes |
-| **Read** | `read` | — | raw REST, v4 or deprecated | no |
+| Spool write | `seed.events` + `seed.ingest` | producer-supplied, **backdated** | raw OTLP (+ `score-create`) | yes |
+| **Read** | `read` | — | raw REST, v4 | no |
 | **Live emission** | `live.emit` | **wall clock** | Langfuse **SDK** | no, by design |
 
 ---
 
 ## The read seam — `langfuse_synth_core.read`
 
-Every kit's `verify` reads Langfuse over HTTP today, so the v3→v4 read remap would
-otherwise be done three times and drift three ways. It is done here once, and what a kit
-gets back is the same normalised row whichever API generation answered.
+Every kit's `verify` reads Langfuse over HTTP, so the v3→v4 read remap would otherwise have
+been done three times and drifted three ways. It is done here once, and what a kit gets back
+is a normalised row rather than whatever shape the endpoint of the day returns.
+
+**The seam reads v4 and only v4** (portal #213). It carried both generations through the
+migration; the table below is now a record of what moved, not a menu.
 
 ### What moved
 
@@ -34,17 +37,20 @@ Not remapped, because they were never deprecated and the seam does not model the
 `/annotation-queues`, `/health`, `/models`. Read those with `lfread.get_json` (or
 `adapter.read_json`).
 
-### Which generation answers
+### Why there is no generation to choose any more
 
-Probed, not configured: one deprecated endpoint is called once per reader, and a `404`
-means the target has cut over. `SYNTH_LANGFUSE_READ_API=legacy|v4` pins it for a test or an
-operator.
+The seam probed for one until #213: it called a deprecated endpoint once per reader and read
+a `404` as "this target has cut over". Legacy was then *preferred* while it lived, because
+the v4 read APIs serve data written without `x-langfuse-ingestion-version: 4` with a delay of
+up to 15 minutes, and a batch-written Spool was exactly that data (measured on Cloud,
+2026-08-19: legacy 21.7s, v4 still nothing at 5 minutes — portal #205).
 
-**Legacy is preferred while it lives.** The v4 read APIs serve data written by an exporter
-that does not send `x-langfuse-ingestion-version: 4` with a delay of up to 15 minutes, and
-every Spool written on the batch path is exactly that data (measured on Cloud, 2026-08-19:
-legacy 21.7s, v4 still nothing at 5 minutes — portal #205). Preferring v4 before a kit's
-write path has moved would read a demo back as half-empty.
+Both halves of that argument are gone. The Spool is written over OTLP **with** the header, so
+v4 answers it in seconds; and a deprecated call is now simply a call that stops working on
+2026-11-16. The probe went with the arm it selected — it *was* a deprecated call, so a seam
+that reads only v4 could not keep one as its way of asking which generation to use.
+`LangfuseReader.ping()` replaces it: the same reachability question, asked on
+`/v2/observations`.
 
 ### What normalisation actually undoes
 
@@ -53,17 +59,15 @@ write path has moved would read a demo back as half-empty.
   discriminated `subject` object where v2 had flat `traceId` / `observationId` /
   `sessionId` / `datasetRunId` columns. `Score` carries `numeric_value`, `string_value` and
   all four flattened subjects, so an assertion reads the same on both.
-* **Cursor pagination.** The v4 APIs answer `meta.cursor` (base64url) and **no total**; the
-  deprecated ones answer `meta.totalPages`. Both are followed to the end here.
+* **Cursor pagination.** The v4 APIs answer `meta.cursor` (base64url) and **no total**,
+  where the deprecated ones answered `meta.totalPages`. Cursors are followed to the end here;
+  a count is what you read, never a number the API hands you.
 * **Renamed observation columns.** `providedModelName` → `model`, `totalCost` →
-  `total_cost` (legacy's `calculatedTotalCost`), and the io / model / usage / prompt columns
-  are opt-in **field groups** on v4 — the seam always asks for them, so a row never comes
-  back with silent holes.
+  `total_cost`, and the io / model / usage / prompt columns are opt-in **field groups** on
+  v4 — the seam always asks for them, so a row never comes back with silent holes.
 * **The missing trace.** Under v4 a trace is the set of observations sharing an id: its
   name, user, session and tags are attributes copied onto every span, and its overall input
   and output live on the **root** observation. `reader.trace(id)` assembles that.
-* **Trace-level attributes on legacy observations.** Legacy keeps user/session/tags on the
-  trace body, so the seam pushes them down onto the observations it returns.
 
 ### Five things the live API does that its own generated types do not say
 
@@ -80,16 +84,17 @@ Each was found by running `examples/v4_seam_check.py` against a real Cloud proje
 3. **Unset string columns come back as `""`, not `null`** — `promptName`, `version`,
    `traceName`, `statusMessage`. "Is this generation prompt-linked?" must be a falsy
    *absence*, so the seam normalises empty to `None`.
-4. **A categorical score carries `value: 0` on the deprecated API**, beside its
-   `stringValue`. Read as a number it would drag any mean a kit computes toward zero, so a
-   string-typed score reports no numeric value at all.
+4. **A string-typed score reports no numeric value at all.** The deprecated API sent
+   `value: 0` beside a categorical score's `stringValue`, and reading that as a number would
+   drag any mean a kit computes toward zero. The rule outlived the endpoint that motivated
+   it and is kept as a property of `Score`.
 5. **Spans and scores become readable at different times.** They travel different paths —
-   spans over OTLP, scores as `score-create` envelopes on the legacy ingestion endpoint —
-   and on Cloud the spans were queryable ~11s after emission while the scores needed ~30s
-   more. Anything that reads back a freshly written story must wait for the *whole* story,
+   spans over OTLP, scores as `score-create` envelopes on `POST /api/public/ingestion` (the
+   supported v4 path for scores) — and on Cloud the spans were queryable ~11s after emission
+   while the scores needed ~30s more. Anything that reads back a freshly written story must wait for the *whole* story,
    not the first part of it to arrive.
 
-### One place the generations genuinely differ, and it is visible
+### One place the read model genuinely changed, and it is visible
 
 `reader.traces()` is a **sample**, not a project total. There is no trace list to page under
 v4, so the seam groups observations by trace id; ask `reader.trace(id)` for one trace's
@@ -99,12 +104,14 @@ the Metrics API — and it belongs to the portal (#205), which is metered for it
 ### Which host is this, anyway — `langfuse_synth_core.target`
 
 `TargetProfile.detect(url)` answers the free question (is this Cloud? then space the
-one-at-a-time REST calls out) without a request. `.resolved()` answers the paid one by
-asking the target through the seam's probe, and hands back a profile that knows its
-generation — `is_v4`, and a `label` that says so in the `verify` log. The host name cannot
-answer it: Cloud cuts over on 2026-11-16 and a self-hosted target whenever its operator
-upgrades. `profile.reader()` then builds a reader that inherits both, so nothing probes
-twice.
+one-at-a-time REST calls out) without a request. `.resolved()` answers the paid one — does
+this target answer at all — through `reader.ping()`, and `.try_resolve()` hands back the
+reason instead of raising, so a `verify` can report "cannot read this project, and here is
+why" on its first line rather than failing every check with the same traceback.
+
+It resolved the *read-API generation* until #213. There is one generation now, so the
+question narrowed to reachability and the `label` simply names the v4 read APIs once the
+target has answered.
 
 ### Retired
 
@@ -117,6 +124,11 @@ rewired kept working on either generation. All three kits read `reader.scores(..
 #211, so it retired with its last caller in **core v3.0.0**, and the legacy row shape —
 including a categorical score reporting `value: 0` beside its label — is gone from the
 codebase. Read a label with `Score.string_value`.
+
+**The whole deprecated read arm** — every legacy branch, its normalisers, the generation
+probe and `SYNTH_LANGFUSE_READ_API` — in **core v4.0.0** (#213). The seam is the one place a
+kit reaches Langfuse, so "no deprecated endpoint remains" is provable by reading this module:
+`tests/test_read_seam.py` asserts the module names none.
 
 What is left in `lfread` is auth, one authenticated GET, and timestamp parsing: the way to
 read the endpoints the migration left alone without losing the Retry-After-aware backoff.
@@ -157,7 +169,7 @@ emitter.score("user_disagreement", 1, trace_id=trace.id, data_type="BOOLEAN")
   environment onto everything nested inside it. Overall input and output go on the root
   observation; the deprecated trace-IO helpers are forbidden.
 * **Scores stay on their own path.** `emitter.score(...)` rides the SDK's `create_score`,
-  which posts a `score-create` envelope to the legacy ingestion endpoint — the one envelope
+  which posts a `score-create` envelope to `POST /api/public/ingestion` — the one envelope
   type that survives the cutover. Same decision as the Spool's `score_event`.
 * **Flush is delivery, not readability.** The block flushes on exit so the trace is on its
   way before the surface answers its user; Langfuse's ingestion is asynchronous, so an
@@ -182,20 +194,22 @@ proving that live traces land; it gains no golden coverage.
 ## Verified against a real project
 
 Both seams were exercised against a real Langfuse Cloud project on **2026-08-19** with
-`examples/v4_seam_check.py`. Mocked tests do not prove backend behaviour; that is why the
-check exists. What that run established:
+`examples/v4_seam_check.py`, while the seam still had two arms. Mocked tests do not prove
+backend behaviour; that is why the check exists. What that run established:
 
 - One trace emitted through the live seam — root observation, nested span, nested
   generation with model / usage / cost, a numeric trace score and a categorical
-  observation score — read back **identically on both arms**, attribute for attribute.
+  observation score — read back **identically on both arms**, attribute for attribute. That
+  equivalence is what made dropping the legacy arm a deletion rather than a change of
+  behaviour.
 - A two-item dataset with one experiment run (`SEAM_CHECK_CREATE_EXPERIMENT=1`) read back
-  through the **Experiments API** on v4 and through `/datasets/{name}/runs` on legacy: the
-  run listed and its items carrying their traces on both.
+  through the **Experiments API**: the run listed and its items carrying their traces.
 - The five wire behaviours above, each of which the seam now handles.
 
-**What it does not establish.** Cloud still dual-serves both generations, so the v4 arm was
-reached by pinning `read_api="v4"` rather than by a project that has actually cut over. The
-*resolution* step — a deprecated endpoint answering `404` and the reader switching arms by
-itself — is unit-tested, not observed on a cut-over server, and no such project exists to
-test against yet (the research notes carry the same gap). That is the one piece of this
-seam that only 2026-11-16, or a self-hosted v4 server, can prove.
+**What it does not establish.** Cloud dual-serves: it answers the deprecated endpoints as
+well as the v4 ones. So every run so far proves that the v4 endpoints return what this seam
+expects — it does not prove how a project that has genuinely cut over behaves, because no
+such project has been available to test against (the research notes carry the same gap).
+What #213 changed is that this no longer matters for correctness: the seam calls only v4
+endpoints, so a cut-over target removes nothing it uses. It still matters as evidence, and
+running against a v4-only project before 2026-11-16 would convert inference into proof.

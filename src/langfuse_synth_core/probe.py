@@ -44,7 +44,9 @@ def probe_ids(rng: Rng) -> tuple[str, str]:
 
     Salting the ids with a fresh per-run nonce writes a distinct throwaway trace every run,
     so the readback always reflects THIS run and never lands on a tombstoned id. The bulk
-    ``seed`` ids stay deterministic (idempotent upsert) — only the probe is salted.
+    ``seed`` ids stay deterministic — only the probe is salted. (Deterministic no longer
+    means re-runnable: OTLP appends, so a re-seed duplicates rather than upserting. What the
+    bulk ids buy is a byte-identical Spool — portal #213.)
     """
     nonce = secrets.token_hex(8)
     return rng.trace_id("probe", "backdate-check", nonce), rng.obs_id("probe", "marker", nonce)

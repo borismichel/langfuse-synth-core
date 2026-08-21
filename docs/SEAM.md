@@ -47,15 +47,20 @@ library read-client. The `run_verify` body (scenario assertions, golden-path) �
 split is proven assertion-identical to the pre-split `verify` against a seeded env, on
 **both** kits.
 
-**The read-client became the read seam (portal #208).** The substance now lives in
+**The read-client became the read seam (portal #208).** The substance lives in
 `langfuse_synth_core.read` — traces, observations, scores, sessions and experiments,
-normalised across the v4 and the deprecated Langfuse read APIs, because platform v4 retires
-every endpoint the kits read and its replacements are not drop-in.
-`langfuse_synth_core.lfread` keeps the two primitives that did not change (auth + a single
-authenticated GET) and one compatibility front for the un-rewired kits. The seam rule is
-unchanged and is *why* this landed in the library: speaking the Langfuse data model is the
-machine's job, and the remap would otherwise be written three times. See
-[`READ_LIVE_SEAMS.md`](READ_LIVE_SEAMS.md).
+normalised off the **v4** Langfuse read APIs, because platform v4 retired every endpoint the
+kits read and its replacements are not drop-in. `langfuse_synth_core.lfread` keeps the two
+primitives that did not change: auth, and a single authenticated GET for the endpoints the
+seam does not model. The seam rule is unchanged and is *why* this landed in the library:
+speaking the Langfuse data model is the machine's job, and the remap would otherwise have
+been written three times.
+
+The seam carried a second arm through the migration — the deprecated endpoints, and a probe
+to choose between them — plus a compatibility front in `lfread` for kits that had not been
+rewired yet. All three are gone (the front in v3.0.0, the arm and the probe in v4.0.0,
+portal #211/#213): every kit reads through the seam, so there is nothing left to be
+compatible with. See [`READ_LIVE_SEAMS.md`](READ_LIVE_SEAMS.md).
 
 ## Distribution
 

@@ -1,10 +1,14 @@
-"""The golden gate under the write-path flag (portal #206).
+"""The golden gate over the v4 write model (portal #206, #213).
 
-The golden captures are this migration's primary regression gate, so the flag has to be
-provably invisible while it is off and provably deterministic once it is on. These run the
-gate over a fixture kit that materializes its Spool through the real event builders and the
-real ``Ingestor``, in a fresh subprocess with a pinned hash seed and egress blocked — the
-same machine a kit's own golden test uses.
+The golden captures are this migration's primary regression gate, so the Spool has to be
+provably byte-deterministic on the wire the fleet actually writes. These run the gate over
+a fixture kit that materializes its Spool through the real event builders and the real
+``Ingestor``, in a fresh subprocess with a pinned hash seed and egress blocked — the same
+machine a kit's own golden test uses.
+
+There was a write-path flag here, and three of these tests measured its two sides against
+each other. #213 removed the batch path; what survives is the half that still means
+something — the Spool is deterministic, and it carries the whole story.
 """
 
 from __future__ import annotations
@@ -13,8 +17,6 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-
-from langfuse_synth_core.seed import writepath
 
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("jsonschema") is None,
@@ -31,45 +33,31 @@ def _spec(golden_path: Path):
                       params={"seed": 7}, search_paths=(FIXTURES,))
 
 
-def test_a_blessed_golden_stays_green_while_the_flag_is_off(tmp_path, monkeypatch):
+def test_the_spool_is_byte_deterministic(tmp_path):
     from langfuse_synth_core.authoring.golden import assert_golden, freeze
 
-    monkeypatch.delenv(writepath.WRITE_PATH_ENV, raising=False)
-    spec = _spec(tmp_path / "wire.golden")
-    freeze(spec)
-    assert_golden(spec)
-    assert b'"span-create"' in spec.golden_path.read_bytes()
-
-
-def test_the_otlp_spool_is_byte_deterministic_too(tmp_path, monkeypatch):
-    from langfuse_synth_core.authoring.golden import assert_golden, freeze
-
-    monkeypatch.setenv(writepath.WRITE_PATH_ENV, writepath.OTLP)
     spec = _spec(tmp_path / "wire-otlp.golden")
     freeze(spec)
     assert_golden(spec)   # a second, independent materialization is byte-identical
 
 
-def test_flipping_the_flag_is_what_moves_the_golden(tmp_path, monkeypatch):
-    """A blessed batch golden fails the gate once the kit cuts over — which is exactly why
-    #210 re-blesses one kit at a time and reviews the diff as data."""
-    from langfuse_synth_core.authoring.golden import GoldenMismatch, assert_golden, freeze
-
-    monkeypatch.delenv(writepath.WRITE_PATH_ENV, raising=False)
-    spec = _spec(tmp_path / "wire.golden")
-    freeze(spec)
-
-    monkeypatch.setenv(writepath.WRITE_PATH_ENV, writepath.OTLP)
-    with pytest.raises(GoldenMismatch):
-        assert_golden(spec)
-
-
-def test_the_otlp_spool_still_carries_the_whole_story(tmp_path, monkeypatch):
+def test_the_spool_still_carries_the_whole_story(tmp_path):
     from langfuse_synth_core.authoring.golden import materialize_spool
 
-    monkeypatch.setenv(writepath.WRITE_PATH_ENV, writepath.OTLP)
     blob = materialize_spool(_spec(tmp_path / "unused.golden"))
     assert b'"langfuse.observation.usage_details"' in blob
     assert b'"langfuse.session.id"' in blob
-    assert b'"score-create"' in blob          # scores keep the ingestion endpoint
+    assert b'"score-create"' in blob          # the supported v4 write path for scores
     assert b'"parentObservationId"' not in blob   # nesting is span context now
+
+
+def test_no_deprecated_ingestion_envelope_reaches_the_spool(tmp_path):
+    """The contract half of expand–contract, asserted on the bytes (portal #213). The
+    ingestion deprecation is per event type, so the Spool may carry `score-create` and
+    nothing else that goes to that endpoint."""
+    from langfuse_synth_core.authoring.golden import materialize_spool
+
+    blob = materialize_spool(_spec(tmp_path / "unused.golden"))
+    for retired in (b'"trace-create"', b'"span-create"', b'"generation-create"',
+                    b'"event-create"', b'"observation-create"'):
+        assert retired not in blob, retired

@@ -27,8 +27,8 @@ The eight rows of ``CompanionAdapterContract`` (#25) map onto this module as:
    seeded pool (:meth:`reader`, the read seam — with :meth:`read_json` for the raw endpoints
    it does not model) AND emit live traces (:meth:`emitter`, the wall-clock live-emission
    seam) AND the SDK surface (:meth:`langfuse`, the ``lfclient`` seam), all bound to
-   ``LANGFUSE_BASE_URL`` + the project keys (D5, story 6/24). :meth:`ingestor` is the Spool's
-   backdating write path, kept reachable only until the kits are rewired (portal #208/#211).
+   ``LANGFUSE_BASE_URL`` + the project keys (D5, story 6/24). The Spool's backdating writer
+   is deliberately NOT here — a live surface stamps *now* (portal #208/#211/#213).
 6. **LLM client** — :meth:`llm` returns a ready client via the G1 resolution module (#138);
    the adapter owns *resolution* (provider + key), the Surface owns *usage* — including,
    via :meth:`llm`'s optional ``model``, a per-request model a Surface's user picks (a
@@ -136,7 +136,6 @@ class CompanionAdapterContract(Protocol):
     def langfuse(self) -> Any: ...
     def emitter(self, **kw: Any) -> Any: ...
     def reader(self, **kw: Any) -> Any: ...
-    def ingestor(self, **kw: Any) -> Any: ...
     def read_json(self, path: str, params: dict | None = ..., *, throttle: float = ...) -> dict: ...
     def llm(self, model: str | None = ...) -> _llm.LLMClient: ...
     def readiness(self) -> ReadinessReport: ...
@@ -222,18 +221,6 @@ class CompanionAdapter:
                                                    os.environ.get("LANGFUSE_SECRET_KEY", "")),
                               **kw)
 
-    def ingestor(self, **kw: Any) -> Any:
-        """The backdated-batch **write** client, keyed to the deployment's project via env.
-        Reuses the ``seed.ingest`` seam; a fresh instance each call so a Surface can hold its
-        own spool/chunk settings.
-
-        **For live emission use :meth:`emitter` instead.** A Surface reaching for the Spool's
-        ingestor couples a wall-clock surface to backdating machinery it does not need; the
-        kits move off it in #211 and this accessor goes with the batch path in #213."""
-        from ..seed.ingest import Ingestor
-
-        return Ingestor.from_env(self.base_url, **kw)
-
     def read_json(self, path: str, params: dict | None = None, *, throttle: float = 0.0) -> dict:
         """A single authenticated **read** against the Langfuse public REST API — the read
         direction of the bidirectional client (the ``lfread`` seam). The Surface composes
@@ -284,9 +271,16 @@ class CompanionAdapter:
         return ReadinessReport(langfuse_write_ok=lf_ok, llm_bound=llm_ok, detail=detail)
 
     def _probe_langfuse_write(self) -> None:
-        """Prove the write path with an empty ingestion batch — auth + endpoint reachability,
-        zero events emitted (the seeded pool is untouched). Raises on any failure."""
-        self.ingestor().write_ping()
+        """Prove the write path with an empty OTLP export — auth + endpoint reachability,
+        zero spans emitted (the seeded pool is untouched). Raises on any failure.
+
+        The Spool's writer is constructed here rather than exposed on the Adapter. It was a
+        public accessor while a kit might still want it; a Surface emits at *now* and rides
+        :meth:`emitter`, so the only thing left that needs a Spool writer is this probe
+        (portal #211, removed with the batch path in #213)."""
+        from ..seed.ingest import Ingestor
+
+        Ingestor.from_env(self.base_url).write_ping()
 
     def _probe_llm_bound(self) -> None:
         """Prove the LLM client binds by *constructing* the provider SDK client from the

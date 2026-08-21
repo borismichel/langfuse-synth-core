@@ -62,7 +62,7 @@ the story and re-bless.
 synth-authoring new my-kit --dir ../kits          # kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion            # also emit the companion stub (Spec G)
 synth-authoring new my-kit --anchors              # also emit per-run anchors wiring (#199)
-synth-authoring new my-kit --core-ref v3.0.0       # lib git tag the kit pins to
+synth-authoring new my-kit --core-ref v4.0.0       # lib git tag the kit pins to
 ```
 
 This emits a **runnable-green walking skeleton**, not a blank template: the plumbing
@@ -75,7 +75,7 @@ file floor you now own:
 | `usecase.yaml` | The portal manifest (schema-valid, canonical `generation.target_traces` knob injected). The *only* portal surface. | Phase 4 (artifacts), as the story lands |
 | `src/synth/materialize.py` | **Deterministic, model-free generation** — the trace tree. | **Phase 2** |
 | `src/synth/config.py` | Config model + the `DERIVATION_HOOK` (identity by default). | **Phase 3** |
-| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library; `seed.py` pins the kit's **OTLP write path** and `verify.py` reads through the **read seam** (whichever generation the target serves). | Rarely — grow verbs here + in `usecase.yaml` together |
+| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library; the Spool goes out as **OTLP spans** and `verify.py` reads through the **read seam** (the v4 APIs). | Rarely — grow verbs here + in `usecase.yaml` together |
 | `DEMO_SCRIPT.md` | The `render: markdown` Presenter Runbook stub. | **Phase 4** |
 | `tests/` | The determinism golden gate + manifest-validity test + the retargeting gate (all green now). | Never by hand — re-bless via `freeze` |
 | `Dockerfile` | The reference non-root image. | Only for real runtime deps |
@@ -105,11 +105,12 @@ The library gives you the write primitives (import from `langfuse_synth_core.see
 
 **The wire is core's, and it is OTLP.** Langfuse platform v4 makes the observation the
 primary entity — there is no separately ingested trace — and Cloud goes v4-only on
-**2026-11-16**. The scaffold pins that path in `src/synth/seed.py`
-(`set_spool_write_path(OTLP)`), and the builders above keep one Python API across both
-wires: you compose the same call tree, and core decides what goes on the wire. **Never
-hand-write an OTLP payload or post to Langfuse yourself** — that is the seam (`docs/SEAM.md`),
-and core's `docs/WRITE_PATHS.md` is where the mapping and its rationale live.
+**2026-11-16**. There is nothing to select: every observation is an OTLP span, and scores
+are `score-create` envelopes on `POST /api/public/ingestion`, which is the supported v4
+path for them and not legacy debt. You compose the same call tree either way, and core
+decides what goes on the wire. **Never hand-write an OTLP payload or post to Langfuse
+yourself** — that is the seam (`docs/SEAM.md`), and core's `docs/WRITE_PATHS.md` is where
+the mapping and its rationale live.
 
 Three consequences that change how you author, not what you call:
 
@@ -136,7 +137,7 @@ before you write the first `observation_event`:
 > shouting — is *accepted* and quietly filed as a `SPAN`, or as a `GENERATION` if the
 > observation carries a model. Nothing anywhere reports a problem; your mistyped tool step
 > simply turns up in the cost and usage views and the demo tells a different story than
-> you wrote. The batch path this migration replaces rejected an unknown type with a `400`;
+> you wrote. The batch path this migration replaced rejected an unknown type with a `400`;
 > the OTLP wire has no such answer.
 
 Core supplies the rejection instead, so this costs you nothing to get right:
@@ -345,5 +346,6 @@ runtime, once or per-unit). Full pattern in
 - `CONTRACT.md` (in the library repo) — reserved-verb semantics, filesystem conventions,
   the canonical volume knob, LLM-provider rules.
 - `docs/SEAM.md` — the library/kit hand-off rule (what the lib owns vs. what the kit owns).
-- `docs/WRITE_PATHS.md` (in the library repo) — the Spool's write paths, why the v4 one is
-  raw OTLP rather than the Langfuse SDK, and the non-resumable import and its recovery.
+- `docs/WRITE_PATHS.md` (in the library repo) — how the Spool is written, why it is raw OTLP
+  rather than the Langfuse SDK, why scores stay `score-create`, and the non-resumable import
+  and its recovery.

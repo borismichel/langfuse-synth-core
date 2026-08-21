@@ -1,8 +1,12 @@
 """Prove the read seam and the live-emission seam against a **real** Langfuse project.
 
 Mocked tests do not verify backend ingestion. This script emits one wall-clock trace through
-the live seam (portal #208) and reads it back through the read seam on **both** API
-generations, asserting the same story each time — which is the whole claim the seams make.
+the live seam (portal #208) and reads it back through the read seam, asserting the whole
+story survives the round trip — which is the claim the seams make.
+
+It read the story back on **both** API generations while there were two, and their agreeing
+field for field is what made dropping the deprecated arm in #213 a deletion rather than a
+change of behaviour. It reads v4 only now, like the seam.
 
     export LANGFUSE_BASE_URL=https://cloud.langfuse.com
     export LANGFUSE_PUBLIC_KEY=pk-lf-…      # a THROWAWAY project, never a demo project
@@ -14,20 +18,16 @@ What it asserts, in order:
 1. **Live emission lands.** One trace with a root observation, a nested span and a nested
    generation carrying model / usage / cost — emitted through the Langfuse SDK, at wall
    clock, with no Spool and no ingestor anywhere in the call path.
-2. **The read seam reads it on the v4 arm** — `/api/public/v2/observations` and
+2. **The read seam reads it back** — `/api/public/v2/observations` and
    `/api/public/v3/scores`: the trace assembled out of its observations, the trace-level
    attributes propagated onto them, the overall input and output on the root observation,
    and the v3 single typed `value` split back into numeric and string.
-3. **The read seam reads the same story on the deprecated arm**, while Langfuse still
-   serves it. Field for field, the two arms agree — that is what lets a kit be rewired once
-   and deploy against either target through the 2026-11-16 cutover.
-4. **Scores normalise on both arms** — a numeric trace score and a categorical observation
-   score, each with its subject flattened.
-5. **Experiments read through the Experiments API** — `/api/public/experiments` →
-   `/api/public/experiment-items` on v4, `/api/public/datasets/{name}/runs` on the
-   deprecated arm. Point it at an existing dataset with `SEAM_CHECK_DATASET=<name>`, or set
-   `SEAM_CHECK_CREATE_EXPERIMENT=1` to have it create a two-item dataset and run a
-   model-free experiment on it first.
+3. **Scores normalise** — a numeric trace score and a categorical observation score, each
+   with its subject flattened.
+4. **Experiments read through the Experiments API** — `/api/public/experiments` →
+   `/api/public/experiment-items`. Point it at an existing dataset with
+   `SEAM_CHECK_DATASET=<name>`, or set `SEAM_CHECK_CREATE_EXPERIMENT=1` to have it create a
+   two-item dataset and run a model-free experiment on it first.
 
 It writes a handful of observations and scores into whatever project the keys point at, so
 point it at a throwaway one.
@@ -148,8 +148,7 @@ def assert_story(trace, arm: str) -> None:
           bool(categorical and categorical.observation_id),
           str(getattr(categorical, "observation_id", None)))
 
-    session = trace.session_id and read_mod.LangfuseReader(
-        BASE, read_api=arm).session(trace.session_id)
+    session = trace.session_id and read_mod.LangfuseReader(BASE).session(trace.session_id)
     check(f"[{arm}] session groups the trace",
           bool(session and trace.id in session.trace_ids),
           str(getattr(session, "trace_ids", None))[:80])
@@ -177,7 +176,7 @@ def make_experiment() -> str:
 
 
 def check_experiments(arm: str, dataset: str | None) -> None:
-    reader = read_mod.LangfuseReader(BASE, read_api=arm)
+    reader = read_mod.LangfuseReader(BASE)
     if not dataset:
         print(f"· [{arm}] experiments: SKIPPED — set SEAM_CHECK_DATASET=<dataset name>, or "
               "SEAM_CHECK_CREATE_EXPERIMENT=1 to make one, to exercise this arm")
@@ -201,21 +200,18 @@ def main() -> int:
         print("set LANGFUSE_BASE_URL / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY first")
         return 2
 
-    resolved = read_mod.LangfuseReader(BASE).read_api
-    print(f"· target resolves to the {resolved!r} read API generation")
-
     trace_id = emit_one_trace()
     dataset = os.environ.get("SEAM_CHECK_DATASET")
     if not dataset and os.environ.get("SEAM_CHECK_CREATE_EXPERIMENT") == "1":
         dataset = make_experiment()
 
-    for arm in (read_mod.V4, read_mod.LEGACY):
-        reader = read_mod.LangfuseReader(BASE, read_api=arm)
-        trace = await_trace(reader, trace_id, arm=arm)
-        if trace is None:
-            check(f"[{arm}] trace readable", False,
-                  "not visible after ~90s — ingestion lag, or this arm is not served here")
-            continue
+    arm = "v4"
+    reader = read_mod.LangfuseReader(BASE)
+    trace = await_trace(reader, trace_id, arm=arm)
+    if trace is None:
+        check(f"[{arm}] trace readable", False,
+              "not visible after ~90s — ingestion lag, or the keys point somewhere else")
+    else:
         assert_story(trace, arm)
         check_experiments(arm, dataset)
 

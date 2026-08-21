@@ -25,7 +25,7 @@ def test_from_env_requires_keys_unless_dry_run(monkeypatch):
     assert ing.base_url == "http://localhost:3000"  # trailing slash trimmed
 
 
-def test_write_ping_posts_an_empty_batch(monkeypatch):
+def test_write_ping_exports_no_spans(monkeypatch):
     # The write-path liveness probe (Spec G · G2, #140): exercises auth + the ingestion
     # endpoint with an EMPTY batch, so nothing is emitted but a bad key / dead host fails.
     import langfuse_synth_core.seed.ingest as ingest_mod
@@ -39,14 +39,14 @@ def test_write_ping_posts_an_empty_batch(monkeypatch):
             return {}
 
     def fake_post(url, json=None, auth=None, headers=None, timeout=None):
-        seen.update(url=url, batch=(json or {}).get("batch"), auth=auth)
+        seen.update(url=url, body=json, auth=auth)
         return _Resp()
 
     monkeypatch.setattr(ingest_mod.requests, "post", fake_post)
     ing = Ingestor(base_url="http://lf.local", public_key="pk", secret_key="sk")
     ing.write_ping()
-    assert seen["url"] == "http://lf.local/api/public/ingestion"
-    assert seen["batch"] == []
+    assert seen["url"] == "http://lf.local/api/public/otel/v1/traces"
+    assert seen["body"] == {"resourceSpans": []}
     assert seen["auth"] == ("pk", "sk")
 
 

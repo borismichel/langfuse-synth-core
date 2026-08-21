@@ -1,42 +1,32 @@
 """The **read seam** — the one place any kit reads Langfuse (portal #208, spec H #204).
 
-Langfuse platform v4 retires every read endpoint the kits use: `/traces`, `/observations`,
-`/sessions`, `/v2/scores` and the dataset-run reads all `404` on a cut-over target. Their
-replacements are not drop-in — `/v2/observations` is cursor-paginated and has no trace
-entity at all, `/v3/scores` carries **one typed value** instead of a `value`/`stringValue`
-pair, and dataset runs become **experiments**. Re-pointing a URL does not carry a kit over.
-
-So the remap lives here, once, behind a normalised surface, instead of three times in three
-kits' `verify` steps. What a caller gets back is the same dataclass on either generation:
+Langfuse platform v4 retired every read endpoint the kits used: `/traces`, `/observations`,
+`/sessions`, `/v2/scores` and the dataset-run reads. Their replacements are not drop-in —
+`/v2/observations` is cursor-paginated and has no trace entity at all, `/v3/scores` carries
+**one typed value** instead of a `value`/`stringValue` pair, and dataset runs became
+**experiments**. Re-pointing a URL does not carry a kit over, which is why the remap lives
+here, once, behind a normalised surface, instead of three times in three kits' `verify`
+steps:
 
 * :class:`Trace` — under v4 a trace is not an entity; it is the set of observations sharing
   a trace id, and its trace-level fields (name, user, session, tags) are attributes
-  denormalised onto those observations. The seam assembles it either way.
-* :class:`Observation` — the v4 observations API, or the deprecated list, normalised to the
-  same fields (including the model / usage / cost / prompt-link columns a `verify` asserts).
+  denormalised onto those observations. The seam assembles it.
+* :class:`Observation` — a `/api/public/v2/observations` row, carrying the model / usage /
+  cost / prompt-link columns a `verify` asserts.
 * :class:`Score` — the v3 single typed `value` split back into
   :attr:`Score.numeric_value` / :attr:`Score.string_value`, and the v3 ``subject``
   discriminator flattened to `trace_id` / `observation_id` / `session_id` /
   `experiment_id`.
 * :class:`Experiment` / :class:`ExperimentItem` — dataset runs, read through the
-  Experiments API on v4 and through `/datasets/{name}/runs` on legacy.
+  Experiments API.
 
-**Which generation answers is probed, not configured.** One deprecated endpoint is called
-once per reader; a `404` means the target has cut over, and the v4 arm takes over by itself
-on the day Cloud removes the old endpoints and not before. `SYNTH_LANGFUSE_READ_API`
-pins a generation for a test or an operator who needs to force one.
-
-The generation is preferred in that order — legacy while it lives — for the same reason
-the portal's counter prefers it (#205): the v2/v3 read APIs serve data written by an
-exporter that does not send `x-langfuse-ingestion-version: 4` with a delay of up to 15
-minutes, and every Spool written on the batch path is exactly that data. Preferring v4
-before a kit's write path has moved would read a demo back as half-empty.
-
-**On the shape: one method per read, branching on the generation inside it.** That is the
-same shape the write seam took for the same dual-path problem — ``seed/events.py`` branches
-on ``on_otlp()`` inside each builder rather than growing two builder families — and the two
-seams ship in the same release and lose their legacy halves in the same one (#213), where
-the deletion is the branch and its normaliser in one known place.
+**This seam reads v4 and only v4** (portal #213). It carried a second arm through the
+migration — the deprecated endpoints, probed for and preferred while they were the faster
+read of a batch-written Spool. Both halves of that reasoning are gone: the Spool is written
+over OTLP with `x-langfuse-ingestion-version: 4`, so v4 answers it in seconds, and a
+deprecated call is now a call that stops working on 2026-11-16. The probe went with the arm
+— it *was* a deprecated call, made once per reader, so a seam that only reads v4 could not
+keep a legacy endpoint as its way of asking which generation to use.
 
 This module owns **reads only**. Writes are two other seams: the Spool's
 (:mod:`langfuse_synth_core.seed`, deterministic and backdated) and the live surfaces'
@@ -57,19 +47,6 @@ from .http import request_retry
 
 #: Sort floor for observations whose start time did not come back on the requested fields.
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-#: The two read-API generations a target can serve.
-LEGACY = "legacy"
-V4 = "v4"
-
-#: Pin a generation instead of probing for one (``legacy`` | ``v4``).
-READ_API_ENV = "SYNTH_LANGFUSE_READ_API"
-
-_GENERATIONS = (LEGACY, V4)
-
-#: The endpoint the generation is probed on: deprecated (so it ``404``s on a cut-over
-#: target) and cheap (one row).
-_PROBE_PATH = "/api/public/traces"
 
 #: The Experiments API requires a start-time bound. This floor predates any Demo Depot
 #: project by years, so "the window" is "everything".
@@ -196,7 +173,7 @@ class Observation:
 
 @dataclass(frozen=True)
 class Trace:
-    """A trace: an entity on legacy, the set of observations sharing an id under v4."""
+    """A trace: under v4, the set of observations sharing a trace id."""
 
     id: str
     name: str | None = None
@@ -302,42 +279,6 @@ def _observation_from_v4(row: dict) -> Observation:
     )
 
 
-def _observation_from_legacy(row: dict, *, trace: dict | None = None) -> Observation:
-    """Normalise a deprecated `/api/public/observations` row onto the same dataclass.
-
-    The legacy model keeps user, session and tags on the *trace*, so when the row was read
-    as part of one, those come off the trace body — which is what makes an assertion written
-    against the seam read the same on either generation.
-    """
-    trace = trace or {}
-    return Observation(
-        id=row.get("id", ""),
-        trace_id=row.get("traceId"),
-        parent_id=row.get("parentObservationId"),
-        type=row.get("type"),
-        name=row.get("name"),
-        start_time=parse_ts(row.get("startTime")),
-        end_time=parse_ts(row.get("endTime")),
-        input=_decoded_io(row.get("input")),
-        output=_decoded_io(row.get("output")),
-        metadata=row.get("metadata"),
-        level=_text(row.get("level")),
-        model=_text(row.get("model")),
-        model_parameters=row.get("modelParameters"),
-        usage_details=row.get("usageDetails"),
-        cost_details=row.get("costDetails"),
-        total_cost=row.get("calculatedTotalCost") or (row.get("costDetails") or {}).get("total"),
-        prompt_name=_text(row.get("promptName")),
-        prompt_version=row.get("promptVersion"),
-        environment=_text(row.get("environment")),
-        user_id=trace.get("userId"),
-        session_id=trace.get("sessionId"),
-        tags=list(trace.get("tags") or []),
-        trace_name=trace.get("name"),
-        raw=row,
-    )
-
-
 def _trace_from_observations(trace_id: str, observations: list[Observation],
                              scores: list[Score]) -> Trace:
     """Assemble the v4 trace: the set of observations sharing an id.
@@ -369,37 +310,6 @@ def _trace_from_observations(trace_id: str, observations: list[Observation],
     )
 
 
-def _trace_from_legacy(body: dict) -> Trace:
-    """Normalise a deprecated `/api/public/traces/{id}` body onto the same trace row.
-
-    The legacy body embeds its observations and scores, and holds user / session / tags at
-    the trace level; the seam pushes those down onto the observations so that an assertion
-    about an observation's session reads the same on either generation.
-
-    The *list* endpoint is a different shape from the single-trace GET: it answers
-    ``observations`` and ``scores`` as lists of **ids**, not bodies. Those carry nothing to
-    normalise, so a trace read from a list comes back with an empty observation set — ask
-    :meth:`LangfuseReader.trace` for the bodies.
-    """
-    observations = [o for o in (body.get("observations") or []) if isinstance(o, dict)]
-    scores = [s for s in (body.get("scores") or []) if isinstance(s, dict)]
-    return Trace(
-        id=body.get("id", ""),
-        name=body.get("name"),
-        timestamp=parse_ts(body.get("timestamp")),
-        user_id=body.get("userId"),
-        session_id=body.get("sessionId"),
-        environment=body.get("environment"),
-        tags=list(body.get("tags") or []),
-        input=body.get("input"),
-        output=body.get("output"),
-        metadata=body.get("metadata"),
-        observations=[_observation_from_legacy(o, trace=body) for o in observations],
-        scores=[_score_from_legacy(s) for s in scores],
-        raw=body,
-    )
-
-
 def _experiment_from_v4(row: dict, *, dataset_name: str | None = None) -> Experiment:
     """Normalise a `/api/public/experiments` row (v4's name for a dataset run)."""
     return Experiment(
@@ -410,26 +320,6 @@ def _experiment_from_v4(row: dict, *, dataset_name: str | None = None) -> Experi
         description=row.get("description"),
         item_count=row.get("itemCount"),
         created_at=parse_ts(row.get("startTime")),
-        metadata=row.get("metadata"),
-        raw=row,
-    )
-
-
-def _experiment_from_legacy(row: dict, *, dataset_name: str | None = None) -> Experiment:
-    """Normalise a deprecated `/api/public/datasets/{name}/runs` row onto the same row.
-
-    The legacy list carries no item count — that only appears on the run detail — so it is
-    left unset rather than guessed at; :meth:`LangfuseReader.experiment_items` is the
-    honest way to count a run's items on this arm.
-    """
-    return Experiment(
-        id=row.get("id", ""),
-        name=row.get("name", ""),
-        dataset_name=dataset_name or row.get("datasetName"),
-        dataset_id=row.get("datasetId"),
-        description=row.get("description"),
-        item_count=row.get("itemCount"),
-        created_at=parse_ts(row.get("createdAt")),
         metadata=row.get("metadata"),
         raw=row,
     )
@@ -449,18 +339,6 @@ def _experiment_item_from_v4(row: dict) -> ExperimentItem:
         trace_id=row.get("traceId"),
         dataset_item_id=None,
         observation_id=row.get("id"),
-        raw=row,
-    )
-
-
-def _experiment_item_from_legacy(row: dict, *, experiment_id: str = "") -> ExperimentItem:
-    """Normalise a deprecated run-detail ``datasetRunItems`` entry onto the same row."""
-    return ExperimentItem(
-        id=row.get("id", ""),
-        experiment_id=row.get("datasetRunId") or experiment_id,
-        trace_id=row.get("traceId"),
-        dataset_item_id=row.get("datasetItemId"),
-        observation_id=row.get("observationId"),
         raw=row,
     )
 
@@ -505,38 +383,6 @@ def _score_from_v3(row: dict) -> Score:
     )
 
 
-def _score_from_legacy(row: dict) -> Score:
-    """Normalise a `/api/public/v2/scores` (or `/scores`) row onto the same dataclass."""
-    data_type = (row.get("dataType") or "").upper() or None
-    value = row.get("value")
-    string_value = row.get("stringValue")
-    numeric = float(value) if isinstance(value, (int, float, bool)) else None
-    if string_value is None and isinstance(value, str):
-        string_value = value
-    if data_type in _STRING_TYPES or (data_type is None and string_value is not None):
-        # A categorical score arrives as `value: 0` PLUS `stringValue`; reporting that 0 as
-        # a measurement would drag any mean a kit computes towards zero.
-        numeric = None
-    return Score(
-        id=row.get("id", ""),
-        name=row.get("name", ""),
-        data_type=data_type,
-        numeric_value=numeric,
-        string_value=string_value,
-        comment=row.get("comment"),
-        timestamp=parse_ts(row.get("timestamp")),
-        source=row.get("source"),
-        environment=row.get("environment"),
-        trace_id=row.get("traceId"),
-        observation_id=row.get("observationId"),
-        session_id=row.get("sessionId"),
-        experiment_id=row.get("datasetRunId"),
-        config_id=row.get("configId"),
-        metadata=row.get("metadata"),
-        raw=row,
-    )
-
-
 # ---------------------------------------------------------------------------
 # The reader
 # ---------------------------------------------------------------------------
@@ -544,7 +390,7 @@ class LangfuseReader:
     """Read a Langfuse project through whichever read API generation it serves."""
 
     def __init__(self, base_url: str, *, auth: tuple[str, str] | None = None,
-                 throttle: float = 0.0, read_api: str | None = None, attempts: int = 8):
+                 throttle: float = 0.0, attempts: int = 8):
         self.base_url = base_url.rstrip("/")
         self.auth = auth if auth is not None else auth_from_env()
         self.throttle = throttle
@@ -554,36 +400,25 @@ class LangfuseReader:
         # — should ask for `attempts=1`: three minutes of backoff before falling back makes
         # the resilience worse, not better (portal #211).
         self.attempts = attempts
-        pinned = read_api or os.environ.get(READ_API_ENV) or None
-        self._read_api = _validated(pinned) if pinned else None
 
     @classmethod
     def from_env(cls, base_url: str, **kw) -> "LangfuseReader":
         """A reader authenticated from the standard `LANGFUSE_*` env vars."""
         return cls(base_url, auth=auth_from_env(), **kw)
 
-    # -- which generation answers -----------------------------------------
-    @property
-    def read_api(self) -> str:
-        """:data:`LEGACY` or :data:`V4`, probed once per reader and then cached."""
-        if self._read_api is None:
-            self._read_api = self._probe_read_api()
-        return self._read_api
+    # -- reachability ------------------------------------------------------
+    def ping(self) -> None:
+        """Prove the target answers: one cheap, **current** read of a single observation.
 
-    def _probe_read_api(self) -> str:
-        """Ask the target which generation it serves. A `404` is the answer "v4"; anything
-        other than that or a success is a *failure to read the target at all* — bad keys, a
-        wrong host, a server error — and it is raised rather than resolved into an arm.
-        Guessing here would report a credentials failure as an empty demo."""
-        resp = self._request(_PROBE_PATH, {"limit": 1})
-        if resp.status_code == 404:
-            return V4
-        if resp.status_code >= 400:
-            raise ReadError(
-                f"cannot read {self.base_url} — GET {_PROBE_PATH} answered "
-                f"{resp.status_code}; check the keys, the host, and the project.",
-                status_code=resp.status_code)
-        return LEGACY
+        Raises :class:`ReadError` on anything but a success — bad keys, a wrong host, a
+        server error. It does not try to interpret which: a caller that wants to report an
+        unreadable target rather than raise on it should catch, not guess.
+
+        There was a generation probe here until #213, and it called a deprecated endpoint
+        once per reader — which made the seam's own liveness check the last legacy call in
+        the stack. This asks the same question on the endpoint the seam actually reads.
+        """
+        self._get("/api/public/v2/observations", {"limit": 1, "fields": "core"})
 
     # -- traces ------------------------------------------------------------
     def trace(self, trace_id: str, *, with_scores: bool = True) -> Trace | None:
@@ -592,76 +427,47 @@ class LangfuseReader:
         A trace that is not there answers ``None`` rather than raising: "does this trace
         exist?" is an assertion every kit's `verify` makes, and a 404 is the answer to it.
 
-        Under v4 the trace is *assembled*: there is no trace row, so the seam reads the
+        The trace is *assembled*: there is no trace row under v4, so the seam reads the
         observations sharing the id and lifts the trace-level attributes off the root one.
-        Scores are fetched on both generations so that what a caller sees does not depend on
-        which arm answered — legacy embeds them in the trace body, v4 needs a second read.
+        Scores are a second read, and one the caller can decline.
         """
-        if self.read_api == V4:
-            observations = self.observations(trace_id=trace_id)
-            if not observations:
-                return None
-            scores = self.scores(trace_id=trace_id) if with_scores else []
-            return _trace_from_observations(trace_id, observations, scores)
-        resp = self._request(f"/api/public/traces/{trace_id}")
-        if resp.status_code == 404:
+        observations = self.observations(trace_id=trace_id)
+        if not observations:
             return None
-        if resp.status_code >= 400:
-            raise ReadError(f"GET /api/public/traces/{trace_id} -> {resp.status_code}",
-                            status_code=resp.status_code)
-        return _trace_from_legacy(resp.json())
+        scores = self.scores(trace_id=trace_id) if with_scores else []
+        return _trace_from_observations(trace_id, observations, scores)
 
     def traces(self, *, limit: int = _PAGE_SIZE, session_id: str | None = None,
                user_id: str | None = None, name: str | None = None,
                environment: str | None = None, limit_pages: int = _MAX_PAGES) -> list[Trace]:
         """Up to ``limit`` traces, newest-API-first — a **sample**, never a project total.
 
-        Under v4 there is no trace list to page: the seam scans observations and groups them
+        There is no trace list to page under v4: the seam scans observations and groups them
         by trace id, so a trace here carries the observations the scan saw. Ask
-        :meth:`trace` for the complete set. This is the one place the two generations differ
-        in more than field names, and it differs *visibly* — no caller is handed a number
-        that looks like a whole-project count. (Counting a whole project is the portal's
-        problem, and it uses the Metrics API for exactly this reason.)
+        :meth:`trace` for the complete set. That difference is *visible* by design — no
+        caller is handed a number that looks like a whole-project count. (Counting a whole
+        project is the portal's problem, and it uses the Metrics API for exactly this
+        reason.)
         """
-        if self.read_api == V4:
-            rows = self.observations(session_id=session_id, user_id=user_id, name=name,
-                                     environment=environment, limit_pages=limit_pages)
-            grouped: dict[str, list[Observation]] = {}
-            for obs in rows:
-                if obs.trace_id:
-                    grouped.setdefault(obs.trace_id, []).append(obs)
-            return [_trace_from_observations(tid, obs, [])
-                    for tid, obs in list(grouped.items())[:limit]]
-        params = {"sessionId": session_id, "userId": user_id, "name": name,
-                  "environment": environment}
-        out: list[Trace] = []
-        for row in self._numbered_pages("/api/public/traces", params, limit_pages):
-            out.append(_trace_from_legacy(row))
-            if len(out) >= limit:
-                break
-        return out
+        rows = self.observations(session_id=session_id, user_id=user_id, name=name,
+                                 environment=environment, limit_pages=limit_pages)
+        grouped: dict[str, list[Observation]] = {}
+        for obs in rows:
+            if obs.trace_id:
+                grouped.setdefault(obs.trace_id, []).append(obs)
+        return [_trace_from_observations(tid, obs, [])
+                for tid, obs in list(grouped.items())[:limit]]
 
     def session(self, session_id: str) -> Session:
-        """One session as the traces it groups — the same answer on either generation.
+        """One session as the traces it groups.
 
-        Under v4 a session is not an entity either: it is a `sessionId` attribute copied
+        A session is not an entity under v4 either: it is a `sessionId` attribute copied
         onto observations, so the seam reads the observations carrying it. A session with
         nothing in it answers an empty :class:`Session`, not an error.
         """
-        if self.read_api == V4:
-            rows = self.observations(session_id=session_id)
-            seen = {o.trace_id for o in rows if o.trace_id}
-            return Session(id=session_id, trace_ids=sorted(seen))
-        resp = self._request(f"/api/public/sessions/{session_id}")
-        if resp.status_code == 404:
-            return Session(id=session_id)
-        if resp.status_code >= 400:
-            raise ReadError(f"GET /api/public/sessions/{session_id} -> {resp.status_code}",
-                            status_code=resp.status_code)
-        body = resp.json()
-        return Session(id=body.get("id", session_id),
-                       trace_ids=[t.get("id") for t in (body.get("traces") or []) if t.get("id")],
-                       raw=body)
+        rows = self.observations(session_id=session_id)
+        seen = {o.trace_id for o in rows if o.trace_id}
+        return Session(id=session_id, trace_ids=sorted(seen))
 
     # -- observations ------------------------------------------------------
     def observations(self, *, trace_id: str | None = None, type: str | None = None,
@@ -671,34 +477,15 @@ class LangfuseReader:
                      limit_pages: int = _MAX_PAGES) -> list[Observation]:
         """Observations matching the given filters, normalised and paginated to the end.
 
-        ``session_id`` filters server-side under v4 (the attribute is on the observation)
-        and client-side on legacy, where it is a trace-level field the observations list
-        does not carry.
+        Every filter here is served server-side: under v4 the trace-level attributes are
+        denormalised onto the observation, so ``session_id`` and ``user_id`` are columns of
+        the thing being filtered rather than of a trace row that no longer exists.
         """
-        if self.read_api == V4:
-            params = {"fields": _OBSERVATION_FIELDS, "traceId": trace_id, "type": type,
-                      "name": name, "parentObservationId": parent_id, "userId": user_id,
-                      "sessionId": session_id, "environment": environment}
-            rows = self._cursor_pages("/api/public/v2/observations", params, limit_pages)
-            return [_observation_from_v4(r) for r in rows]
-        if session_id is not None:
-            # The deprecated observations list has no session filter — session is a
-            # trace-level field there — so the session's traces are read first and their
-            # observations filtered here. Under v4 the same call filters server-side.
-            rows = [o for t in self.traces(session_id=session_id, limit_pages=limit_pages)
-                    for o in (self.trace(t.id, with_scores=False) or t).observations]
-            return [o for o in rows
-                    if (trace_id is None or o.trace_id == trace_id)
-                    and (type is None or (o.type or "").upper() == type.upper())
-                    and (name is None or o.name == name)
-                    and (parent_id is None or o.parent_id == parent_id)
-                    and (user_id is None or o.user_id == user_id)
-                    and (environment is None or o.environment == environment)]
-        params = {"traceId": trace_id, "type": type, "name": name,
-                  "parentObservationId": parent_id, "userId": user_id,
-                  "environment": environment}
-        rows = self._numbered_pages("/api/public/observations", params, limit_pages)
-        return [_observation_from_legacy(r) for r in rows]
+        params = {"fields": _OBSERVATION_FIELDS, "traceId": trace_id, "type": type,
+                  "name": name, "parentObservationId": parent_id, "userId": user_id,
+                  "sessionId": session_id, "environment": environment}
+        rows = self._cursor_pages("/api/public/v2/observations", params, limit_pages)
+        return [_observation_from_v4(r) for r in rows]
 
     # -- scores ------------------------------------------------------------
     def scores(self, *, name: str | None = None, trace_id: str | None = None,
@@ -706,17 +493,11 @@ class LangfuseReader:
                experiment_id: str | None = None, data_type: str | None = None,
                limit_pages: int = _MAX_PAGES) -> list[Score]:
         """Scores matching the given filters, normalised and paginated to the end."""
-        if self.read_api == V4:
-            params = {"fields": "details,subject", "name": name, "traceId": trace_id,
-                      "sessionId": session_id, "observationId": observation_id,
-                      "experimentId": experiment_id, "dataType": data_type}
-            rows = self._cursor_pages("/api/public/v3/scores", params, limit_pages)
-            return [_score_from_v3(r) for r in rows]
-        params = {"name": name, "traceId": trace_id, "sessionId": session_id,
-                  "observationId": observation_id, "datasetRunId": experiment_id,
-                  "dataType": data_type}
-        rows = self._numbered_pages("/api/public/v2/scores", params, limit_pages)
-        return [_score_from_legacy(r) for r in rows]
+        params = {"fields": "details,subject", "name": name, "traceId": trace_id,
+                  "sessionId": session_id, "observationId": observation_id,
+                  "experimentId": experiment_id, "dataType": data_type}
+        rows = self._cursor_pages("/api/public/v3/scores", params, limit_pages)
+        return [_score_from_v3(r) for r in rows]
 
     # -- experiments (dataset runs) ----------------------------------------
     def experiments(self, *, dataset_name: str | None = None, name: str | None = None,
@@ -728,30 +509,22 @@ class LangfuseReader:
         dataset endpoint the migration left alone) and always within a time window, because
         the Experiments API rejects a request without one.
         """
-        if self.read_api == V4:
-            dataset_id = self._dataset_id(dataset_name) if dataset_name else None
-            params = {"datasetId": dataset_id, "name": name, "fromStartTime": _TIME_FLOOR}
-            rows = self._cursor_pages("/api/public/experiments", params, limit_pages)
-            return [_experiment_from_v4(r, dataset_name=dataset_name) for r in rows]
-        rows = self._numbered_pages(f"/api/public/datasets/{dataset_name}/runs",
-                                    {"name": name} if name else {}, limit_pages)
-        return [_experiment_from_legacy(r, dataset_name=dataset_name) for r in rows]
+        dataset_id = self._dataset_id(dataset_name) if dataset_name else None
+        params = {"datasetId": dataset_id, "name": name, "fromStartTime": _TIME_FLOOR}
+        rows = self._cursor_pages("/api/public/experiments", params, limit_pages)
+        return [_experiment_from_v4(r, dataset_name=dataset_name) for r in rows]
 
     def experiment_items(self, experiment: Experiment,
                          limit_pages: int = _MAX_PAGES) -> list[ExperimentItem]:
         """The items of one experiment — each carrying the trace that ran it.
 
-        Takes the :class:`Experiment` rather than an id because the two generations address
-        a run differently: v4 by experiment id, legacy by ``(dataset name, run name)``. The
-        row carries both, so a caller never has to know which arm answered.
+        Takes the :class:`Experiment` rather than a bare id: the row carries the dataset
+        name and run name a caller may want to report alongside the items, and passing the
+        row keeps the two from being looked up twice.
         """
-        if self.read_api == V4:
-            params = {"experimentId": experiment.id, "fromStartTime": _TIME_FLOOR}
-            rows = self._cursor_pages("/api/public/experiment-items", params, limit_pages)
-            return [_experiment_item_from_v4(r) for r in rows]
-        body = self._get(f"/api/public/datasets/{experiment.dataset_name}/runs/{experiment.name}")
-        return [_experiment_item_from_legacy(r, experiment_id=experiment.id)
-                for r in (body.get("datasetRunItems") or [])]
+        params = {"experimentId": experiment.id, "fromStartTime": _TIME_FLOOR}
+        rows = self._cursor_pages("/api/public/experiment-items", params, limit_pages)
+        return [_experiment_item_from_v4(r) for r in rows]
 
     def _dataset_id(self, dataset_name: str) -> str | None:
         """Resolve a dataset name to its id — `/api/public/datasets/{name}` is on no
@@ -783,18 +556,6 @@ class LangfuseReader:
             if not rows or not cursor:
                 return
 
-    def _numbered_pages(self, path: str, params: dict, limit_pages: int) -> Iterator[dict]:
-        """Follow the deprecated APIs' numbered pages until `totalPages` is reached."""
-        page = 1
-        while page <= max(1, limit_pages):
-            payload = self._get(path, {**params, "limit": _PAGE_SIZE, "page": page})
-            rows = payload.get("data") or []
-            yield from rows
-            meta = payload.get("meta") or {}
-            if not rows or page >= meta.get("totalPages", page):
-                return
-            page += 1
-
 
 class ReadError(RuntimeError):
     """A read the seam could not complete — carries the status so a caller can branch."""
@@ -807,14 +568,6 @@ class ReadError(RuntimeError):
 def auth_from_env() -> tuple[str, str]:
     """HTTP Basic credentials for the public API, from the standard env vars."""
     return (os.environ.get("LANGFUSE_PUBLIC_KEY", ""), os.environ.get("LANGFUSE_SECRET_KEY", ""))
-
-
-def _validated(generation: str) -> str:
-    value = generation.strip().lower()
-    if value not in _GENERATIONS:
-        raise ValueError(f"unknown Langfuse read API {generation!r} — expected one of "
-                         f"{list(_GENERATIONS)}. (Set {READ_API_ENV} or pass read_api=.)")
-    return value
 
 
 def _pruned(params: dict) -> dict:

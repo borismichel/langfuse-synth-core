@@ -6,14 +6,16 @@ Every kit is cloned per scenario and pointed at a different Langfuse through
 1. **Is it Langfuse Cloud?** URL-derived, and free. Cloud rate-limits the one-at-a-time
    REST reads and writes a `verify` sweep fires, so those calls are spaced out and lean on
    the Retry-After-aware backoff in :mod:`langfuse_synth_core.http`. Self-hosted has no
-   such limit. The batch/OTLP write path is unaffected — it already retries and is not one
+   such limit. The Spool's write path is unaffected — it already retries and is not one
    request per event — so the seed itself needs no throttle.
-2. **Which read API generation does it serve?** *Probed*, not URL-derived, and therefore
-   not free: it costs one HTTP round trip. Cloud goes v4-only on 2026-11-16 and a
-   self-hosted host cuts over whenever its operator upgrades it, so the host name answers
-   nothing here. :meth:`TargetProfile.resolved` asks the target and hands back a profile
-   that knows — which is what makes a v4 host something a kit *recognises* rather than
-   something it is configured for.
+2. **Does it answer at all?** *Probed*, not URL-derived, and therefore not free: it costs
+   one HTTP round trip. :meth:`TargetProfile.resolved` asks the target and hands back a
+   profile that knows, so a `verify` can say "cannot read this project, and here is why"
+   on its first line instead of failing every check with the same traceback.
+
+   This was a *generation* probe until portal #213 — which read API the target served —
+   and it asked on a deprecated endpoint, once per reader. The seam reads v4 and only v4
+   now, so there is no generation to resolve and the question narrowed to reachability.
 
 Both kits carried a byte-identical copy of the URL-derived half; it lives here now so a
 third kit inherits it rather than growing its own ``"cloud.langfuse.com" in url`` check.
@@ -36,15 +38,16 @@ CLOUD_POST_THROTTLE_S = 0.35
 class TargetProfile:
     """What a kit knows about its target. Build once with :meth:`detect`, pass it around.
 
-    ``read_api`` is ``None`` until the target has been asked (:meth:`resolved`). That is a
-    third state, not a missing value: "nobody has looked yet" is different from "legacy"
-    and from "v4", and a kit that only writes never needs to pay for the answer.
+    ``reachable`` is False until the target has answered, and a kit that only writes never
+    pays to find out. It is deliberately *not* a tri-state: a probe that fails does not
+    record "unreachable", it leaves the profile unresolved and hands the reason back through
+    :meth:`try_resolve`, so a blip is retried rather than remembered as a verdict.
     """
 
     base_url: str
     is_cloud: bool
     post_throttle_s: float
-    read_api: str | None = None
+    reachable: bool = False
 
     @classmethod
     def detect(cls, base_url: str) -> "TargetProfile":
@@ -54,9 +57,9 @@ class TargetProfile:
         return cls(base_url=url, is_cloud=is_cloud,
                    post_throttle_s=CLOUD_POST_THROTTLE_S if is_cloud else 0.0)
 
-    # -- which generation the target serves ---------------------------------
+    # -- does the target answer ---------------------------------------------
     def resolved(self, reader: Any = None) -> "TargetProfile":
-        """This profile with :attr:`read_api` filled in — probing the target if needed.
+        """This profile with :attr:`reachable` filled in — probing the target if needed.
 
         Takes the reader it should ask, so a caller that already built one does not pay for
         a second probe, and a test can hand in a stub. Already-resolved profiles are
@@ -65,50 +68,38 @@ class TargetProfile:
         Raises whatever the probe raises. A `verify` that wants to report an unreadable
         target as failing checks rather than as a traceback should use :meth:`try_resolve`.
         """
-        if self.read_api is not None:
+        if self.reachable:
             return self
-        return replace(self, read_api=(reader or self.reader()).read_api)
+        (reader or self.reader()).ping()
+        return replace(self, reachable=True)
 
     def try_resolve(self, reader: Any = None) -> tuple["TargetProfile", str]:
         """:meth:`resolved`, or this profile unchanged plus the reason it could not be.
 
         Bad keys, a wrong host, a server error — the probe cannot tell those apart from
-        each other and must not resolve them into an arm, so it raises. But a `verify` is a
-        **report**: its job is to say which of the demo's anchors are missing, and a caller
-        who typed the wrong key deserves that report with every check failed and the reason
-        on each line, not a traceback in place of it. Unresolved is a fine state to carry
-        forward — each read then probes again inside its own check and fails there.
+        each other, so it raises. But a `verify` is a **report**: its job is to say which of
+        the demo's anchors are missing, and a caller who typed the wrong key deserves that
+        report with every check failed and the reason on each line, not a traceback in place
+        of it. Unresolved is a fine state to carry forward — each read then fails inside its
+        own check and reports there.
         """
         try:
             return self.resolved(reader), ""
         except Exception as exc:  # noqa: BLE001 — the reason travels to the report
             return self, f"{type(exc).__name__}: {exc}"
 
-    @property
-    def is_v4(self) -> bool:
-        """True once the target has been asked *and* answered v4. Unresolved reads False —
-        ask :meth:`resolved` first; guessing "not v4" is the safe way to be wrong here,
-        because the legacy arm is the one that is preferred while it lives."""
-        return self.read_api == read.V4
-
     def reader(self, **kw: Any) -> read.LangfuseReader:
-        """A reader for this target: its URL, its throttle, its resolved generation.
-
-        The generation is passed through when this profile already knows it, so a reader
-        built off a resolved profile makes no probe of its own.
-        """
+        """A reader for this target: its URL and its throttle."""
         kw.setdefault("throttle", self.post_throttle_s)
-        if self.read_api is not None:
-            kw.setdefault("read_api", self.read_api)
         return read.LangfuseReader.from_env(self.base_url, **kw)
 
     @property
     def label(self) -> str:
-        """A one-line description for a `verify` log — including the generation when the
-        target has been asked, because "which API answered" is the first thing to know when
-        a check that passed yesterday fails today."""
+        """A one-line description for a `verify` log. It names the v4 read APIs once the
+        target has answered, because "what did we read it through" is the first thing to
+        know when a check that passed yesterday fails today."""
         host = "Langfuse Cloud" if self.is_cloud else "self-hosted Langfuse"
-        return host if self.read_api is None else f"{host}, {self.read_api} read APIs"
+        return f"{host}, v4 read APIs" if self.reachable else host
 
 
 def post_throttle_seconds(base_url: str) -> float:

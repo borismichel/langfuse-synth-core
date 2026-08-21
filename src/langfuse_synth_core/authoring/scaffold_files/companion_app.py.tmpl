@@ -53,9 +53,9 @@ def create_app(adapter: CompanionAdapter) -> Any:
     live traces with ``adapter.emitter()``, call the model with ``adapter.llm()``.
 
     A live surface emits at *now*, so it rides the live-emission seam and never the Spool's
-    ``adapter.ingestor()``: that writer exists to backdate weeks of history and stamps
-    producer-supplied timestamps, which a submission does not have (CONTRACT.md, the
-    determinism line).
+    writer: that writer exists to backdate weeks of history and stamps producer-supplied
+    timestamps, which a submission does not have. It is not on the Adapter at all
+    (CONTRACT.md, the determinism line).
     """
     from fastapi import FastAPI
     from fastapi.responses import HTMLResponse
