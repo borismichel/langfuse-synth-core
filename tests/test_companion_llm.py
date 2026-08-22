@@ -101,9 +101,14 @@ def test_complete_routes_to_anthropic_shape():
         )
 
     client._impl = SimpleNamespace(messages=SimpleNamespace(create=create))
-    res = client.complete(system="S", messages=[{"role": "user", "content": "hi"}])
+    res = client.complete(system="S", messages=[{"role": "user", "content": "hi"}], temperature=0)
     assert (res.text, res.input_tokens, res.output_tokens) == ("ok", 11, 3)
     assert captured["system"] == "S"  # Anthropic keeps system separate
+    assert captured["max_tokens"] == 512
+    # anthropic SDK 1.0.0 removed the sampling parameters from `messages.create()`
+    # (passing one is a TypeError, portal #231): the Anthropic branch must never forward
+    # them, whatever the caller asked for.
+    assert not {"temperature", "top_p", "top_k"} & captured.keys()
 
 
 def test_complete_routes_to_openai_shape():
@@ -123,6 +128,8 @@ def test_complete_routes_to_openai_shape():
     # OpenAI folds the system prompt into a leading message role.
     assert captured["messages"][0] == {"role": "system", "content": "S"}
     assert captured["messages"][1] == {"role": "user", "content": "hi"}
+    # The sampling knob still reaches OpenAI — it is only the Anthropic branch that lost it.
+    assert captured["temperature"] == 0
 
 
 def test_complete_openai_empty_system_sends_no_system_message():

@@ -111,12 +111,19 @@ class LLMClient:
         ``messages`` is a list of ``{"role", "content"}`` turns (no system role — the
         system prompt is passed separately, mirroring the Anthropic API shape). An empty
         ``system`` sends no system prompt.
+
+        ``temperature`` reaches the OpenAI provider only. The Anthropic SDK's 1.0.0
+        release removed the sampling parameters (``temperature`` / ``top_p`` / ``top_k``)
+        from ``messages.create()`` — passing one is a ``TypeError``, and its migration
+        guide says current models do not use them (portal #231). The kwarg stays on this
+        interface so a kit's call sites are provider-neutral, and is documented here as
+        a no-op for Anthropic rather than silently dropped.
         """
         client = self._client()
         if self.provider == "anthropic":
             resp = client.messages.create(
                 model=self.model, system=system, messages=messages,
-                temperature=temperature, max_tokens=max_tokens,
+                max_tokens=max_tokens,
             )
             text = "".join(b.text for b in resp.content if b.type == "text")
             return ChatResult(text, resp.usage.input_tokens, resp.usage.output_tokens)
