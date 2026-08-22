@@ -69,7 +69,7 @@ MIN_CORE_REF = "v4.1.0"
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
 # `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call, and
 # must be >= MIN_CORE_REF or the emitted kit cannot run at all.
-DEFAULT_CORE_REF = "v4.1.0"
+DEFAULT_CORE_REF = "v4.1.1"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted

@@ -62,63 +62,15 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **`v4.1.0` — the as-of date reaches the kits (portal #229).** The portal has sent
-  `--set generation.as_of_date=YYYY-MM-DD` on every forward generate since #72, and every
-  kit dropped it at its config model. Minor, additive:
-
-  - **`timegen.resolve_run_date(as_of)` / `timegen.parse_as_of_date(value)`** — the one
-    resolution every kit's seed goes through: a date (or the ISO string the portal sends)
-    anchors at `AS_OF_ANCHOR_HOUR` (noon UTC — the hour every golden adapter already
-    pinned, so a kit that starts honouring the knob keeps its golden bytes); `None` is the
-    wall clock. A future date is by design and is never clamped.
-  - **The scaffold stops teaching the bug.** `materialize.py.tmpl` no longer carries a
-    `RUN_DATE` constant — `build_events(..., run_date=)` takes the anchor `seed.py.tmpl`
-    resolves — and `golden_seed.py.tmpl` pins `AS_OF_DATE` through the real `--set` path.
-    The authoring skill says the same. **`MIN_CORE_REF` moves to `v4.1.0`**: an emitted
-    kit imports the new helper.
-  - Kits re-pinned in the same wave: EV/Lender declare `generation.as_of_date` and route
-    `run_seed`'s default through the resolver (goldens byte-identical); Support drops its
-    frozen anchor and its `verify` derives the re-index boundary from the data it reads.
-
-- **`v4.0.0` — the contract half of expand–contract (portal #213).** The v4 migration ran
-  as expand–contract: core learned every v4 wire *beside* the one it replaced, kits cut over
-  one at a time, and this release deletes what they cut over from. It is **major** because
-  it removes public surface a kit could still be calling, and every removal is load-bearing:
-
-  - **The batch write path is gone.** `langfuse_synth_core.seed.writepath` — `BATCH`,
-    `OTLP`, `set_spool_write_path`, `use_spool_write_path`, `SYNTH_SPOOL_WRITE_PATH` — no
-    longer exists. Every observation is an OTLP span and a trace is its minted root; there
-    is nothing to select. A kit that still pins the path fails at import, which is the
-    intended way to find out. `RICH_OBSERVATION_TYPES` went with it: its off position
-    existed for batch servers that accepted only `SPAN | GENERATION | EVENT`.
-  - **Scores are unchanged, and are not an exception.** They are still `score-create`
-    envelopes on `POST /api/public/ingestion`. Langfuse's deprecated-API migration guide
-    scopes the ingestion deprecation to trace and observation events and says `score-create`
-    needs no client change (portal #225, closed no-change). `docs/WRITE_PATHS.md` says so
-    where the next reader looks.
-  - **The read seam reads v4 and only v4.** Every deprecated branch, its normalisers, the
-    generation probe and `SYNTH_LANGFUSE_READ_API` are gone, and `LangfuseReader(read_api=…)`
-    no longer takes that argument. The probe mattered most: it called a deprecated endpoint
-    once per reader, which made the seam's own liveness check the last legacy call in the
-    stack. `LangfuseReader.ping()` asks the same question on `/v2/observations`.
-  - **`TargetProfile` resolves reachability, not a generation.** `read_api` and `is_v4` are
-    replaced by `reachable`; `resolved()` / `try_resolve()` / `label` keep their names and
-    shapes, so a kit's call sites do not move.
-  - **`CompanionAdapter.ingestor()` is gone**, from the shell and from the Protocol. A live
-    surface stamps wall-clock and rides `emitter()`; the readiness probe builds its own
-    writer. No kit called it.
-  - **`synth-authoring conformance` is enforcing where it matters.** The v4 checks — a
-    deprecated endpoint, and an observation type outside the vocabulary — ride a channel
-    `--advisory` cannot downgrade. `--advisory` still covers a pre-portal kit's convergence
-    debt. The ingestion rule is now stated per **event type**: a trace or observation
-    envelope posted to `/api/public/ingestion` is a finding, a `score-create` one is not.
-  - **`MIN_CORE_REF` and `DEFAULT_CORE_REF` move to `v4.0.0`.** The `seed` template no
-    longer pins a write path, so on an older core a freshly scaffolded kit would write
-    envelopes to an endpoint that has stopped taking them.
-  - `x-langfuse-ingestion-version: 4` is now **asserted**, not merely sent:
-    `tests/test_ingestion_version_header.py` walks every writer. Without the header a v4
-    target files the write on the legacy read path, where it is invisible to every v4 query
-    endpoint and dashboard while the legacy ones answer it happily.
+- **`v4.1.1` — the companion layer survives anthropic SDK 1.0.0 (portal #231).** The SDK's
+  1.0.0 release removed `temperature` / `top_p` / `top_k` from `messages.create()`; every
+  kit pins `anthropic` with no upper bound, so the images built in the #229 wave got 1.0.0
+  and every live model call raised `TypeError`. The call site is `companion/llm.py`, so all
+  three kits broke at once. Patch: `LLMClient.complete` no longer forwards `temperature` on
+  the Anthropic branch (the kwarg stays — it still reaches OpenAI, and kit call sites are
+  provider-neutral). Kits re-pinned in the same wave raise their floor to `anthropic>=1.0.0`
+  so the pin records the migration; seed-spool `modelParameters.temperature` is synthetic
+  metadata and untouched, so goldens stay byte-identical.
 
 ## Release checklist
 
