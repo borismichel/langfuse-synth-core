@@ -62,16 +62,6 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-- **`v4.1.1` — the companion layer survives anthropic SDK 1.0.0 (portal #231).** The SDK's
-  1.0.0 release removed `temperature` / `top_p` / `top_k` from `messages.create()`; every
-  kit pins `anthropic` with no upper bound, so the images built in the #229 wave got 1.0.0
-  and every live model call raised `TypeError`. The call site is `companion/llm.py`, so all
-  three kits broke at once. Patch: `LLMClient.complete` no longer forwards `temperature` on
-  the Anthropic branch (the kwarg stays — it still reaches OpenAI, and kit call sites are
-  provider-neutral). Kits re-pinned in the same wave raise their floor to `anthropic>=1.0.0`
-  so the pin records the migration; seed-spool `modelParameters.temperature` is synthetic
-  metadata and untouched, so goldens stay byte-identical.
-
 ## Release checklist
 
 1. **Bump the version** in `pyproject.toml` (`version = "X.Y.Z"`) on a release branch;
