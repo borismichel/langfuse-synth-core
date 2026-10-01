@@ -1,12 +1,8 @@
 """The golden gate pins the hash seed (determinism hardening for #28 / #30).
 
-The determinism law is ``seed + target_traces + params -> byte-identical Spool``. Python
-salts ``str``/``bytes`` hashing with ``PYTHONHASHSEED`` per process, so a kit that
-serializes a ``set`` (or any hash-ordered structure) without sorting would materialize
-*different bytes on every run* — a false ``GoldenMismatch``, and exactly the flakiness
-that would bite Step 0 (#30) when the gate is pointed at the real kits. The gate must
-therefore pin the hash seed in the seed subprocess, so the byte-identity guarantee holds
-by construction rather than by the kit author's vigilance.
+The historical snapshot comparison stays pinned at hash seed 0. This test protects
+that compatibility; the separate repeatability gate rejects unordered Recipe output
+instead of letting authors freeze it (see test_golden_repeatability.py).
 
 Runs under the ``[authoring]`` extra (the gate ships behind it); skipped on a bare
 runtime install, where the boundary is proved elsewhere.
