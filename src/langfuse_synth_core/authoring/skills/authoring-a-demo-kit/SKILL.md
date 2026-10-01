@@ -296,8 +296,11 @@ under `PYTHONHASHSEED` values 0, 1 and 2, with egress blocked for every run. The
 `assert_repeatable(GoldenSpec(...))` API performs this check; generated tests also support
 the default older core pin through its public egress guard. A `RepeatabilityMismatch` means
 process-dependent output: sort unordered collections before generating or serializing
-records, then rerun the tests. `freeze` refuses this failure and preserves the existing
-snapshot. A `GoldenMismatch` instead reports content drift against the fixed-hash oracle.
+records, then rerun the tests. In core builds with `assert_repeatable`, `freeze` refuses
+this failure and preserves the existing snapshot. On the older default v4.1.1 pin, run
+the generated repeatability test successfully **before** freezing (or upgrade core):
+its older `freeze` does not enforce this safeguard. A `GoldenMismatch` instead reports
+content drift against the fixed-hash oracle.
 
 After repeatability passes, `freeze` materializes at hash seed 0 and writes the Spool as the
 new oracle — so an accidental drift still fails, but an intended change is a deliberate
