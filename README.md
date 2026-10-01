@@ -81,6 +81,7 @@ synth-authoring new my-kit                 # -> ./my-kit/
 synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
 synth-authoring new my-kit --core-ref v4.1.1    # lib git ref the kit pins to (a tag)
+synth-authoring new refund-demo --starter regression-recovery  # complete seeded story
 
 # Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
 synth-authoring validate path/to/usecase.yaml
@@ -98,6 +99,14 @@ synth-authoring skills --install       # copy them into .claude/skills/ so an ag
 
 A freshly scaffolded kit is green from its first commit: `cd my-kit && pip install -e
 '.[dev]' && pytest`.
+
+The opt-in `regression-recovery` starter ships a refund-policy retrieval story: linked
+baseline, failure and recovery traces, seeded correctness scores, current-run scenario
+verification and a three-beat delivered Presenter Runbook. Its default is 24 traces;
+every supported volume (at least three) retains the essential comparison. The walkthrough
+uses Langfuse; an optional `--companion` still starts as a basic placeholder. Answers,
+scores and timings are explicit fixtures. Follow the generated README's offline and
+staging rehearsal paths; a fresh scaffold does not claim a completed live rehearsal.
 
 ## Kit-dev skills (the agent pack)
 
