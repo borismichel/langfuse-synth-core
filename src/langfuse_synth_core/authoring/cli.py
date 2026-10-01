@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from langfuse_synth_core.authoring import benchmark as _benchmark
+from langfuse_synth_core.authoring import check as _check
 from langfuse_synth_core.authoring import conformance as _conformance
 from langfuse_synth_core.authoring import repin as _repin
 from langfuse_synth_core.authoring import skills as _skills
@@ -307,6 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     _benchmark.add_parser(subparsers)
     _add_validate(subparsers)
     _add_conformance(subparsers)
+    _check.add_parser(subparsers)
     _add_freeze(subparsers)
     _add_new(subparsers)
     _add_repin(subparsers)
