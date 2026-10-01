@@ -354,3 +354,16 @@ runtime, once or per-unit). Full pattern in
 - `docs/WRITE_PATHS.md` (in the library repo) — how the Spool is written, why it is raw OTLP
   rather than the Langfuse SDK, why scores stay `score-create`, and the non-resumable import
   and its recovery.
+
+
+## One offline authoring check
+
+In an authoring build that provides `check`, run `synth-authoring check /path/to/kit`
+(or add `--json` for versioned per-stage status). Select the kit's environment with
+`--python /path/to/kit/.venv/bin/python` after installing its `[dev]` extra. This combines
+manifest validation, conformance and the ordinary kit test suite; added scenario and
+repeatability tests participate automatically. The older v4.1.1 pin lacks this command.
+Failed, unavailable or skipped checks require attention; no live seed, live verification,
+admission or publication runs here. Fix local failures first and keep live rehearsal as
+an explicit separate gate. The guard blocks ordinary Python networking and omits inherited
+credentials, but is not an OS sandbox for arbitrary native subprocesses.
