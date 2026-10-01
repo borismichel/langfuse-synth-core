@@ -841,7 +841,8 @@ def test_emitted_kit_pins_the_as_of_date_in_the_gate_not_in_src(kit):
     import re
 
     adapter = (kit.dest / "tests" / "golden_seed.py").read_text()
-    assert 'AS_OF_DATE = "' in adapter and "generation.as_of_date=" in adapter
+    assert 'AS_OF_DATE = "' in adapter
+    # Parameter behavior is exercised through the golden adapter in test_scaffold_parameters.
     for path in (kit.dest / "src").rglob("*.py"):
         body = "\n".join(line for line in path.read_text().splitlines()
                          if not line.lstrip().startswith("#"))
