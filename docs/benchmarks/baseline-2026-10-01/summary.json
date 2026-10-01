@@ -1,0 +1,177 @@
+{
+  "groups": [
+    {
+      "cohort": {
+        "protocol_version": 1,
+        "brief": "new-spool",
+        "mode": "offline",
+        "environment": {
+          "platform": "macOS-26.6.2-arm64-arm-64bit",
+          "machine": "arm64",
+          "python": "3.12.14",
+          "dependencies": {
+            "PyYAML": "6.0.3",
+            "Pygments": "2.21.0",
+            "annotated-doc": "0.0.5",
+            "annotated-types": "0.8.0",
+            "anyio": "4.15.1",
+            "attrs": "26.1.0",
+            "backoff": "2.2.1",
+            "certifi": "2026.7.22",
+            "charset-normalizer": "3.5.2",
+            "click": "8.5.0",
+            "fastapi": "0.142.2",
+            "googleapis-common-protos": "1.75.5",
+            "h11": "0.16.0",
+            "httpcore": "1.0.9",
+            "httpx": "0.28.1",
+            "idna": "3.20",
+            "iniconfig": "2.3.0",
+            "jsonschema": "4.26.0",
+            "jsonschema-specifications": "2025.9.1",
+            "langfuse": "4.16.0",
+            "opentelemetry-api": "1.45.0",
+            "opentelemetry-exporter-http-transport": "0.66b0",
+            "opentelemetry-exporter-otlp-common": "0.66b0",
+            "opentelemetry-exporter-otlp-proto-common": "1.45.0",
+            "opentelemetry-exporter-otlp-proto-http": "1.45.0",
+            "opentelemetry-proto": "1.45.0",
+            "opentelemetry-sdk": "1.45.0",
+            "opentelemetry-semantic-conventions": "0.66b0",
+            "packaging": "26.3",
+            "pip": "25.0.1",
+            "pluggy": "1.6.0",
+            "protobuf": "7.36.2",
+            "pydantic": "2.13.5",
+            "pydantic_core": "2.46.5",
+            "pytest": "8.4.2",
+            "python-multipart": "0.0.32",
+            "referencing": "0.37.0",
+            "requests": "2.34.2",
+            "rpds-py": "2026.6.3",
+            "ruff": "0.16.9",
+            "starlette": "1.7.0",
+            "typing-inspection": "0.4.4",
+            "typing_extensions": "4.16.0",
+            "urllib3": "2.8.0",
+            "uvicorn": "0.54.0",
+            "wrapt": "2.5.0"
+          },
+          "context": "Local subprocesses; existing Python environment; no install, image build or deployment. System load and filesystem caches uncontrolled."
+        },
+        "agent": null,
+        "inputs": {
+          "scaffold": "pure-spool"
+        },
+        "checks": [
+          "scaffold",
+          "validate",
+          "conformance",
+          "kit-tests"
+        ]
+      },
+      "revisions": {
+        "7eabcbb5e71a447fba40ddbbd3de5785bf257db0": {
+          "runs": 1,
+          "run_ids": [
+            "ba304eff-c6bc-47bc-ba68-812f069b3215"
+          ],
+          "offline_seconds_mean": {
+            "scaffold": 0.2244674579706043,
+            "validate": 0.10198000003583729,
+            "conformance": 0.09690404194407165,
+            "kit-tests": 0.23798391607124358
+          },
+          "authoring_and_live": "pending (not measured by offline checks)"
+        }
+      }
+    },
+    {
+      "cohort": {
+        "protocol_version": 1,
+        "brief": "interactive-companion",
+        "mode": "offline",
+        "environment": {
+          "platform": "macOS-26.6.2-arm64-arm-64bit",
+          "machine": "arm64",
+          "python": "3.12.14",
+          "dependencies": {
+            "PyYAML": "6.0.3",
+            "Pygments": "2.21.0",
+            "annotated-doc": "0.0.5",
+            "annotated-types": "0.8.0",
+            "anyio": "4.15.1",
+            "attrs": "26.1.0",
+            "backoff": "2.2.1",
+            "certifi": "2026.7.22",
+            "charset-normalizer": "3.5.2",
+            "click": "8.5.0",
+            "fastapi": "0.142.2",
+            "googleapis-common-protos": "1.75.5",
+            "h11": "0.16.0",
+            "httpcore": "1.0.9",
+            "httpx": "0.28.1",
+            "idna": "3.20",
+            "iniconfig": "2.3.0",
+            "jsonschema": "4.26.0",
+            "jsonschema-specifications": "2025.9.1",
+            "langfuse": "4.16.0",
+            "opentelemetry-api": "1.45.0",
+            "opentelemetry-exporter-http-transport": "0.66b0",
+            "opentelemetry-exporter-otlp-common": "0.66b0",
+            "opentelemetry-exporter-otlp-proto-common": "1.45.0",
+            "opentelemetry-exporter-otlp-proto-http": "1.45.0",
+            "opentelemetry-proto": "1.45.0",
+            "opentelemetry-sdk": "1.45.0",
+            "opentelemetry-semantic-conventions": "0.66b0",
+            "packaging": "26.3",
+            "pip": "25.0.1",
+            "pluggy": "1.6.0",
+            "protobuf": "7.36.2",
+            "pydantic": "2.13.5",
+            "pydantic_core": "2.46.5",
+            "pytest": "8.4.2",
+            "python-multipart": "0.0.32",
+            "referencing": "0.37.0",
+            "requests": "2.34.2",
+            "rpds-py": "2026.6.3",
+            "ruff": "0.16.9",
+            "starlette": "1.7.0",
+            "typing-inspection": "0.4.4",
+            "typing_extensions": "4.16.0",
+            "urllib3": "2.8.0",
+            "uvicorn": "0.54.0",
+            "wrapt": "2.5.0"
+          },
+          "context": "Local subprocesses; existing Python environment; no install, image build or deployment. System load and filesystem caches uncontrolled."
+        },
+        "agent": null,
+        "inputs": {
+          "scaffold": "companion"
+        },
+        "checks": [
+          "scaffold",
+          "validate",
+          "conformance",
+          "kit-tests"
+        ]
+      },
+      "revisions": {
+        "7eabcbb5e71a447fba40ddbbd3de5785bf257db0": {
+          "runs": 1,
+          "run_ids": [
+            "551593a3-41f3-4ec9-9b6f-9479f3d5606c"
+          ],
+          "offline_seconds_mean": {
+            "scaffold": 0.2079582919832319,
+            "validate": 0.09923049993813038,
+            "conformance": 0.25141487503424287,
+            "kit-tests": 0.24246350000612438
+          },
+          "authoring_and_live": "pending (not measured by offline checks)"
+        }
+      }
+    }
+  ],
+  "excluded": {}
+}

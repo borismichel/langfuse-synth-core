@@ -1,0 +1,2 @@
+["/private/tmp/demo-kit-review-venv/bin/python", "-m", "langfuse_synth_core.authoring.cli", "validate", "/var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs/benchmark-kit/usecase.yaml"]
+✓ /var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs/benchmark-kit/usecase.yaml — valid (slug: benchmark-kit)
