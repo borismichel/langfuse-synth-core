@@ -134,3 +134,10 @@ byte-identical core was extracted and **both** kits went golden-green (Ring 1b, 
 
 Cutting a version is not done until **every consuming kit is re-pinned to it** — follow
 the checklist in [`RELEASING.md`](RELEASING.md), which lists the kits that must be bumped.
+
+## Measuring time-to-demo
+
+Use the [benchmark protocol](docs/benchmarks/README.md) to compare core or authoring-skill
+changes against three fixed briefs. `synth-authoring benchmark` records and validates
+evidence, separates offline component timings from agent-authoring and live outcomes,
+and compares completed runs only within matching environments.

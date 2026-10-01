@@ -13,6 +13,7 @@ extra; the deployed runtime image must never carry it (Spec A §3). The gate imp
 """
 from __future__ import annotations
 
+import os
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -49,10 +50,22 @@ def seed(target_traces: int, params: Mapping[str, Any]) -> bytes:
     )
     with tempfile.TemporaryDirectory(prefix="synth-golden-") as tmp:
         spool_path = Path(tmp) / "events.ndjson"
-        # dry_run: no guardrail call, no network; do_import=False: never touch Langfuse.
-        run_seed(
-            cfg, dry_run=True, do_import=False, spool_path=spool_path,
-            output_dir=Path(tmp) / "out", runbook_source=CONFIG.parent.parent / "DEMO_SCRIPT.md",
-            log=lambda _m: None,
-        )
-        return spool_path.read_bytes()
+        # Golden runs own temporary state as well as a temporary Spool. A dry run
+        # invalidates verification receipts and may write anchors; neither may touch
+        # the last live run, including when the caller inherited SYNTH_STATE_DIR.
+        previous_state_dir = os.environ.get("SYNTH_STATE_DIR")
+        os.environ["SYNTH_STATE_DIR"] = tmp
+        try:
+            # dry_run: no guardrail or network; do_import=False: never touch Langfuse.
+            run_seed(
+                cfg, dry_run=True, do_import=False, spool_path=spool_path,
+                output_dir=Path(tmp) / "out",
+                runbook_source=CONFIG.parent.parent / "DEMO_SCRIPT.md",
+                log=lambda _m: None,
+            )
+            return spool_path.read_bytes()
+        finally:
+            if previous_state_dir is None:
+                os.environ.pop("SYNTH_STATE_DIR", None)
+            else:
+                os.environ["SYNTH_STATE_DIR"] = previous_state_dir
