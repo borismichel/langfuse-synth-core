@@ -104,6 +104,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
 COMPANION_FILES: tuple[tuple[str, str], ...] = (
     ("companion__init__.py.tmpl", "src/synth/companion/__init__.py"),
     ("companion_app.py.tmpl", "src/synth/companion/app.py"),
+    ("companion_preview.py.tmpl", "src/synth/companion/preview.py"),
 )
 
 # Emitted ONLY when `--anchors` is passed (portal #199): the kit's anchors payload on the
@@ -193,7 +194,7 @@ _ANCHORS_PAGE_HELPER = (
     "\n"
     "\n"
 )
-_ANCHORS_PAGE_BODY = "\n        + _anchors_line()"
+_ANCHORS_PAGE_BODY = "\n        + (_anchors_line() if not preview else '')"
 
 
 class ScaffoldError(ValueError):
