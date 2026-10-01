@@ -116,3 +116,14 @@ inherited credentials are omitted; this is a development guard, not an OS sandbo
 untrusted/native subprocesses. Golden snapshots remain intentional `freeze` operations.
 After offline checks pass, perform the separate current-run live verification, admission
 and Presenter Runbook rehearsal; local readiness does not claim those have happened.
+
+### Release admission handoff
+
+After the kit's tagged image is published and signed, an authoring build containing
+`synth-authoring admit` can preflight and resume its depot admission run. Use an existing
+admin session, an immutable release tag and a separate nonsecret progress file per
+candidate. Only a passing eligible-to-pin verdict prints a registry snippet; registry
+edits, staging rehearsal and publication remain separate steps. The default older v4.1.1
+runtime pin does not include this new authoring command. Follow core's
+[admission guide](https://github.com/borismichel/langfuse-synth-core/blob/main/docs/ADMISSION.md)
+for connection setup, polling limits, retries and credential handling.
