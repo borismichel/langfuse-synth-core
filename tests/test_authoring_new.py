@@ -538,7 +538,7 @@ def test_scaffolded_verify_reads_through_the_seam_and_names_no_endpoints(kit):
     """
     verify_src = (kit.dest / "src" / "synth" / "verify.py").read_text()
     assert "TargetProfile" in verify_src
-    assert "reader.traces(" in verify_src and "reader.scores(" in verify_src
+    assert "reader.trace(" in verify_src and "reader.scores(" in verify_src
     body = "\n".join(line for line in verify_src.splitlines()
                      if not line.lstrip().startswith("#"))
     body = body.split('"""', 2)[-1]   # the docstring discusses the migration

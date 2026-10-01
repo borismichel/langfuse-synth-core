@@ -51,3 +51,18 @@ the demo through the depot.
 3. Replace the identity derivation hook and grow `materialize.py` into the real story,
    keeping the gate green. Re-bless a deliberate pool change with `synth-authoring freeze`
    (never hand-edit the golden).
+
+### Verify the seeded run
+
+A successful live `synth seed` writes `.synth_verify.json` beside the Spool, using
+`SYNTH_STATE_DIR` when deployed. `synth verify` reads up to five exact trace/score pairs
+from that receipt, checks run timestamps, score values and trace relationships, and polls
+visibility for up to 60 seconds. In-flight requests use core's HTTP timeout. A missing or
+invalid receipt fails before querying Langfuse; unrelated project data cannot pass.
+Dry runs, spool-only runs and failed new attempts leave no successful receipt. Never
+re-seed an uncleared project to fix verification: OTLP appends observations.
+
+The receipt shares core's anchors IO but has its own filename, so `--anchors`' kit state
+is preserved. Grow the representative selection and assertions with the story; the
+starter's score timestamps equal their trace start timestamps. The `run_verify` function
+accepts `timeout_seconds`, `poll_interval`, `clock` and `sleep` for controlled local tests.
