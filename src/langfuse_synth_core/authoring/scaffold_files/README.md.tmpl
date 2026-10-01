@@ -100,3 +100,19 @@ page/interaction behavior, never live Adapter readiness or admission. The manife
 continues to launch `synth companion` with the real Adapter. Before release, run that
 live command against your intended target, verify both `langfuse_write_ok` and
 `llm_bound` in its readiness response, and complete live verification and admission.
+
+### One offline check
+
+With an authoring checkout/build containing `check`, run `synth-authoring check .` (or
+`synth-authoring check /path/to/kit --json`). It runs manifest validation, conformance and
+kit tests in isolated processes, without live verification or admission. Use `--python
+/path/to/kit/.venv/bin/python` for the kit's environment; install the kit's `[dev]` extra
+there first. The older default runtime pin does not include this new authoring command.
+
+Every stage reports passed, failed, skipped or unavailable, its exit code and a next action.
+Skipped tests or missing dependencies leave local readiness incomplete. `--timeout 120`
+bounds each stage. Normal Python network calls (including localhost) are blocked and
+inherited credentials are omitted; this is a development guard, not an OS sandbox for
+untrusted/native subprocesses. Golden snapshots remain intentional `freeze` operations.
+After offline checks pass, perform the separate current-run live verification, admission
+and Presenter Runbook rehearsal; local readiness does not claim those have happened.

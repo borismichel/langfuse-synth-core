@@ -9,7 +9,7 @@ validator can't check) to the existing ``langfuse`` skill.
 
 The skills ride here as **package data** under ``langfuse_synth_core.authoring`` — one
 version, one repo — so the Contract, its validator, and the skills that teach both can
-never drift (the drift that killed the pure template-repo option). They live behind the
+travel together; installation receipts detect stale copies. They live behind the
 ``[authoring]`` extra: a deployed kit never authors, so the runtime image carries none of
 this.
 
@@ -22,12 +22,18 @@ discoverable where the agent looks for it.
 
 from __future__ import annotations
 
-import shutil
+import hashlib
+import json
+import tempfile
+import uuid
 from importlib import resources
-from importlib.abc import Traversable
+from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import TypedDict
 
 import yaml
+
+from langfuse_synth_core import __version__
 
 
 def _copy_tree(src: Traversable, dest: Path) -> None:
@@ -52,6 +58,8 @@ def _copy_tree(src: Traversable, dest: Path) -> None:
 # ``SKILL.md`` is one skill.
 _SKILLS_SUBDIR = "skills"
 _SKILL_FILE = "SKILL.md"
+_RECEIPT = ".synth-authoring.json"
+AGENT_DESTS = {"claude": ".claude/skills", "codex": ".agents/skills"}
 
 
 class SkillNotFoundError(LookupError):
@@ -110,25 +118,128 @@ def skill_frontmatter(name: str) -> dict:
     return meta if isinstance(meta, dict) else {}
 
 
-def install_skills(dest: str | Path, *, force: bool = False) -> list[Path]:
-    """Copy every shipped skill (SKILL.md + references) into ``dest``; return the dirs written.
+def install_skills(
+    dest: str | Path, *, force: bool = False, update: bool = False,
+) -> list[Path]:
+    """Install the shipped pack, or update unedited copies with ``update=True``.
 
-    ``dest`` is the skills directory a coding agent reads (``.claude/skills`` by default via
-    the CLI). Each skill lands at ``dest/<name>/``. Refuses to overwrite an existing skill
-    dir unless ``force`` — an author may have edited their installed copy, and a silent
-    clobber would lose that.
+    Every replacement preserves the previous directory in a sibling backup directory.
+    ``force`` permits replacing modified/unmanaged copies; it never discards their files.
+    All conflicts are checked before writing any skill.
     """
     dest = Path(dest)
-    written: list[Path] = []
-    for name in list_skills():
+    statuses = skill_status(dest)
+    for item in statuses:
+        target = dest / item["name"]
+        state = item["state"]
+        if target.is_symlink():
+            raise FileExistsError(f"{target} is a symlink; choose a regular destination")
+        if state != "missing" and not force:
+            if not update or state in ("locally-modified", "unmanaged"):
+                raise FileExistsError(
+                    f"{target}: {state}; inspect your copy, then use --update --force "
+                    "to replace it with a preserved backup"
+                )
+    written = []
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in statuses:
+        name = item["name"]
         target = dest / name
-        if target.exists() and not force:
-            raise FileExistsError(
-                f"{target} already exists — pass force=True to overwrite (this would "
-                "replace an edited copy of the skill)"
-            )
-        if target.exists():
-            shutil.rmtree(target)
-        _copy_tree(_skill_dir(name), target)
+        if update and item["state"] == "current":
+            continue
+        # Prepare a complete copy before moving the installed one out of the way.
+        with tempfile.TemporaryDirectory(prefix=".synth-skill-", dir=dest.parent) as temp:
+            staged = Path(temp) / name
+            _copy_tree(_skill_dir(name), staged)
+            (staged / _RECEIPT).write_text(json.dumps({
+                "core_version": __version__, "files": _hashes(staged),
+            }, indent=2) + "\n", encoding="utf-8")
+            backup = None
+            if target.exists():
+                backup = dest.parent / ".synth-skill-backups" / f"{name}-{uuid.uuid4().hex}"
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                target.rename(backup)
+            try:
+                staged.rename(target)
+            except OSError:
+                if backup is not None:
+                    backup.rename(target)
+                raise
         written.append(target)
     return written
+
+
+def _hashes(root: Traversable, prefix: str = "") -> dict[str, str]:
+    files = {}
+    for child in root.iterdir():
+        if not prefix and child.name == _RECEIPT:
+            continue
+        name = prefix + child.name
+        if isinstance(child, Path) and child.is_symlink():
+            files[name] = "symlink:" + str(child.readlink())
+        elif child.is_dir():
+            files.update(_hashes(child, name + "/"))
+        else:
+            files[name] = hashlib.sha256(child.read_bytes()).hexdigest()
+    return files
+
+
+class SkillStatus(TypedDict):
+    name: str
+    state: str
+    core_version: str | None
+
+
+def skill_status(dest: str | Path) -> list[SkillStatus]:
+    """Compare installed files with their receipt and the currently running core."""
+    result: list[SkillStatus] = []
+    for name in list_skills():
+        target = Path(dest) / name
+        version = None
+        if not target.exists():
+            state = "missing"
+        else:
+            try:
+                receipt = json.loads((target / _RECEIPT).read_text(encoding="utf-8"))
+                version = receipt["core_version"]
+                recorded = receipt["files"]
+                if not isinstance(version, str) or not isinstance(recorded, dict):
+                    raise ValueError("invalid receipt")
+            except (OSError, ValueError, KeyError, TypeError):
+                version = None
+                state = "unmanaged"
+            else:
+                actual = _hashes(target)
+                if actual != recorded:
+                    state = "locally-modified"
+                elif version != __version__ or actual != _hashes(_skill_dir(name)):
+                    state = "stale"
+                else:
+                    state = "current"
+        result.append({"name": name, "state": state, "core_version": version})
+    return result
+
+
+def find_langfuse_skill(dest: str | Path, *, agent: str) -> Path | None:
+    """Find the prerequisite in conventional project/user filesystem locations.
+
+    A custom destination is checked first. Plugin registration and agent enable/disable
+    settings require confirmation in the agent itself, outside this filesystem check.
+    """
+    relative = AGENT_DESTS[agent]
+    directories = [Path(dest).expanduser()]
+    cwd = Path.cwd()
+    parents = [cwd, *cwd.parents]
+    repo = next((parent for parent in parents if (parent / ".git").exists()), cwd)
+    for parent in parents:
+        directories.append(parent / relative)
+        if parent == repo:
+            break
+    directories.append(Path.home() / relative)
+    if agent == "codex":
+        directories.append(Path("/etc/codex/skills"))
+    for directory in directories:
+        skill = directory / "langfuse" / "SKILL.md"
+        if skill.is_file():
+            return skill
+    return None

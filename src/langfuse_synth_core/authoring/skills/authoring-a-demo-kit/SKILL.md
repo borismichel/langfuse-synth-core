@@ -36,19 +36,27 @@ you are ever tempted to "enrich" a story with a live model call.
 ## Prerequisites
 
 ```bash
-pip install 'langfuse-synth-core[authoring]'      # brings the synth-authoring CLI + gates
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
 ```
 
 This skill ships *inside* that extra, versioned with the library — so the CLI you run and
-the skill you follow can never drift. To make sibling skills discoverable to your agent:
+the skill you follow can be checked against it. Keep an existing kit's agreed pin.
+Unreleased features require a local core checkout until tagged. To install for your agent:
 
 ```bash
 synth-authoring skills                # list the shipped kit-dev skills
-synth-authoring skills --install      # copy them into .claude/skills/
+synth-authoring skills --install --agent claude  # .claude/skills (default)
+synth-authoring skills --install --agent codex   # .agents/skills
+synth-authoring skills --status --agent codex    # installed version and local edits
+synth-authoring skills --update --agent codex    # refresh unedited copies
 ```
 
-Keep the `langfuse` skill available too — you will
-hand off to it in Phase 2 and Phase 5.
+Use the matching `--agent` and any custom `--dest` on subsequent commands.
+Updates preserve previous copies in a sibling `.synth-skill-backups` directory;
+local edits block replacement until you inspect them and explicitly use `--force`.
+The commands report whether the `langfuse` skill is found in conventional filesystem
+locations. Keep it enabled in your agent for the handoffs in Phase 2 and Phase 5;
+plugin-managed skills require checking in the agent itself.
 
 ## The workflow
 
@@ -371,3 +379,16 @@ live verification nor admission evidence.
 - `docs/WRITE_PATHS.md` (in the library repo) — how the Spool is written, why it is raw OTLP
   rather than the Langfuse SDK, why scores stay `score-create`, and the non-resumable import
   and its recovery.
+
+
+## One offline authoring check
+
+In an authoring build that provides `check`, run `synth-authoring check /path/to/kit`
+(or add `--json` for versioned per-stage status). Select the kit's environment with
+`--python /path/to/kit/.venv/bin/python` after installing its `[dev]` extra. This combines
+manifest validation, conformance and the ordinary kit test suite; added scenario and
+repeatability tests participate automatically. The older v4.1.1 pin lacks this command.
+Failed, unavailable or skipped checks require attention; no live seed, live verification,
+admission or publication runs here. Fix local failures first and keep live rehearsal as
+an explicit separate gate. The guard blocks ordinary Python networking and omits inherited
+credentials, but is not an OS sandbox for arbitrary native subprocesses.
