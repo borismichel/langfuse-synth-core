@@ -1,0 +1,51 @@
+"""Read-back assertions for the first current-run refund comparison session."""
+from .materialize import BEATS, QUESTION
+
+
+def check_story(reader, examples: list[dict]) -> tuple[bool, str]:
+    """Require linked baseline/failure/recovery with their actual retrieved evidence.
+
+    The common verifier separately establishes each receipt ID, run timestamp and score.
+    This assertion adds the scenario: the same question/customer session, ordered beats,
+    the wrong retired document followed by the corrected policy, and nonzero timings.
+    """
+    if len(examples) < 3:
+        return False, "current receipt needs baseline, failure and recovery"
+    traces = [reader.trace(e["trace_id"], with_scores=False) for e in examples[:3]]
+    if any(t is None for t in traces):
+        return False, "one of the three current-run story traces is not visible"
+    if not traces[0].session_id or len({t.session_id for t in traces}) != 1:
+        return False, "baseline, failure and recovery must share a comparison session"
+    if any(t.timestamp is None for t in traces) or not (
+        traces[0].timestamp < traces[1].timestamp < traces[2].timestamp
+    ):
+        return False, "story chronology must be baseline, then failure, then recovery"
+    for index, (trace, example, expected) in enumerate(zip(traces, examples, BEATS)):
+        beat, release, policy, answer, correctness = expected
+        metadata = trace.metadata or {}
+        if not isinstance(metadata, dict) or (
+            trace.name != f"refund-{beat}" or trace.input != QUESTION or trace.output != answer
+            or metadata.get("beat") != beat or metadata.get("release") != release
+            or metadata.get("evidence") != "seeded-fixture"
+            or metadata.get("baseline_trace_id") != traces[0].id
+            or metadata.get("previous_trace_id") != traces[max(0, index - 1)].id
+            or example["name"] != "policy-correctness" or example["value"] != correctness
+        ):
+            return False, f"{beat}: question, output, score or cross-trace relationship differs"
+        retrieval = next((o for o in trace.observations
+                          if o.name == "retrieve-refund-policy"), None)
+        generation = next((o for o in trace.observations
+                           if o.name == "answer-refund-question"), None)
+        if (retrieval is None or generation is None
+                or (retrieval.type or "").lower() != "retriever"
+                or (generation.type or "").lower() != "generation"
+                or retrieval.output != {"document": policy}
+                or generation.input != {"question": QUESTION, "context": policy}
+                or generation.output != answer):
+            return False, f"{beat}: retrieved policy and answer evidence do not agree"
+        if any(o.start_time is None or o.end_time is None or o.end_time <= o.start_time
+               for o in (retrieval, generation)):
+            return False, f"{beat}: retrieval and generation need nonzero durations"
+        if retrieval.end_time > generation.start_time:
+            return False, f"{beat}: generation started before retrieval completed"
+    return True, "current-run baseline → stale-policy failure → recovery is linked and visible"

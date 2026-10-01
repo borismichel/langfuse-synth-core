@@ -126,6 +126,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
             dest,
             with_companion=args.companion,
             with_anchors=args.anchors,
+            starter=args.starter,
             core_ref=args.core_ref,
             force=args.force,
         )
@@ -149,6 +150,10 @@ def _add_new(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--dir", default=".",
         help="parent directory to create the kit in (default: cwd); the kit lands at <dir>/<slug>",
+    )
+    parser.add_argument(
+        "--starter", choices=["basic", "regression-recovery"], default="basic",
+        help="start with the basic skeleton or a complete refund-policy regression story",
     )
     parser.add_argument(
         "--companion", action="store_true",

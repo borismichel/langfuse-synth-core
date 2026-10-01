@@ -110,8 +110,8 @@ def _version(tag: str) -> tuple[int, ...]:
     return tuple(int(g) for g in m.groups()) if m else (0, 0, 0)
 
 
-@pytest.fixture(scope="module")
-def image(tmp_path_factory):
+@pytest.fixture(scope="module", params=["basic", "regression-recovery"])
+def image(tmp_path_factory, request):
     """Scaffold one kit, build its emitted Dockerfile, yield the tag, clean up the image."""
     from langfuse_synth_core.authoring.scaffold import MIN_CORE_REF, scaffold_kit
 
@@ -124,7 +124,7 @@ def image(tmp_path_factory):
         )
 
     dest = tmp_path_factory.mktemp("kits") / "image-gate"
-    scaffold_kit("image-gate", dest, core_ref=core_ref)
+    scaffold_kit("image-gate", dest, core_ref=core_ref, starter=request.param)
 
     tag = f"synth-scaffold-gate:{uuid.uuid4().hex[:12]}"
     build = subprocess.run(

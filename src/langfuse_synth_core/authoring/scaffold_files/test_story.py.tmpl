@@ -1,0 +1,32 @@
+"""Independent story expectations at the public materialization seam."""
+from datetime import datetime, timezone
+
+import pytest
+
+from synth.materialize import build_events
+
+
+@pytest.mark.parametrize("count", [3, 4, 24, 101])
+def test_first_comparison_survives_volume_changes(count):
+    events = build_events(count, {"seed": 42},
+                          run_date=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    roots = [e for e in events if e.get("name", "").startswith("refund-")]
+    assert len(roots) == count
+    assert [r["name"] for r in roots[:3]] == [
+        "refund-baseline", "refund-failure", "refund-recovery",
+    ]
+    attrs = [{a["key"]: a["value"].get("stringValue") for a in r["attributes"]}
+             for r in roots[:3]]
+    assert {a["langfuse.session.id"] for a in attrs} == {"refund-42-case-0000"}
+    assert attrs[1]["langfuse.trace.metadata.baseline_trace_id"] == roots[0]["traceId"]
+    assert attrs[2]["langfuse.trace.metadata.previous_trace_id"] == roots[1]["traceId"]
+    assert "30 days" in attrs[0]["langfuse.observation.output"]
+    assert "14 days" in attrs[1]["langfuse.observation.output"]
+    assert "30 days" in attrs[2]["langfuse.observation.output"]
+    scores = [e["body"]["value"] for e in events if e.get("type") == "score-create"]
+    assert scores[:3] == [1.0, 0.0, 1.0]
+
+
+def test_too_small_volume_cannot_drop_the_recovery():
+    with pytest.raises(ValueError, match="at least 3"):
+        build_events(2, {"seed": 42}, run_date=datetime(2026, 1, 1, tzinfo=timezone.utc))

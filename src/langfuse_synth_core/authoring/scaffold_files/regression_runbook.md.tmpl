@@ -1,0 +1,63 @@
+# __NAME__ — Presenter Runbook
+
+**Story:** the support assistant denied a valid refund after a retrieval change picked
+a retired policy. Langfuse connects the wrong answer to its evidence; a corrected
+retrieval filter restores the answer and its score.
+
+**Evidence:** every trace, answer, timing and `policy-correctness` score in this demo is
+a deterministic seeded fixture. Scores are authored ground-truth labels: 1 means the
+answer follows the current 30-day policy; 0 means it does not. No LLM or evaluator runs
+during seeding. The recovery is already seeded; these beats inspect evidence and do
+not deploy a fix, edit a prompt, run an experiment or make a live model call.
+
+## Before presenting
+
+Deploy into a fresh demo project through the depot. Continue after `seed` and `verify`
+pass. Open this delivered Presenter Runbook and the deployment's Langfuse project.
+Set the trace time window to include the three days before the deployment's as-of
+date (including a future date when one was selected). At the default volume there are
+24 traces; the minimum three traces contains one complete comparison.
+
+## Beat 1 — Establish the correct answer (one minute)
+
+In Langfuse, open a trace named `refund-baseline`. Use the first comparison session
+(`refund-42-case-0000` with the default seed; substitute the selected generation seed)
+for all three beats. Read the input: unopened headphones delivered 21 days ago.
+Show the answer accepting a return within **30 days**, and `policy-correctness = 1`.
+Open `retrieve-refund-policy`: its output names `policy-2026`, the current 30-day policy.
+The `answer-refund-question` generation shows the same policy in its context.
+
+**Say:** “This is the expected outcome, with the evidence needed to explain it.”
+
+## Beat 2 — Explain the regression (one minute)
+
+Open the same session and its later `refund-failure` trace. The input is unchanged,
+but the output denies the refund using **14 days**, and `policy-correctness = 0`.
+Open `retrieve-refund-policy`: it retrieved `policy-2024 (retired)`. Compare its
+`filter` metadata (`none`) with the baseline's `status=current`. The trace metadata
+names `support-v2` and links back via `baseline_trace_id` and `previous_trace_id`.
+
+**Say:** “The answer follows the wrong document. The retrieval evidence localises the
+regression; the low score alone would not explain it.”
+
+## Beat 3 — Prove the seeded recovery (one minute)
+
+Open the same session's `refund-recovery`. Show the `support-v3` metadata, retrieval
+filter `status=current`, current `policy-2026` document, restored **30-day** answer,
+and `policy-correctness = 1`. The trace's `previous_trace_id` points to the failure.
+Compare the nonzero retrieval/generation timings without claiming measured performance:
+these timings, too, are fixtures.
+
+**Say:** “The corrected filter restores the same customer's answer. These three linked
+traces let us explain the failure and check the recovery.”
+
+## Rehearsal completion
+
+Complete all three beats in one session, with the same question, ordered timestamps,
+the retired/current document contrast and scores **1 → 0 → 1** visible. If `verify`
+fails or a record is absent, resolve that before presenting; unrelated old data is not
+a substitute. Never rerun seed over an uncleared project: ingestion appends observations.
+
+No Companion App is required. If the kit was created with `--companion`, its initial
+page is the basic scaffold placeholder and is outside this walkthrough. Live interaction
+requires additional authored behavior; none is claimed here.
