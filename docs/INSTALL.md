@@ -9,7 +9,7 @@ of) consumed as a **git-pinned dependency**. Kits pin it to a tag/SHA in their o
 ```toml
 # kit's pyproject.toml
 dependencies = [
-    "langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v0.1.0",
+    "langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1",
 ]
 ```
 
@@ -34,10 +34,65 @@ dependency, and the `python:*-slim` base images don't ship it — install it fir
 
 ## Runtime vs authoring install
 
-- **Runtime** (deployed kit / portal): `pip install langfuse-synth-core` (or the git pin
-  above). Carries none of the authoring toolchain's dependencies.
-- **Authoring** (a kit author's dev box): `pip install 'langfuse-synth-core[authoring]'`
+- **Runtime** (deployed kit / portal): the git-pinned dependency
+  above. Carries none of the authoring toolchain's dependencies.
+- **Authoring** (a kit author's dev box): the same git pin with the `[authoring]` extra
   to get `synth-authoring new / validate / freeze` and the kit-dev skills.
+
+
+```bash
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
+```
+
+`v4.1.1` is a published git tag, not a PyPI install. Keep an existing kit's agreed
+pin when working on it. Features documented on an unreleased branch require a
+local checkout (`pip install -e '.[authoring]'`) until they receive a release tag.
+
+## Bootstrap your coding agent
+
+Run from the kit directory after installing core's authoring extra:
+
+```bash
+synth-authoring skills --install --agent claude  # .claude/skills (also the default)
+synth-authoring skills --install --agent codex   # .agents/skills
+synth-authoring skills --status --agent codex
+synth-authoring skills --update --agent codex
+```
+
+The project targets follow [Claude Code's skill discovery](https://code.claude.com/docs/en/skills)
+and [Codex's skill discovery](https://learn.chatgpt.com/docs/build-skills).
+`--dest DIR` overrides either agent's destination for install, status and update;
+ensure your agent is configured to discover that directory. For a personal Codex
+install, for example, pass `--dest ~/.agents/skills` to each command.
+
+Each installed skill has a `.synth-authoring.json` receipt recording the source
+core version and SHA-256 identity of every bundled file. `--status` reports:
+
+- `current`: receipt, installed files and bundled files match.
+- `stale`: files still match their receipt, but the running core version or content changed.
+- `locally-modified`: a file was edited, added or removed since installation.
+- `unmanaged`: an existing copy has no readable installation receipt.
+- `missing`: no installed copy exists.
+
+Status is read-only and exits successfully after reporting; it is not a readiness
+gate. Update uses the **currently installed core**, without fetching or upgrading
+packages. Install your desired released git pin first, then run `--update`. Current
+copies are left alone; unedited stale copies are refreshed and missing copies installed.
+
+Modified and unmanaged copies block updates. Inspect them before choosing
+`--update --force`; that command preserves the previous directory in
+`.synth-skill-backups/` beside the destination directory before replacing it. Forced
+installation uses the same backup policy. Copy any wanted edits from the preserved
+backup into the new skill, or restore the backup after moving the new copy aside.
+Backups remain until you remove them. Symlinked installation targets are left untouched.
+
+Install, update and status also look for `langfuse/SKILL.md` in the destination,
+selected agent's project locations up to the repository root, and its personal
+skills directory (plus `/etc/codex/skills` for Codex). If absent, install your
+Langfuse skill there or use your agent's skill manager; no dependency is installed
+automatically. This filesystem check does not inspect plugin registration, synced
+account skills, additional directories or disabled-skill settings. Confirm the
+Langfuse skill is enabled in the agent before authoring.
 
 ## If the lib is ever made private again
 
@@ -50,7 +105,7 @@ Infisical to supply it):
 RUN --mount=type=secret,id=git_token \
     GIT_TOKEN="$(cat /run/secrets/git_token)" \
     pip install --no-cache-dir \
-      "langfuse-synth-core @ git+https://x-access-token:${GIT_TOKEN}@github.com/borismichel/langfuse-synth-core@v0.1.0"
+      "langfuse-synth-core @ git+https://x-access-token:${GIT_TOKEN}@github.com/borismichel/langfuse-synth-core@v4.1.1"
 ```
 
 This path is **not needed while the repo is public** and is documented only so a future

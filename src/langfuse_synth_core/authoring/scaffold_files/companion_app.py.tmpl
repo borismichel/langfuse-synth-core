@@ -18,9 +18,12 @@ once in CONTRACT.md §"The live surface"; this module only records the kit-side 
 """
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
-from langfuse_synth_core.companion import CompanionAdapter, parse_invocation
+from langfuse_synth_core.companion import (
+    CompanionAdapter, CompanionAdapterContract, parse_invocation,
+)
 from langfuse_synth_core.live import paths, theme
 
 # Kept in step with the `live_components` entry in usecase.yaml (the scaffold pins them
@@ -31,21 +34,30 @@ HEALTH_PATH = "/healthz"
 REQUIRES_SECRETS = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY")
 
 
-__ANCHORS_HELPER__def _placeholder_page() -> str:
+__ANCHORS_HELPER__def _placeholder_page(*, preview: bool = False) -> str:
     """The starter page, rendered through the shared Langfuse-styled shell (`live.theme`)."""
     body = (
+        _preview_banner(preview) +
         "<p class='eyebrow'>Companion surface</p>"
         "<h1>Your <span class='mark'>live</span> scene starts here.</h1>"
         "<p class='sub'>Scaffolded by <code>synth-authoring new --companion</code>. This "
         "placeholder is served by the Companion Adapter — replace it with the demo's "
         "interactive surface. Your routes get ready Langfuse + LLM clients from the adapter; "
         "you never handle a raw secret.</p>"
+        f"<p><a href='{paths.local('/sample')}'>View sample trace</a></p>"
         f"<a class='back' href='{paths.local(HEALTH_PATH)}'>readiness &rarr;</a>"__ANCHORS_BODY__
     )
     return theme.page(body, title="__NAME__ · companion")
 
 
-def create_app(adapter: CompanionAdapter) -> Any:
+def _preview_banner(preview: bool) -> str:
+    return (
+        "<aside role='status'><strong>Development preview</strong> — fixture data only. "
+        "Live readiness and admission have not been checked.</aside>"
+    ) if preview else ""
+
+
+def create_app(adapter: CompanionAdapterContract, *, preview: bool = False) -> Any:
     """Build the live Surface on ``adapter`` (its ready clients) and return a FastAPI app.
 
     Serves the placeholder page at ``/``; the Adapter mounts the health route and owns
@@ -64,7 +76,23 @@ def create_app(adapter: CompanionAdapter) -> Any:
 
     @app.get("/", response_class=HTMLResponse)
     async def _root() -> str:
-        return _placeholder_page()
+        return _placeholder_page(preview=preview)
+
+    @app.get("/sample", response_class=HTMLResponse)
+    async def _sample() -> str:
+        traces = adapter.reader().traces(limit=1)
+        body = _preview_banner(preview)
+        if traces:
+            trace = traces[0]
+            body += (
+                f"<h1>{escape(trace.name or trace.id)}</h1>"
+                f"<p>{escape(str(trace.input))}</p>"
+                f"<p>{escape(str(trace.output))}</p>"
+            )
+        else:
+            body += "<p>No traces found. Seed your demo before inspecting its data.</p>"
+        body += f"<a href='{paths.local('/')}' >Back to Companion</a>"
+        return theme.page(body, title="__NAME__ · sample trace")
 
     return app
 

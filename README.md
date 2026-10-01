@@ -21,10 +21,10 @@ flexibility > deduplication). See [`docs/SEAM.md`](docs/SEAM.md) for the hand-of
 
 ```bash
 # Runtime (deployed kit / portal) — carries none of the authoring deps:
-pip install langfuse-synth-core
+pip install 'langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
 
 # Authoring (a kit author's dev box):
-pip install 'langfuse-synth-core[authoring]'
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
 ```
 
 Kits pin it as a **git dependency** by tag/SHA. The repo is **public** (consistent with
@@ -103,13 +103,17 @@ A freshly scaffolded kit is green from its first commit: `cd my-kit && pip insta
 
 The Authoring SDK is **agent-first** — a coding agent authors ~99% of new demos — so the
 `[authoring]` extra ships **kit-dev skills** versioned with the library (so the Contract,
-its validator, and the skills that teach them can never drift). The orchestrator skill
+its validator, and the skills that teach them ship together). The orchestrator skill
 [`authoring-a-demo-kit`](src/langfuse_synth_core/authoring/skills/authoring-a-demo-kit/SKILL.md)
 walks scaffold → model the trace tree → wire the `target_traces` derivation → runbook → run
 the gates; it enforces the **model-free-seed** law (with the author-time-LLM-frozen-fixture
 escape hatch, re-blessed via `synth-authoring freeze`) and **delegates Langfuse craft**
 (which observation type, which evaluator type) to the existing `langfuse` skill rather than
-duplicating it. `synth-authoring skills --install` copies the pack into `.claude/skills/`.
+duplicating it. `synth-authoring skills --install` keeps the `.claude/skills/` default;
+`--agent codex` targets `.agents/skills/`. Use `--status` to inspect installed versions
+and local edits, then `--update` to refresh unedited copies from the installed core.
+See [agent bootstrap](docs/INSTALL.md#bootstrap-your-coding-agent) for backups,
+prerequisite discovery, and custom destinations.
 
 ## Develop
 

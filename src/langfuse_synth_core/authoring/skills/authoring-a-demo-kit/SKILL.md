@@ -36,19 +36,27 @@ you are ever tempted to "enrich" a story with a live model call.
 ## Prerequisites
 
 ```bash
-pip install 'langfuse-synth-core[authoring]'      # brings the synth-authoring CLI + gates
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
 ```
 
 This skill ships *inside* that extra, versioned with the library — so the CLI you run and
-the skill you follow can never drift. To make sibling skills discoverable to your agent:
+the skill you follow can be checked against it. Keep an existing kit's agreed pin.
+Unreleased features require a local core checkout until tagged. To install for your agent:
 
 ```bash
 synth-authoring skills                # list the shipped kit-dev skills
-synth-authoring skills --install      # copy them into .claude/skills/
+synth-authoring skills --install --agent claude  # .claude/skills (default)
+synth-authoring skills --install --agent codex   # .agents/skills
+synth-authoring skills --status --agent codex    # installed version and local edits
+synth-authoring skills --update --agent codex    # refresh unedited copies
 ```
 
-Keep the `langfuse` skill available too — you will
-hand off to it in Phase 2 and Phase 5.
+Use the matching `--agent` and any custom `--dest` on subsequent commands.
+Updates preserve previous copies in a sibling `.synth-skill-backups` directory;
+local edits block replacement until you inspect them and explicitly use `--force`.
+The commands report whether the `langfuse` skill is found in conventional filesystem
+locations. Keep it enabled in your agent for the handoffs in Phase 2 and Phase 5;
+plugin-managed skills require checking in the agent itself.
 
 ## The workflow
 
@@ -291,6 +299,11 @@ synth-authoring freeze golden_seed:seed \
     --target-traces 24 --search-path tests --search-path src
 ```
 
+The scaffold adapter accepts `--params '{"seed": 7, "as_of_date": "2026-01-01"}'`
+(or the `generation.`-prefixed names). Volume stays in `--target-traces`. Unknown,
+duplicate and invalid parameters fail explicitly. Keep these adapter inputs aligned
+with the Recipe's declared configuration as the story grows.
+
 `freeze` re-materializes the Spool under the same deny-LLM egress block and writes it as the
 new oracle — so an accidental drift still fails, but an intended change is a deliberate
 re-bless, reviewable in the diff. The oracle is the Spool as it goes on the wire: OTLP spans
@@ -325,6 +338,18 @@ Seed runtime then replays frozen data; the rule stays a clean binary (no LLM at 
 runtime, once or per-unit). Full pattern in
 [references/model-free-seed.md](references/model-free-seed.md).
 
+### Companion preview during development
+
+For a scaffolded Companion, install its `.[dev]` extra and run
+`python -m synth.companion.preview --port 8765`. Open the local page and follow
+**View sample trace** to exercise the Surface through an explicit fixture reader.
+Extend the fixture data when adding interactions; unsupported client operations fail
+closed. The preview discards inherited credentials, blocks outgoing connections and
+shows a persistent preview indicator. Its `/healthz` is intentionally 503 with
+`ready: false`. Use this loop for rendering and interaction work, then stop it and
+rehearse the deployed Surface with its live Adapter. Successful preview is neither
+live verification nor admission evidence.
+
 ## What "done" looks like
 
 - `synth-authoring validate usecase.yaml` — valid.
@@ -354,3 +379,16 @@ runtime, once or per-unit). Full pattern in
 - `docs/WRITE_PATHS.md` (in the library repo) — how the Spool is written, why it is raw OTLP
   rather than the Langfuse SDK, why scores stay `score-create`, and the non-resumable import
   and its recovery.
+
+
+## One offline authoring check
+
+In an authoring build that provides `check`, run `synth-authoring check /path/to/kit`
+(or add `--json` for versioned per-stage status). Select the kit's environment with
+`--python /path/to/kit/.venv/bin/python` after installing its `[dev]` extra. This combines
+manifest validation, conformance and the ordinary kit test suite; added scenario and
+repeatability tests participate automatically. The older v4.1.1 pin lacks this command.
+Failed, unavailable or skipped checks require attention; no live seed, live verification,
+admission or publication runs here. Fix local failures first and keep live rehearsal as
+an explicit separate gate. The guard blocks ordinary Python networking and omits inherited
+credentials, but is not an OS sandbox for arbitrary native subprocesses.
