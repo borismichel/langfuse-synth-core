@@ -105,8 +105,8 @@ The Authoring SDK is **agent-first** — a coding agent authors ~99% of new demo
 `[authoring]` extra ships **kit-dev skills** versioned with the library (so the Contract,
 its validator, and the skills that teach them can never drift). The orchestrator skill
 [`authoring-a-demo-kit`](src/langfuse_synth_core/authoring/skills/authoring-a-demo-kit/SKILL.md)
-walks scaffold → model the trace tree → wire the `target_traces` derivation → runbook → run
-the gates; it enforces the **model-free-seed** law (with the author-time-LLM-frozen-fixture
+walks audience → three presenter beats → small walkthrough → scale → live verification
+and delivered rehearsal; it enforces the **model-free-seed** law (with the author-time-LLM-frozen-fixture
 escape hatch, re-blessed via `synth-authoring freeze`) and **delegates Langfuse craft**
 (which observation type, which evaluator type) to the existing `langfuse` skill rather than
 duplicating it. `synth-authoring skills --install` copies the pack into `.claude/skills/`.

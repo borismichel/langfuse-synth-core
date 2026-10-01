@@ -45,14 +45,13 @@ fetches current docs rather than reasoning from memory** (Langfuse changes often
 - **The observation-type vocabulary.** *Which* of the ten a step is, is craft — that there
   are exactly ten, and what a value outside them silently does, is red/green, so core
   refuses one rather than advising about it. `CONTRACT.md` §"The spool" holds the rule and
-  the orchestrator skill's Phase 2 states it where you meet it; don't restate it a third
-  time here.
+  [recipe-and-transport.md](recipe-and-transport.md) gives the authoring implications.
 - **The library seam.** The kit composes the trace tree from library primitives; it does not
-  reimplement event emission, backdating, ingest, or the read client. See `docs/SEAM.md`.
+  reimplement event emission, backdating, ingest, or the read client. See [recipe-and-transport.md](recipe-and-transport.md) for the library seam.
 - **The wire.** Which transport the Spool is written on (OTLP under Langfuse v4) and which
   endpoints a read uses are core's, pinned in one line of the kit's `seed` — never a payload
   the kit hand-builds. Craft advice about *what* to model never becomes a reason to write
-  *how* it is transmitted. See `docs/WRITE_PATHS.md`.
+  *how* it is transmitted. See [recipe-and-transport.md](recipe-and-transport.md) for transport details.
 
 ## Why delegate instead of duplicate
 

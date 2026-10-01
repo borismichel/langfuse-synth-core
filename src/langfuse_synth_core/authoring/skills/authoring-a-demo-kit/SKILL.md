@@ -1,356 +1,202 @@
 ---
 name: authoring-a-demo-kit
 description: >-
-  Author a new Demo Depot synth kit with langfuse-synth-core — scaffold a runnable-green
-  walking skeleton, model its trace tree, wire the target_traces derivation, grow the
-  Presenter Runbook, and keep the determinism + validate gates green. Use when building a
-  new demo package / synth kit, adding a use case to Demo Depot, or working in a repo that
-  pins langfuse-synth-core. Enforces the model-free-seed law and delegates Langfuse craft
-  (which observation type, which evaluator) to the `langfuse` skill.
+  Author or adapt a Demo Depot synth kit with langfuse-synth-core. Define a three-beat
+  presenter journey, build a small complete walkthrough, then scale, verify and rehearse
+  its delivered surfaces. Use for a new demo package, a Demo Depot use case, or story
+  changes in a kit that pins langfuse-synth-core. Enforces model-free seed generation and
+  delegates Langfuse observation and evaluator choices to the langfuse skill.
 ---
 
 # Authoring a Demo Kit
 
-You are building a **Demo Depot synth kit**: a small repo whose `usecase.yaml` is the only
-surface the portal reads, and whose `synth seed` deterministically ingests backdated
-Langfuse data that tells a scenario story. This skill is the orchestrator — it walks you
-from an empty directory to a kit that stays green through every gate.
+Build a demonstrable outcome, then add volume. A **Recipe** owns the scenario; core owns
+configuration, event transport, ingestion and reads. The **Manifest** (`usecase.yaml`) is
+the portal's only integration surface. Keep scenario logic in the kit, not in the depot.
 
-Two jobs are split cleanly, and this skill only owns the first:
+Follow these stages for new work. For an existing kit, retain its working beats and enter
+at the earliest stage affected by the request. Preserve unrelated code and the agreed core
+pin. **Seed runtime is model-free:** replay static fixtures with deterministic generation.
+Read [model-free-seed.md](references/model-free-seed.md) before generating fixture content
+with a model or debugging an egress failure.
 
-- **Contract compliance → mechanical, red/green.** The validator and the determinism gate
-  tell you yes/no. This skill drives them.
-- **Langfuse craft → judgment.** *Which* observation type models this step, *which*
-  evaluator type scores it — the validator cannot check that. **Delegate it to the
-  `langfuse` skill.** (See
-  [references/langfuse-craft.md](references/langfuse-craft.md).) Do not reason about
-  Langfuse semantics from memory here; that skill fetches current docs.
+## 1. Frame the demo
 
-There is exactly **one law** you must never break: **seed runtime is model-free.** No LLM
-call emits observations at seed time. It is not a style rule — a runtime egress block
-*proves* it at every gate run. The sanctioned escape hatch (a one-off LLM call at
-*authoring* time, frozen as a static fixture) is a first-class pattern taught below and in
-[references/model-free-seed.md](references/model-free-seed.md). Read that reference before
-you are ever tempted to "enrich" a story with a live model call.
+Extract the **audience**, business **problem**, **visible failure**, **presenter action**
+and measurable **payoff** from the brief and existing kit. State reasonable defaults.
+Ask only about missing decisions that would change the story or delivered interaction;
+continue independent setup while awaiting an answer.
 
-## Prerequisites
+Write **three presenter beats** into `DEMO_SCRIPT.md` before expanding the dataset:
 
-```bash
-pip install 'langfuse-synth-core[authoring]'      # brings the synth-authoring CLI + gates
-```
+| Beat | Screen | Presenter action | Expected result | Evidence |
+| --- | --- | --- | --- | --- |
+| Expose the problem | Name the delivered screen or view | Exact click/filter/input | Visible failure tied to the business problem | Representative trace or score to seed |
+| Investigate | Name the next screen or view | Exact inspection or comparison | Cause becomes understandable | Observation, metadata or comparison that demonstrates it |
+| Demonstrate the payoff | Name the final screen or view | Exact fix/replay/compare action | Measurable improvement or decision | Expected score, outcome or before/after record |
 
-This skill ships *inside* that extra, versioned with the library — so the CLI you run and
-the skill you follow can never drift. To make sibling skills discoverable to your agent:
+Adapt the beats to the brief; a static comparison is sufficient when no live intervention
+is promised. Give every beat a concrete expected result and evidence to create. An empty
+trace list or a successful HTTP response is not yet the story's payoff.
 
-```bash
-synth-authoring skills                # list the shipped kit-dev skills
-synth-authoring skills --install      # copy them into .claude/skills/
-```
+**Complete when:** the three beats explain why this audience cares and specify what to
+build and verify. Record assumptions in the runbook so the presenter can review them.
 
-Keep the `langfuse` skill available too — you will
-hand off to it in Phase 2 and Phase 5.
+## 2. Reuse or scaffold
 
-## The workflow
+Inspect existing kits for the same journey before starting another. Reuse a working
+Recipe where it reduces work; preserve its Manifest and library seams. Add a **Companion**
+only if a beat requires an interaction the Langfuse UI cannot deliver. Use `--anchors`
+when that surface needs kit-owned per-run state.
 
-Do these in order. The kit is **green from Phase 1** and must stay green — after every
-change, run the gates (Phase 5) before moving on. Never hand-edit a golden snapshot; grow
-the story and re-bless.
-
-### Phase 1 — Scaffold (`synth-authoring new`)
+For a new kit, read [setup.md](references/setup.md) for installation and the scaffold
+options, then run one suitable command, for example:
 
 ```bash
-synth-authoring new my-kit --dir ../kits          # kit lands at ../kits/my-kit
-synth-authoring new my-kit --companion            # also emit the companion stub (Spec G)
-synth-authoring new my-kit --anchors              # also emit per-run anchors wiring (#199)
-synth-authoring new my-kit --core-ref v4.1.1       # lib git tag the kit pins to
+synth-authoring new my-kit --dir ../kits
+cd ../kits/my-kit
+pip install -e '.[dev]'
 ```
 
-This emits a **runnable-green walking skeleton**, not a blank template: the plumbing
-(backdated ingestion through the library, spool determinism, non-root uid 10001) is proven
-before any story logic lands, and the initial determinism golden is already blessed. The
-file floor you now own:
+The scaffold supplies the manifest, seed/verify path, small golden and runbook artifact.
+For Langfuse **observation** and **evaluator** choices, use the `langfuse` skill and
+[langfuse-craft.md](references/langfuse-craft.md); confirm current semantics instead of
+inventing them from memory. A missing skill is an explicit setup gap, not evidence that
+those choices were checked.
 
-| File | What it is | You edit it in |
-| --- | --- | --- |
-| `usecase.yaml` | The portal manifest (schema-valid, canonical `generation.target_traces` knob injected). The *only* portal surface. | Phase 4 (artifacts), as the story lands |
-| `src/synth/materialize.py` | **Deterministic, model-free generation** — the trace tree. | **Phase 2** |
-| `src/synth/config.py` | Config model + the `DERIVATION_HOOK` (identity by default). | **Phase 3** |
-| `src/synth/seed.py` / `verify.py` / `cli.py` | `seed`/`verify` wired through the library; the Spool goes out as **OTLP spans** and `verify.py` reads through the **read seam** (the v4 APIs). | Rarely — grow verbs here + in `usecase.yaml` together |
-| `DEMO_SCRIPT.md` | The `render: markdown` Presenter Runbook stub. | **Phase 4** |
-| `tests/` | The determinism golden gate + manifest-validity test + the retargeting gate (all green now). | Never by hand — re-bless via `freeze` |
-| `Dockerfile` | The reference non-root image. | Only for real runtime deps |
-| `.github/workflows/` | `ci.yml` runs the suite (job `test` — the check `protect main` requires) on every push/PR; `publish.yml` builds + signs the image on a `v*.*.*` tag. | Never by hand |
+**Complete when:** the chosen kit installs and its existing offline checks pass. Keep
+any pre-existing failures visible before changing its story.
 
-Then confirm the floor is real before you touch anything:
+## 3. Build the small walkthrough
+
+Build the **smallest complete walkthrough** that supports all three beats. Start with a
+few deliberately selected examples, including failure and successful comparison data;
+choose the minimum volume needed for the story's statistics. Make the whole journey
+coherent before increasing volume or polishing the interface.
+
+Model the trace tree in `src/synth/materialize.py` with core event builders. Use seeded
+RNG substreams, stable IDs and offsets from the provided `run_date`; sort unordered
+collections. When changing generation, the volume derivation, retargeting, observation
+vocabulary or transport, read [recipe-and-transport.md](references/recipe-and-transport.md).
+
+**Edit and add scenario tests.** Assert the story's intended contrasts and representative
+records through the kit's public generation and verification interfaces. Golden snapshots
+are different: preserve them until a deliberate content change is reviewed, then use
+`synth-authoring freeze` as described in [goldens.md](references/goldens.md).
+
+Grow `verify` alongside the story. Check representative IDs from the **current seeded
+run**, their relationships, timestamps and expected outcomes through core read interfaces.
+A bounded run receipt or existing anchors should connect seed to verify without
+clobbering Companion state. Unrelated project traces or any score named `quality` cannot
+satisfy these assertions. Cover missing evidence and delayed visibility with bounded
+polling and specific failures; preserve deterministic Spool generation.
+
+Every presenter action must be reachable from the **delivered surfaces**: a **Companion
+route** or the Langfuse UI. Keep shell instructions in a marked **developer-mode** section.
+Presenter controls should be tucked away in a muted footer/disclosure, with their location
+explained in the runbook. A CLI-only evaluation trigger cannot fulfil an interactive beat
+(the EV failure in depot #180). A local preview can prove navigation; it cannot establish
+that live data or an evaluation landed.
+
+**Walk the small journey before scaling.** Execute the available local surfaces and
+record each beat's outcome. If an essential beat requires live data, perform stage 6
+with the small dataset before stage 5. Keep scaling pending until the complete small
+walkthrough works; useful offline fixes can continue while a target is unavailable.
+
+**Complete when:** all three beats have implementation, scenario assertions and an
+observed small walkthrough. Identify any live outcomes still pending.
+
+## 4. Check offline
+
+Run the relevant local tests while editing. Before moving on, run these from the kit root:
 
 ```bash
-cd ../kits/my-kit && pip install -e '.[dev]' && pytest      # green from the first commit
-```
-
-### Phase 2 — Model the trace tree
-
-`src/synth/materialize.py::build_events` is where generation lives, and the **only** place
-it lives. It builds the Spool's wire objects through the library's event builders and its
-deterministic RNG — nothing else. The skeleton emits, per trace: one `trace_event`, one
-`generation_event`, one `score_event`. Grow that into your scenario's tree.
-
-The library gives you the write primitives (import from `langfuse_synth_core.seed.events`):
-
-- `trace_event` — the root of one trace.
-- `span_event` — a non-LLM unit of work (a retrieval, a tool call, a routing step).
-- `generation_event` — an **LLM** step (carries model, token usage, cost).
-- `event_event` — a point-in-time marker.
-- `observation_event` — the generic escape hatch when none of the above fits.
-- `score_event` — an evaluation/score attached to a trace or observation.
-
-**The wire is core's, and it is OTLP.** Langfuse platform v4 makes the observation the
-primary entity — there is no separately ingested trace — and Cloud goes v4-only on
-**2026-11-16**. There is nothing to select: every observation is an OTLP span, and scores
-are `score-create` envelopes on `POST /api/public/ingestion`, which is the supported v4
-path for them and not legacy debt. You compose the same call tree either way, and core
-decides what goes on the wire. **Never hand-write an OTLP payload or post to Langfuse
-yourself** — that is the seam (`docs/SEAM.md`), and core's `docs/WRITE_PATHS.md` is where
-the mapping and its rationale live.
-
-Three consequences that change how you author, not what you call:
-
-- **The Spool appends; it does not upsert.** OTLP has no idempotent write, so re-seeding a
-  project that already holds this demo doubles the story, and `import-spool` is
-  non-resumable — it fails loudly and the recovery is to clear that deployment's Langfuse
-  data and import from the top. Say that in the runbook's reset beat; never tell a
-  presenter a re-seed is safe.
-- **Determinism of the *file* is untouched.** `seed + target_traces + params →
-  byte-identical Spool` is the same law, proven by the same golden gate. What is gone is
-  the *replay* guarantee, which was a property of the old transport, not of your code.
-- **A trace is its root observation.** Core mints one root span per `trace_event`, so the
-  Spool carries one more observation per trace than the count you may remember. Nothing to
-  do in `materialize.py`; it is what your kit's billable volume now measures.
-
-*Which* observation type each step should be is still Langfuse craft — ask the
-`langfuse` skill (below), not this one. **Which values exist is not**, and it is a trap worth knowing
-before you write the first `observation_event`:
-
-> **The vocabulary is closed, and a wrong value does not fail — it lies.**
-> Langfuse recognises exactly ten observation types: `span`, `generation`, `event`,
-> `agent`, `tool`, `chain`, `retriever`, `embedding`, `evaluator`, `guardrail`. On the
-> wire they are **lowercase and case-sensitive**. Anything else — a typo, or `AGENT`
-> shouting — is *accepted* and quietly filed as a `SPAN`, or as a `GENERATION` if the
-> observation carries a model. Nothing anywhere reports a problem; your mistyped tool step
-> simply turns up in the cost and usage views and the demo tells a different story than
-> you wrote. The batch path this migration replaced rejected an unknown type with a `400`;
-> the OTLP wire has no such answer.
-
-Core supplies the rejection instead, so this costs you nothing to get right:
-
-- **`observation_event` raises** on a value outside the ten, at the call, with the
-  vocabulary in the message. Either spelling is fine there — kits write `obs_type="TOOL"`
-  and core lowercases for the wire — what is refused is a value that is not one of the ten.
-- **A live surface's `as_type` is checked strictly**, because the SDK hands it to Langfuse
-  exactly as written. `as_type="AGENT"` on the live seam raises; `as_type="agent"` is what
-  you want. This is the one place the casing rule is yours to get right.
-- **`synth-authoring conformance` refuses either** where it finds one named in your
-  sources, so a typo in a branch you have not exercised is still caught before the kit
-  ships. It reads literals: a type your code assembles at runtime is caught by the two
-  guards above instead, when the code runs.
-
-`CONTRACT.md` §"The spool" is the rule's home; `docs/WRITE_PATHS.md` records what each
-input was observed to land as.
-
-**Determinism is the constraint that shapes this code.** Every id, timestamp, and value
-must derive from the seeded RNG (`langfuse_synth_core.rng.Rng`), never from a wall clock,
-`random` without a seed, `uuid4`, set iteration order, or a network call:
-
-- Draw all randomness from `rng.sub("namespace", i)` substreams — stable, independent, and
-  reproducible. Use `r.trace_id(i)` / `r.obs_id(i)` / `r.score_id(i)` for W3C-format ids.
-- Backdate from the **run anchor `synth.seed` hands in** (`run_date`: the operator's
-  `generation.as_of_date`, or now when none was set — `timegen.resolve_run_date`), never
-  from `datetime.now()` and never from a date constant in `src/`. Every date in the story is
-  an *offset* from `run_date`; the only pinned date is `AS_OF_DATE` in `tests/golden_seed.py`,
-  where the gate owns it. A future as-of date is legitimate (the demo is next week) — do not
-  clamp or reject it. Use `langfuse_synth_core.timegen.sample_timestamps` for a realistic
-  backdated spread.
-- The single operator volume knob flows in as `target_traces` and must pass through
-  `DERIVATION_HOOK` (Phase 3) — do not read a bespoke count.
-
-**Hand off the semantic choices to the `langfuse` skill.** *Which* observation type a step
-should be, whether a step is a generation vs. a span, what score names/data-types make the
-scenario legible in the Langfuse UI, and which evaluator type fits — that is Langfuse craft,
-not contract. Ask the `langfuse` skill; it fetches
-current docs rather than guessing. This skill only guarantees the result stays deterministic
-and model-free. See [references/langfuse-craft.md](references/langfuse-craft.md) for the
-exact boundary.
-
-After every change here, run Phase 5. If the golden gate now fails and the change was
-**intentional**, re-bless (Phase 5); if it was accidental, you perturbed determinism — fix
-it (usually an unseeded random source crept in).
-
-### Phase 3 — Wire the `target_traces` derivation
-
-Every volume-adjustable kit exposes the **same** operator knob: `generation.target_traces`
-(already injected into `usecase.yaml`). A kit-side **deterministic** hook maps that one knob
-to your kit's internals, so the portal stays zero-code (it passes
-`--set generation.target_traces=N` verbatim) and determinism holds.
-
-In `src/synth/config.py` the hook is pre-wired to the trivial identity derivation:
-
-```python
-from langfuse_synth_core.derivation import identity_derivation
-DERIVATION_HOOK = identity_derivation      # target_traces -> {"target_traces": target_traces}
-```
-
-If your kit's volume *is* a direct trace count, leave it. If `target_traces` should drive
-something internal (a scale multiplier, a per-cohort split, a number of experiment runs),
-replace it with your own hook:
-
-```python
-def DERIVATION_HOOK(target_traces: int, declared) -> dict:
-    # DETERMINISTIC: identical (target_traces, declared) -> identical output, always.
-    # Fixed golden assets (a canned suite, seeded experiments) stay UNSCALED.
-    return {"target_traces": target_traces, "scale": max(1, target_traces // 100)}
-```
-
-The contract the hook must uphold: `seed + target_traces (+ declared params) →
-byte-identical Spool`, with fixed golden assets left unscaled. Keep it pure and
-deterministic or the golden gate will (correctly) go red.
-
-**Don't break retargeting while you're in this file.** The same `config.py` carries `Target`,
-where `host` is the committed default and `base_url` is a property that lets
-`LANGFUSE_BASE_URL` win:
-
-```python
-@property
-def base_url(self) -> str:
-    return os.environ.get("LANGFUSE_BASE_URL", self.host).rstrip("/")
-```
-
-That override is how the portal points ONE shipped config at whatever Langfuse a deployment
-targets. Flatten it back into a plain field and the kit passes every other gate and then dials
-`localhost:3000` on its first deployment — which is exactly what happened to the first
-scaffolded kit (portal #187). `tests/test_retargeting.py` gates it; keep both halves (env wins,
-and with the var absent the file value still applies).
-
-### Phase 4 — Grow the Presenter Runbook
-
-`DEMO_SCRIPT.md` is the `render: markdown` artifact declared in `usecase.yaml` — the script
-a solutions engineer reads to walk the demo. At least one `render: markdown` artifact is
-mandatory; the scaffold ships this one. Grow the stub into the real walkthrough: what the
-demo shows, the setup, the story beats, the reset.
-
-**The runbook-executability rule.** Every step the presenter performs must be reachable
-from the **delivered surfaces** — the Companion's routes or the Langfuse UI. Kits are
-cartridges delivered as-is through the depot: the presenter has no shell, and the portal's
-invocation contract templates only `{config}`, so there is no sanctioned way to run extra
-verbs in a deployed container. The failure shape to recognize: EV once wired its red/green
-eval beat only to a `synth` CLI verb — unreachable in a depot delivery (portal #180). An
-interactive beat has exactly two compliant homes: a **Companion route**, or the **Langfuse
-UI**. `synth` CLI commands may appear only in a clearly-marked developer-mode section
-(both gold kits close with a `## Developer mode — …` footnote); `synth-authoring validate`
-flags presenter-facing `synth` command blocks outside such a section as an advisory.
-
-**The cosmetic corollary: presenter controls are tucked away.** When a beat does need a
-presenter-only control on a Companion surface, make it visually recessive — a collapsed
-disclosure at the bottom of the page, footer placement, muted styling, no accent color —
-so the demo fiction stays intact for the prospect; the runbook tells the presenter where
-it lives. The reference implementation is EV's playground eval triggers (portal #180): a
-quiet disclosure at the foot of the page, never a big red button in the prospect's face.
-
-**Runbook delivery.** Per `CONTRACT.md` ("Filesystem conventions"),
-the portal collects declared artifacts from the container's `/app/out/` directory after the
-producing step exits. The scaffold's `seed` already copies the committed `DEMO_SCRIPT.md`
-there, including on a dry run; edit that source as the story grows. For a local rehearsal,
-run from the kit root with `SYNTH_OUT_DIR=./out`. Missing source or unwritable output fails
-before ingestion, with the path and remedy. When adding another artifact or changing its
-manifest path, wire its producing step and verify the delivered file.
-If you add pipeline steps, keep `usecase.yaml` and `src/synth/cli.py` in sync (a reserved-verb
-step id must run `synth <that verb>` — see `CONTRACT.md`).
-
-### Phase 5 — Run the gates
-
-Three offline/dev gates, cheapest first. Run them after every phase; all must be green
-before the kit is done.
-
-```bash
-# 1. Static Contract lint — same code the portal runs at sync (offline, instant).
 synth-authoring validate usecase.yaml
-
-# 2. Determinism golden gate + manifest validity + retargeting (offline; the golden gate runs
-#    seed in a subprocess under the deny-LLM egress block).
+synth-authoring conformance .
 pytest
-
-# 3. Read-back suite against a LIVE seeded env — asserts the scenario truth landed.
-synth verify --config config/demo.yaml       # needs a seeded Langfuse project
 ```
 
-**Re-blessing the golden — the only correct way to change the pool.** When you *deliberately*
-change generation (Phase 2/3) or refresh a frozen fixture, the golden gate goes red because
-the Spool bytes changed. Do **not** edit the snapshot. Re-bless it in one intentional step:
+These gates cover Manifest shape, contract conformance, golden content, retargeting and
+the kit's scenario tests. Inspect skipped conformance checks and install the kit's declared
+dev/Companion dependencies when needed; a skip is an unmet check, not a pass. Keep local
+validation separate from live verification and admission. Rerun affected offline checks
+after changes; repeat the full local suite when the candidate is ready.
+
+The scaffold's seed copies the committed runbook into `/app/out/`. To check artifact
+delivery locally, select a writable output and temporary state directory; the developer
+example is in [setup.md](references/setup.md). Check the declared artifact's actual file
+and content. Wire and check every additional artifact's producing step.
+
+**Complete when:** required offline gates pass, the small golden remains reviewable, and
+the declared runbook is readable from the produced artifacts. This establishes offline
+readiness only.
+
+## 5. Scale the story
+
+After the small walkthrough works, grow background history through the existing
+`generation.target_traces` knob and deterministic derivation hook. Preserve the examples
+needed by every beat, fixed evaluation assets and the intended proportions. Keep the
+golden small; a larger production dataset does not require a huge committed snapshot.
+
+Verify the story at the small and intended demo volumes. Use the same seed and date for
+reproducible comparisons, check the evidence for each beat, then run the offline gates.
+Improve presentation polish after those checks preserve the story.
+
+**Complete when:** both scales retain the expected contrasts and presenter evidence.
+
+## 6. Verify the live run
+
+Use the authorised demo or disposable target. Record the kit revision, generation inputs,
+target and representative evidence, excluding secrets. Seed once when that dataset is
+needed, then read it back:
 
 ```bash
-synth-authoring freeze golden_seed:seed \
-    --golden tests/golden/my_kit_spool.ndjson \
-    --target-traces 24 --search-path tests --search-path src
+synth verify --config config/demo.yaml
 ```
 
-`freeze` re-materializes the Spool under the same deny-LLM egress block and writes it as the
-new oracle — so an accidental drift still fails, but an intended change is a deliberate
-re-bless, reviewable in the diff. The oracle is the Spool as it goes on the wire: OTLP spans
-for observations, and score envelopes (score creation is the one thing that stays on the
-legacy ingestion endpoint past the v4 cutover — that is a decision, not an oversight).
+Use the same configuration and environment as the successful seed. Test exact current-run
+records and the scenario's payoff; inspect the verification report rather than accepting
+aggregate counts. For delayed visibility, poll within the bounded timeout before deciding
+whether ingestion failed.
 
-## The one law: seed runtime is model-free
+**The Spool appends; it does not upsert.** `import-spool` is **non-resumable**. Re-seeding
+an uncleared project duplicates observations. A documentation or UI edit normally needs
+no seed. For changed data or a failed partial import, use the established authorised reset
+of the deployment's demo data, or a fresh target, before a new import. Put that reset
+procedure and its effect in the runbook; it is not a presenter's shell command.
 
-**No LLM call may emit observations at seed runtime.** This is enforced, not requested: the
-determinism golden gate runs `seed` in a subprocess under a **deny-LLM egress block** (a
-socket-level guard plus proxy/base-url env pointed at an unroutable sink). A planted LLM
-call — anywhere under `seed`, in *your* generation code, even via a dynamic import — trips
-it and the gate fails with `EgressBlockedError`. The skill tells you the rule; the gate
-proves you followed it.
+**Complete when:** live verification passes against the recorded seeded run. If credentials,
+a target or access are unavailable, report **live verification pending** with the missing
+prerequisite. Continue offline work; never describe an unexecuted check as passed.
 
-Why it matters here specifically: the library's write machinery is model-free by
-construction, but **your** `materialize.py` is agent-authored and is exactly the code
-tempted to call a model to "enrich" a story. The gate guards *your* code.
+## 7. Admit and rehearse
 
-### The sanctioned escape hatch (use this instead)
+For depot delivery, read [delivery.md](references/delivery.md). Follow the published
+release/admission workflow for the exact candidate, retain the admission run and failed-rung
+evidence, then rehearse through the actual delivered surfaces in staging. Local checks
+and a healthy Companion endpoint do not substitute for admission or the presenter journey.
 
-A legitimate one-off LLM call belongs at **authoring time**, with its output **frozen into
-the recipe as a static fixture** that seed replays deterministically:
+Execute every runbook beat as the presenter: screen, action, expected result. Record the
+actual outcome, representative links/IDs and a timestamped action log or screenshots.
+Check links, reset instructions and artifact access. Fix failed beats and repeat affected
+steps; expand the rehearsal when the change affects the whole journey.
 
-1. At authoring time (in a script or notebook, *not* in `materialize.py`), call the model
-   once and capture its output.
-2. Commit that output as a static fixture (a JSON/text file, or an in-repo constant).
-3. Have `materialize.py` read the frozen fixture — never the model — at seed time.
-4. `synth-authoring freeze` re-blesses the golden so the new fixture is the oracle.
-
-Seed runtime then replays frozen data; the rule stays a clean binary (no LLM at seed
-runtime, once or per-unit). Full pattern in
-[references/model-free-seed.md](references/model-free-seed.md).
+**Complete when:** the delivered journey has evidence for all three beats and an explicit
+admission result. Keep **admission pending** or **rehearsal pending** when access is missing.
+Publishing remains a distinct authorised action after staging rehearsal.
 
 ## What "done" looks like
 
-- `synth-authoring validate usecase.yaml` — valid.
-- `pytest` — green (determinism golden gate + manifest validity + retargeting), under the
-  egress block.
-- `synth verify` — the scenario truth reads back from a live seeded env.
-- The trace tree and runbook tell the real story; Langfuse semantic choices were made with
-  the `langfuse` skill, not from memory.
-- Every presenter beat in the runbook is reachable from the delivered surfaces (a
-  Companion route or the Langfuse UI); `synth` commands sit only in a marked
-  developer-mode section (`validate`'s advisory is silent), and presenter-only controls
-  on Companion surfaces are tucked away — recessive, not in the prospect's face.
-- No LLM call at seed runtime; any author-time model use is frozen as a fixture and blessed.
-- The kit writes through core's builders on the OTLP path and reads through core's read
-  helpers — no hand-rolled payload, no legacy endpoint, and no promise anywhere (runbook,
-  config comments, README) that a re-seed upserts.
+Hand over the kit revision, Presenter Runbook, representative evidence and readiness status:
 
-## References
+- **Offline:** validation, conformance and scenario/determinism tests passed; skips disclosed.
+- **Live:** current-run verification passed, or its missing prerequisite is named.
+- **Admission:** the exact candidate's run and verdict, or pending with a reason.
+- **Rehearsal:** all beats worked through the delivered surfaces, with presenter controls
+  tucked away and evidence attached; otherwise list the failed or unexecuted beats.
 
-- [references/model-free-seed.md](references/model-free-seed.md) — the model-free law, the
-  egress gate, and the author-time-LLM-frozen-fixture escape hatch, in depth.
-- [references/langfuse-craft.md](references/langfuse-craft.md) — the exact split between
-  contract (this skill) and Langfuse craft (the `langfuse` skill).
-- `CONTRACT.md` (in the library repo) — reserved-verb semantics, filesystem conventions,
-  the canonical volume knob, LLM-provider rules.
-- `docs/SEAM.md` — the library/kit hand-off rule (what the lib owns vs. what the kit owns).
-- `docs/WRITE_PATHS.md` (in the library repo) — how the Spool is written, why it is raw OTLP
-  rather than the Langfuse SDK, why scores stay `score-create`, and the non-resumable import
-  and its recovery.
+A kit is demo-ready only when its required live, admission and rehearsal stages have passed.
+For measured time-to-demo comparisons, use the core
+[benchmark protocol](https://github.com/borismichel/langfuse-synth-core/blob/main/docs/benchmarks/README.md)
+when available in the installed core. Compare fixed briefs and observed outcomes; shorter
+instructions or passing offline tests alone do not demonstrate a faster successful demo.
