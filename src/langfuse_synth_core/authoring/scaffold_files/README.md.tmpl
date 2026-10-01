@@ -66,3 +66,11 @@ The receipt shares core's anchors IO but has its own filename, so `--anchors`' k
 is preserved. Grow the representative selection and assertions with the story; the
 starter's score timestamps equal their trace start timestamps. The `run_verify` function
 accepts `timeout_seconds`, `poll_interval`, `clock` and `sleep` for controlled local tests.
+
+### Rehearse artifact delivery locally
+
+From the kit root, run `SYNTH_OUT_DIR=./out synth seed --config config/demo.yaml --dry-run`.
+This writes the Spool without network calls and copies `DEMO_SCRIPT.md` into `./out/`.
+The container defaults to `/app/out`, the depot's artifact collection directory. A missing
+runbook source or unwritable destination fails before ingestion; fix the reported path
+before retrying. The golden gate uses its own temporary artifact directory.

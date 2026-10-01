@@ -733,7 +733,8 @@ def test_anchors_seed_writes_the_state_file(anchors_kit, monkeypatch, tmp_path):
     cfg = config_mod.load_config(str(anchors_kit.dest / "config" / "demo.yaml"))
     seed_mod.run_seed(
         cfg, dry_run=True, do_import=False,
-        spool_path=tmp_path / "events.ndjson", log=lambda _m: None,
+        spool_path=tmp_path / "events.ndjson", output_dir=tmp_path / "out",
+        runbook_source=anchors_kit.dest / "DEMO_SCRIPT.md", log=lambda _m: None,
     )
 
     assert state_mod.RunState.exists()
@@ -798,7 +799,8 @@ def _seed_spool_newest_day(kit, extra_set: list[str]):
     import sys
     from datetime import date
 
-    env = {**os.environ, "PYTHONPATH": str(kit.dest / "src")}
+    env = {**os.environ, "PYTHONPATH": str(kit.dest / "src"),
+           "SYNTH_OUT_DIR": str(kit.dest / "out")}
     cmd = [sys.executable, "-m", "synth.cli", "seed", "--config", "config/demo.yaml",
            "--dry-run", *sum((["--set", s] for s in extra_set), [])]
     subprocess.run(cmd, cwd=kit.dest, env=env, check=True, capture_output=True, text=True)

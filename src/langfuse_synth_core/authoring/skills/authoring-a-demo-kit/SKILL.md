@@ -254,13 +254,13 @@ so the demo fiction stays intact for the prospect; the runbook tells the present
 it lives. The reference implementation is EV's playground eval triggers (portal #180): a
 quiet disclosure at the foot of the page, never a big red button in the prospect's face.
 
-**Wiring note (deploy-time, not a gate).** Per `CONTRACT.md` ("Filesystem conventions"),
+**Runbook delivery.** Per `CONTRACT.md` ("Filesystem conventions"),
 the portal collects declared artifacts from the container's `/app/out/` directory after the
-producing step exits — so the committed `DEMO_SCRIPT.md` is the *source*, and for the portal
-to actually collect it a pipeline step (or `seed`) must write the runbook to
-`/app/out/DEMO_SCRIPT.md`. This doesn't affect the local gates (the manifest is valid with
-`path: DEMO_SCRIPT.md` as-is, exactly as the scaffold ships it) — it's what makes the runbook
-show up in a real deploy, matching the wiring note in the scaffolded `DEMO_SCRIPT.md` stub.
+producing step exits. The scaffold's `seed` already copies the committed `DEMO_SCRIPT.md`
+there, including on a dry run; edit that source as the story grows. For a local rehearsal,
+run from the kit root with `SYNTH_OUT_DIR=./out`. Missing source or unwritable output fails
+before ingestion, with the path and remedy. When adding another artifact or changing its
+manifest path, wire its producing step and verify the delivered file.
 If you add pipeline steps, keep `usecase.yaml` and `src/synth/cli.py` in sync (a reserved-verb
 step id must run `synth <that verb>` — see `CONTRACT.md`).
 

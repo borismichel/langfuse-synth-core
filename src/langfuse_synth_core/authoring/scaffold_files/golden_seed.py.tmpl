@@ -57,7 +57,12 @@ def seed(target_traces: int, params: Mapping[str, Any]) -> bytes:
         os.environ["SYNTH_STATE_DIR"] = tmp
         try:
             # dry_run: no guardrail or network; do_import=False: never touch Langfuse.
-            run_seed(cfg, dry_run=True, do_import=False, spool_path=spool_path, log=lambda _m: None)
+            run_seed(
+                cfg, dry_run=True, do_import=False, spool_path=spool_path,
+                output_dir=Path(tmp) / "out",
+                runbook_source=CONFIG.parent.parent / "DEMO_SCRIPT.md",
+                log=lambda _m: None,
+            )
             return spool_path.read_bytes()
         finally:
             if previous_state_dir is None:
