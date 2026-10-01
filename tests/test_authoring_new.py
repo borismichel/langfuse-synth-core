@@ -744,11 +744,9 @@ def test_anchors_seed_writes_the_state_file(anchors_kit, monkeypatch, tmp_path):
     assert state.base_url == cfg.target.base_url
 
 
-def test_anchors_blessing_wrote_state_into_the_gitignored_spool(anchors_kit):
-    """The golden-blessing freeze already ran the emitted seed once (no SYNTH_STATE_DIR),
-    so the anchors landed in the kit's dev fallback — `.synth_spool/`, which the emitted
-    .gitignore keeps out of the repo."""
-    assert (anchors_kit.dest / ".synth_spool" / ".synth_state.json").is_file()
+def test_anchors_blessing_leaves_runtime_state_untouched(anchors_kit):
+    """Initial golden blessing owns temporary state, not the kit's runtime spool."""
+    assert not (anchors_kit.dest / ".synth_spool" / ".synth_state.json").exists()
     assert ".synth_spool/" in (anchors_kit.dest / ".gitignore").read_text()
 
 
