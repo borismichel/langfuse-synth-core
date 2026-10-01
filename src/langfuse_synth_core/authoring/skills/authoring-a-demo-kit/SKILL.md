@@ -281,7 +281,7 @@ before the kit is done.
 # 1. Static Contract lint — same code the portal runs at sync (offline, instant).
 synth-authoring validate usecase.yaml
 
-# 2. Determinism golden gate + manifest validity + retargeting (offline; the golden gate runs
+# 2. Golden + process repeatability + manifest validity + retargeting (offline; each gate runs
 #    seed in a subprocess under the deny-LLM egress block).
 pytest
 
@@ -304,7 +304,18 @@ The scaffold adapter accepts `--params '{"seed": 7, "as_of_date": "2026-01-01"}'
 duplicate and invalid parameters fail explicitly. Keep these adapter inputs aligned
 with the Recipe's declared configuration as the story grows.
 
-`freeze` re-materializes the Spool under the same deny-LLM egress block and writes it as the
+**Process repeatability is a separate gate.** Generated tests compare identical inputs
+under `PYTHONHASHSEED` values 0, 1 and 2, with egress blocked for every run. The public
+`assert_repeatable(GoldenSpec(...))` API performs this check; generated tests also support
+the default older core pin through its public egress guard. A `RepeatabilityMismatch` means
+process-dependent output: sort unordered collections before generating or serializing
+records, then rerun the tests. In core builds with `assert_repeatable`, `freeze` refuses
+this failure and preserves the existing snapshot. On the older default v4.1.1 pin, run
+the generated repeatability test successfully **before** freezing (or upgrade core):
+its older `freeze` does not enforce this safeguard. A `GoldenMismatch` instead reports
+content drift against the fixed-hash oracle.
+
+After repeatability passes, `freeze` materializes at hash seed 0 and writes the Spool as the
 new oracle — so an accidental drift still fails, but an intended change is a deliberate
 re-bless, reviewable in the diff. The oracle is the Spool as it goes on the wire: OTLP spans
 for observations, and score envelopes (score creation is the one thing that stays on the
