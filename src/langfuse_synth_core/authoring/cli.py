@@ -230,22 +230,33 @@ def _add_repin(subparsers: argparse._SubParsersAction) -> None:
 
 
 # ── synth-authoring skills (#37) ────────────────────────────────────────────────────────
-# Default target for `--install`: the directory Claude Code discovers project skills in.
-DEFAULT_SKILLS_DEST = ".claude/skills"
-
-
 def _cmd_skills(args: argparse.Namespace) -> int:
     names = _skills.list_skills()
-    if args.install:
-        dest = Path(args.dest)
+    dest = Path(args.dest or _skills.AGENT_DESTS[args.agent]).expanduser()
+    if args.install or args.update or args.status:
+        prerequisite = _skills.find_langfuse_skill(dest, agent=args.agent)
+        if prerequisite:
+            print(f"Langfuse skill: found at {prerequisite}")
+        else:
+            print("Langfuse skill: not found in checked filesystem locations. "
+                  f"Install your Langfuse skill at {dest / 'langfuse' / 'SKILL.md'}, "
+                  "or use your agent's skill manager.")
+        print("  Confirm it is enabled in your agent; plugin-managed skills are not checked.")
+    if args.status:
+        for item in _skills.skill_status(dest):
+            print(f"{item['name']}: {item['state']} (installed core "
+                  f"{item['core_version'] or 'unknown'}) -> {dest}")
+        return 0
+    if args.install or args.update:
         try:
-            written = _skills.install_skills(dest, force=args.force)
-        except FileExistsError as exc:
+            written = _skills.install_skills(dest, force=args.force, update=args.update)
+        except OSError as exc:
             print(f"✗ synth-authoring skills: {exc}", file=sys.stderr)
             return 2
         for path in written:
             print(f"✓ installed skill {path.name!r} -> {path}")
-        print(f"  {len(written)} skill(s) now discoverable under {dest}")
+        print(f"  {len(written)} skill(s) written under {dest}")
+        print(f"  replacement backups: {dest.parent / '.synth-skill-backups'}")
         return 0
     # Locate mode: name every shipped skill and its triggering description.
     if not names:
@@ -265,17 +276,23 @@ def _add_skills(subparsers: argparse._SubParsersAction) -> None:
         "skills",
         help="locate or install the shipped kit-dev skills (the agent pack)",
     )
-    parser.add_argument(
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--update", action="store_true",
+                         help="update unedited copies from this installed core version")
+    actions.add_argument("--status", action="store_true", help="report installed skill state")
+    parser.add_argument("--agent", choices=sorted(_skills.AGENT_DESTS), default="claude",
+                        help="agent discovery target (default: claude)")
+    actions.add_argument(
         "--install", action="store_true",
-        help="copy the skills into --dest (default: .claude/skills) so an agent discovers them",
+        help="copy skills into the selected agent directory (or --dest)",
     )
     parser.add_argument(
-        "--dest", default=DEFAULT_SKILLS_DEST,
-        help=f"skills directory to install into (default: {DEFAULT_SKILLS_DEST})",
+        "--dest",
+        help="custom skills directory; overrides --agent destination",
     )
     parser.add_argument(
         "--force", action="store_true",
-        help="overwrite an existing skill dir in --dest (replaces an edited copy)",
+        help="replace an existing/edited skill, preserving it in a backup",
     )
     parser.set_defaults(func=_cmd_skills)
 
