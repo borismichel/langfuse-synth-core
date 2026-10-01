@@ -121,7 +121,9 @@ synth-authoring check /absolute/path/to/my-kit --python /absolute/path/to/my-kit
 
 This works outside the kit directory and reports each stage independently. Inspect every
 stage and require `local_ready: true`; failed, unavailable or skipped checks need action.
-The selected interpreter's installed dependencies are the ones checked. If the installed
+The selected interpreter's installed dependencies are the ones checked. The guard omits
+inherited credentials and blocks ordinary Python networking; it is not an OS sandbox for
+arbitrary native subprocesses. The command runs no live or publishing stages. If the installed
 authoring tool is v4.1.1 or otherwise lacks `check`, run the existing commands from the
 kit root with its dev environment activated:
 
