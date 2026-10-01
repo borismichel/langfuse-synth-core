@@ -91,6 +91,7 @@ include = ["langfuse_synth_core*"]
 # nothing under skills/ is ever collected as test/lint source.
 "langfuse_synth_core.authoring" = [
     "*.json",
+    "benchmark_briefs/*.md",
     "scaffold_files/*.tmpl",
     "skills/*/SKILL.md",
     "skills/*/references/*.md",
