@@ -11,6 +11,11 @@ build/deployment pipeline, and does not create tags, change the registry or publ
 Use the depot API **origin**, such as `https://depot.example.com`, without an API path,
 query, fragment or embedded credentials. HTTP is accepted only for a local loopback depot.
 An administrator must configure the disposable admission target in the depot first.
+Use a depot build containing the
+[Manifest slug identity guard](https://github.com/borismichel/langfuse-demo-depot/pull/274)
+and staging default. Older admission endpoints echo the requested slug without checking
+it against the Manifest; the CLI cannot infer that mismatch from their response. Update
+the depot before relying on this workflow's registry handoff.
 
 The token is the existing **short-lived admin session bearer token**, not a Langfuse key
 or a new credential type. Follow the deployed instance's

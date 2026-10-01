@@ -407,3 +407,14 @@ def test_uncertain_post_saves_only_intent_and_can_be_repeated(
     assert set(receipt) == {"schema_version", "candidate"}
     assert main(args(portal, tmp_path)) == 2
     assert portal[1]["calls"][0][0] == "POST"
+
+
+def test_manifest_slug_rejection_never_produces_registry_handoff(portal, tmp_path, capsys):
+    from langfuse_synth_core.authoring.cli import main
+
+    portal[1].update(status=422, response={"detail": "candidate slug does not match usecase.yaml"})
+    assert main(args(portal, tmp_path)) == 1
+    output = capsys.readouterr().out
+    assert "Manifest" in output
+    assert "use_cases:" not in output
+    assert "run_id" not in json.loads((tmp_path / "run.json").read_text())
