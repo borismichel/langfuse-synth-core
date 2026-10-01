@@ -36,19 +36,27 @@ you are ever tempted to "enrich" a story with a live model call.
 ## Prerequisites
 
 ```bash
-pip install 'langfuse-synth-core[authoring]'      # brings the synth-authoring CLI + gates
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
 ```
 
 This skill ships *inside* that extra, versioned with the library — so the CLI you run and
-the skill you follow can never drift. To make sibling skills discoverable to your agent:
+the skill you follow can be checked against it. Keep an existing kit's agreed pin.
+Unreleased features require a local core checkout until tagged. To install for your agent:
 
 ```bash
 synth-authoring skills                # list the shipped kit-dev skills
-synth-authoring skills --install      # copy them into .claude/skills/
+synth-authoring skills --install --agent claude  # .claude/skills (default)
+synth-authoring skills --install --agent codex   # .agents/skills
+synth-authoring skills --status --agent codex    # installed version and local edits
+synth-authoring skills --update --agent codex    # refresh unedited copies
 ```
 
-Keep the `langfuse` skill available too — you will
-hand off to it in Phase 2 and Phase 5.
+Use the matching `--agent` and any custom `--dest` on subsequent commands.
+Updates preserve previous copies in a sibling `.synth-skill-backups` directory;
+local edits block replacement until you inspect them and explicitly use `--force`.
+The commands report whether the `langfuse` skill is found in conventional filesystem
+locations. Keep it enabled in your agent for the handoffs in Phase 2 and Phase 5;
+plugin-managed skills require checking in the agent itself.
 
 ## The workflow
 
