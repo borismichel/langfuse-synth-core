@@ -19,6 +19,7 @@ Two consequences worth knowing before you grow the story:
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from langfuse_synth_core.seed.ingest import Ingestor, assert_demo_project
@@ -36,9 +37,40 @@ def run_seed(
     dry_run: bool = False,
     do_import: bool = True,
     spool_path: str | Path | None = None,
+    output_dir: str | Path | None = None,
+    runbook_source: str | Path = "DEMO_SCRIPT.md",
     log=print,
 ) -> Path:
-    """Generate the Spool and (unless `dry_run`) ingest it into the target Langfuse project."""
+    """Deliver the runbook, generate the Spool, and ingest unless `dry_run`.
+
+    Run from the kit root, or pass `runbook_source` explicitly. `output_dir` overrides
+    SYNTH_OUT_DIR (default /app/out); offline callers should select a writable local dir.
+    """
+    # The committed runbook is required output, even in offline rehearsals. Write it
+    # before any remote mutation so a missing source or unwritable destination fails early.
+    source = Path(runbook_source)
+    artifact_dir = Path(output_dir) if output_dir is not None else Path(
+        os.environ.get("SYNTH_OUT_DIR", "/app/out")
+    )
+    runbook = artifact_dir / "DEMO_SCRIPT.md"
+    try:
+        content = source.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot read Presenter Runbook source {source.resolve()}: {exc}. "
+            "Restore DEMO_SCRIPT.md and run seed from the kit root."
+        ) from exc
+    try:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        runbook.write_bytes(content)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot write Presenter Runbook {runbook}: {exc}. "
+            "Set SYNTH_OUT_DIR to a directory writable by the runtime user "
+            "(/app/out in the depot container)."
+        ) from exc
+    log(f"· Presenter Runbook -> {runbook}")
+
     spool_path = Path(spool_path) if spool_path else DEFAULT_SPOOL
     # The run anchor: the operator's as-of date (portal `--set generation.as_of_date=…`),
     # or the wall clock when none was set. The only place either is read — `materialize`
