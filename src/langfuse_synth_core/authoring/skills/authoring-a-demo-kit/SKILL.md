@@ -47,7 +47,9 @@ build and verify. Record assumptions in the runbook so the presenter can review 
 Inspect existing kits for the same journey before starting another. Reuse a working
 Recipe where it reduces work; preserve its Manifest and library seams. Add a **Companion**
 only if a beat requires an interaction the Langfuse UI cannot deliver. Use `--anchors`
-when that surface needs kit-owned per-run state.
+when that surface needs kit-owned per-run state. For a refund-policy comparison, select
+`--starter regression-recovery` to begin with linked baseline, failure and recovery
+evidence; adapt the supplied runbook and assertions to the audience.
 
 For a new kit, read [setup.md](references/setup.md) for installation and the scaffold
 options, then run one suitable command, for example:
@@ -59,6 +61,8 @@ pip install -e '.[dev]'
 ```
 
 The scaffold supplies the manifest, seed/verify path, small golden and runbook artifact.
+When building a Companion, follow setup’s credential-free preview instructions to check
+its navigation and fixture interactions before connecting a live target.
 For Langfuse **observation** and **evaluator** choices, use the `langfuse` skill and
 [langfuse-craft.md](references/langfuse-craft.md); confirm current semantics instead of
 inventing them from memory. A missing skill is an explicit setup gap, not evidence that
@@ -108,7 +112,18 @@ observed small walkthrough. Identify any live outcomes still pending.
 
 ## 4. Check offline
 
-Run the relevant local tests while editing. Before moving on, run these from the kit root:
+Run the relevant local tests while editing. Before moving on, use the installed core's
+`check` command, selecting the Python environment that holds the kit's dev dependencies:
+
+```bash
+synth-authoring check /absolute/path/to/my-kit --python /absolute/path/to/my-kit/.venv/bin/python --json
+```
+
+This works outside the kit directory and reports each stage independently. Inspect every
+stage and require `local_ready: true`; failed, unavailable or skipped checks need action.
+The selected interpreter's installed dependencies are the ones checked. If the installed
+authoring tool is v4.1.1 or otherwise lacks `check`, run the existing commands from the
+kit root with its dev environment activated:
 
 ```bash
 synth-authoring validate usecase.yaml

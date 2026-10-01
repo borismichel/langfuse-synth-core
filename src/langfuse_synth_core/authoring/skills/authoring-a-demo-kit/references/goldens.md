@@ -15,6 +15,8 @@ First identify the failure:
   [model-free-seed.md](model-free-seed.md).
 
 Run the generated process-repeatability test before freezing when that test is present.
+It compares identical inputs in fresh processes with different Python hash seeds; keep
+this gate separate from the fixed-hash content snapshot.
 Newer core provides `assert_repeatable(GoldenSpec(...))` and makes `freeze` reject detected
 repeatability failures. The default older v4.1.1 `freeze` does **not** enforce that new
 check. A generated compatibility test can run it with the older pin; run that test first
@@ -37,3 +39,10 @@ then rerun scenario assertions. An adapter must apply every supported declared p
 through runtime configuration and reject unsupported/conflicting inputs. Inspect that
 adapter's accepted names before supplying `--params`; older scaffold adapters may ignore
 parameters and need updating first.
+
+The current generated adapter accepts `--params '{"seed": 7, "as_of_date": "2026-01-01"}'`
+or the corresponding `generation.`-prefixed names. Volume stays in `--target-traces`.
+Unknown, duplicate and invalid parameters fail explicitly. Keep accepted inputs aligned
+with the Recipe's runtime configuration when adding story controls. Golden execution
+uses temporary output and state directories so it preserves successful live receipts and
+optional Companion anchors even when `SYNTH_STATE_DIR` was inherited.
