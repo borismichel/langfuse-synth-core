@@ -291,6 +291,11 @@ synth-authoring freeze golden_seed:seed \
     --target-traces 24 --search-path tests --search-path src
 ```
 
+The scaffold adapter accepts `--params '{"seed": 7, "as_of_date": "2026-01-01"}'`
+(or the `generation.`-prefixed names). Volume stays in `--target-traces`. Unknown,
+duplicate and invalid parameters fail explicitly. Keep these adapter inputs aligned
+with the Recipe's declared configuration as the story grows.
+
 **Process repeatability is a separate gate.** Generated tests compare identical inputs
 under `PYTHONHASHSEED` values 0, 1 and 2, with egress blocked for every run. The public
 `assert_repeatable(GoldenSpec(...))` API performs this check; generated tests also support
