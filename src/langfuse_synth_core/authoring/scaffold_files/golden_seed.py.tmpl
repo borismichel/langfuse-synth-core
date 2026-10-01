@@ -13,10 +13,13 @@ extra; the deployed runtime image must never carry it (Spec A §3). The gate imp
 """
 from __future__ import annotations
 
+import json
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from langfuse_synth_core.timegen import parse_as_of_date
 
 from synth.config import load_config
 from synth.seed import run_seed
@@ -34,17 +37,35 @@ def seed(target_traces: int, params: Mapping[str, Any]) -> bytes:
     """Materialize the full pre-upload Spool for `target_traces` through the runtime seed
     path; return its bytes.
 
-    `target_traces` and the as-of date are set exactly as the portal sets them (`--set
-    generation.target_traces=N` / `--set generation.as_of_date=YYYY-MM-DD`), so this proves
-    both operator knobs end to end. `params` completes the gate contract; the skeleton
-    derives volume from the knob alone (identity hook), so it reads config defaults for
-    the rest.
+    `params` supports `seed` and `as_of_date`, or their `generation.`-prefixed
+    config names. The default date stays pinned for the golden. Volume belongs to
+    the dedicated `target_traces` argument. Extend the supported inputs explicitly
+    when the Recipe gains new declared parameters.
     """
+    declared: dict[str, Any] = {}
+    for key, value in params.items():
+        name = key.removeprefix("generation.")
+        if name == "target_traces":
+            raise ValueError("set volume with the target_traces argument, not params")
+        if name not in {"seed", "as_of_date"}:
+            raise ValueError(f"unsupported golden parameter {key!r}; use seed or as_of_date")
+        if name in declared:
+            raise ValueError(f"golden parameter {name!r} specified more than once")
+        if name == "seed" and (type(value) is not int or value < 0):
+            raise ValueError("golden seed must be a non-negative integer")
+        if name == "as_of_date":
+            if not isinstance(value, str) or not value:
+                raise ValueError("golden as_of_date must be YYYY-MM-DD")
+            try:
+                parse_as_of_date(value)
+            except ValueError as exc:
+                raise ValueError("golden as_of_date must be YYYY-MM-DD") from exc
+        declared[name] = value
+    declared.setdefault("as_of_date", AS_OF_DATE)
     cfg = load_config(
         str(CONFIG),
-        overrides=[
-            f"generation.target_traces={int(target_traces)}",
-            f"generation.as_of_date={AS_OF_DATE}",
+        overrides=[f"generation.target_traces={int(target_traces)}"] + [
+            f"generation.{key}={json.dumps(value)}" for key, value in declared.items()
         ],
     )
     with tempfile.TemporaryDirectory(prefix="synth-golden-") as tmp:

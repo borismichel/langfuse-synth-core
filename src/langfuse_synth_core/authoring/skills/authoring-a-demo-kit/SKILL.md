@@ -291,6 +291,11 @@ synth-authoring freeze golden_seed:seed \
     --target-traces 24 --search-path tests --search-path src
 ```
 
+The scaffold adapter accepts `--params '{"seed": 7, "as_of_date": "2026-01-01"}'`
+(or the `generation.`-prefixed names). Volume stays in `--target-traces`. Unknown,
+duplicate and invalid parameters fail explicitly. Keep these adapter inputs aligned
+with the Recipe's declared configuration as the story grows.
+
 `freeze` re-materializes the Spool under the same deny-LLM egress block and writes it as the
 new oracle — so an accidental drift still fails, but an intended change is a deliberate
 re-bless, reviewable in the diff. The oracle is the Spool as it goes on the wire: OTLP spans
