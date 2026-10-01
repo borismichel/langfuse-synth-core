@@ -1,0 +1,4 @@
+["/private/tmp/demo-kit-review-venv/bin/python", "-m", "langfuse_synth_core.authoring.cli", "new", "benchmark-kit", "--dir", "/var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs", "--core-ref", "7eabcbb5e71a447fba40ddbbd3de5785bf257db0", "--companion"]
+✓ scaffolded kit 'benchmark-kit' at /var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs/benchmark-kit (22 files)
+  blessed determinism golden: /var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs/benchmark-kit/tests/golden/benchmark_kit_spool.ndjson
+  next: cd into it, `pip install -e '.[dev]'`, then `pytest` (green from the start).
