@@ -74,3 +74,14 @@ This writes the Spool without network calls and copies `DEMO_SCRIPT.md` into `./
 The container defaults to `/app/out`, the depot's artifact collection directory. A missing
 runbook source or unwritable destination fails before ingestion; fix the reported path
 before retrying. The golden gate uses its own temporary artifact directory.
+
+### Release admission handoff
+
+After the kit's tagged image is published and signed, an authoring build containing
+`synth-authoring admit` can preflight and resume its depot admission run. Use an existing
+admin session, an immutable release tag and a separate nonsecret progress file per
+candidate. Only a passing eligible-to-pin verdict prints a registry snippet; registry
+edits, staging rehearsal and publication remain separate steps. The default older v4.1.1
+runtime pin does not include this new authoring command. Follow core's
+[admission guide](https://github.com/borismichel/langfuse-synth-core/blob/main/docs/ADMISSION.md)
+for connection setup, polling limits, retries and credential handling.

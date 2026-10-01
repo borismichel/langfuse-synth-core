@@ -27,6 +27,7 @@ import json
 import sys
 from pathlib import Path
 
+from langfuse_synth_core.authoring import admission as _admission
 from langfuse_synth_core.authoring import benchmark as _benchmark
 from langfuse_synth_core.authoring import conformance as _conformance
 from langfuse_synth_core.authoring import repin as _repin
@@ -288,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     _benchmark.add_parser(subparsers)
+    _admission.add_parser(subparsers)
     _add_validate(subparsers)
     _add_conformance(subparsers)
     _add_freeze(subparsers)

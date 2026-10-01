@@ -137,3 +137,11 @@ Use the [benchmark protocol](docs/benchmarks/README.md) to compare core or autho
 changes against three fixed briefs. `synth-authoring benchmark` records and validates
 evidence, separates offline component timings from agent-authoring and live outcomes,
 and compares completed runs only within matching environments.
+
+## Released-candidate admission
+
+An authoring build containing `synth-authoring admit` can start or resume a released kit's
+existing depot admission run and print its registry handoff after success. It saves
+nonsecret progress and keeps registration, staging rehearsal and publication separate.
+See [admission setup and resume](docs/ADMISSION.md) for session credentials, immutable
+release tags, bounded polling and exit codes. This command is not in the older v4.1.1 pin.
