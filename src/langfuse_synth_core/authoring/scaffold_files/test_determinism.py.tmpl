@@ -2,7 +2,8 @@
 
 A fresh full-payload materialization is compared byte-for-byte against the blessed golden,
 run offline in a subprocess under PYTHONHASHSEED=0 and the deny-LLM egress block. This
-simultaneously proves the seed is deterministic AND model-free-at-seed-runtime. `synth new`
+checks content drift and model-free-at-seed-runtime. A separate repeatability check varies
+process hash seeds to detect unordered Recipe output. `synth-authoring new`
 blessed the initial golden, so this is green from the first commit.
 
 The oracle is pinned at a small `GOLDEN_TARGET_TRACES` floor: determinism is
@@ -46,6 +47,53 @@ def test_full_payload_golden_is_byte_identical():
     from langfuse_synth_core.authoring.golden import assert_golden
 
     assert_golden(_spec())
+
+
+def test_recipe_is_repeatable_across_process_hash_seeds(tmp_path):
+    """Identical logical inputs stay byte-identical under different process ordering."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from langfuse_synth_core.authoring import golden
+    from langfuse_synth_core.authoring.egress import egress_block_env
+
+    spec = _spec()
+    if hasattr(golden, "assert_repeatable"):
+        golden.assert_repeatable(spec)
+        return
+
+    # Compatibility with the scaffold's default v4.1.1 pin. Use its public egress
+    # guard and the kit-owned seed directly; that release's materialize_spool
+    # always pins hash seed 0. Remove this fallback after upgrading the core pin.
+    script = """
+import json, sys
+from pathlib import Path
+from langfuse_synth_core.authoring.egress import install_guard
+install_guard()
+sys.path[:0] = json.loads(sys.argv[1])
+from golden_seed import seed
+Path(sys.argv[4]).write_bytes(seed(int(sys.argv[2]), json.loads(sys.argv[3])))
+"""
+    baseline = None
+    for hash_seed in (0, 1, 2):
+        out = tmp_path / f"spool-{hash_seed}.bin"
+        env = egress_block_env(os.environ)
+        env["PYTHONHASHSEED"] = str(hash_seed)
+        subprocess.run(
+            [sys.executable, "-c", script, json.dumps(spec.search_paths),
+             str(spec.target_traces), json.dumps(dict(spec.params)), str(out)],
+            env=env, check=True, capture_output=True, text=True,
+        )
+        fresh = out.read_bytes()
+        if baseline is None:
+            baseline = fresh
+        assert fresh == baseline, (
+            f"Process-dependent Spool: PYTHONHASHSEED=0 differs from {hash_seed}. "
+            "Sort unordered collections before generating or serializing records; "
+            "re-blessing a golden cannot fix repeatability."
+        )
 
 
 def test_golden_is_full_payload_not_ids_and_summary():

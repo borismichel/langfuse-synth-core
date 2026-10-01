@@ -1,0 +1,48 @@
+# __NAME__
+
+A support assistant correctly accepts a refund, regresses after selecting a retired
+policy, and recovers when retrieval filters for the current policy. The same question
+is linked across three traces in one Langfuse session.
+
+Deploy this kit through Demo Depot into a fresh demo project. Seeding delivers a small
+24-trace Spool and the **Presenter Runbook**; verification checks the current run and
+its baseline/failure/recovery evidence. Follow the runbook's three beats in Langfuse.
+
+All answers, scores and timings are deterministic fixtures. This demo does not run a
+live model or evaluator, create a prompt-management version, or deploy a real repair.
+The `support-v1/v2/v3` labels are scenario metadata. A Companion is optional and its
+basic placeholder is outside this story.
+
+## Development and rehearsal
+
+Install with `pip install -e '.[dev]'` and run `pytest`. The suite proves golden byte
+identity, retargeting, manifest validity and story preservation at supported volumes.
+`generation.target_traces` accepts integers of at least 3; the first complete example
+is retained at every supported volume. Extra nonmultiples of three end in a partial
+background session. Adapt `src/synth/materialize.py`, `src/synth/story.py` and the runbook
+together when changing the story; re-bless an intentional golden change via core's
+`synth-authoring freeze` command.
+
+Offline artifact rehearsal, from the kit root:
+
+```bash
+SYNTH_OUT_DIR=./out synth seed --config config/demo.yaml --dry-run \
+  --set generation.target_traces=3 --set generation.as_of_date=2026-10-01
+```
+
+Inspect `out/DEMO_SCRIPT.md` and `.synth_spool/events.ndjson`. This validates local
+delivery, not the live walkthrough. Dry-run deliberately leaves no successful
+verification receipt.
+
+For live rehearsal, release and admit the kit through the depot's normal workflow,
+then use an admin staging deployment into a fresh project. Wait for `seed` and `verify`
+to pass and follow the delivered runbook in the deployment's Langfuse project. Record
+the kit revision, selected seed/as-of/volume, verification result and whether all three
+beats were visible. Live rehearsal remains pending until that evidence exists.
+
+Verification reads bounded current-run trace/score IDs from `.synth_verify.json` on
+`SYNTH_STATE_DIR`, then checks the first comparison's relationships, outputs, retrieved
+documents and timings through core's read client. It polls visibility for up to 60
+seconds; individual requests use core's own timeout. Optional `--anchors` state remains
+separate. A failed seed or dry run invalidates the live receipt. Clear a disposable
+project before any reseed: OTLP appends observations.

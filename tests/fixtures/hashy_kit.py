@@ -5,11 +5,9 @@ deliberately *careless* in the most ordinary way: it serializes a ``set`` of str
 without sorting, so its iteration order (and therefore its bytes) is salted by
 ``PYTHONHASHSEED``. A real kit author writes code like this all the time.
 
-It exists to prove the golden gate PINS the hash seed: a careless-but-common kit must
-still materialize a byte-stable Spool, so the determinism law
-(``seed + target_traces + params -> byte-identical Spool``) holds by the gate's
-construction, not by the kit author's vigilance. Model-free and network-free, so it
-passes cleanly under the deny-LLM egress block.
+It proves both that legacy fixed-hash materialization remains stable and that the
+separate repeatability check catches process-dependent ordering. Model-free and
+network-free, so the egress block does not obscure the ordering failure.
 """
 
 from __future__ import annotations
