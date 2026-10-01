@@ -6,16 +6,17 @@ payload (not IDs + a summary). This is stronger than internal repeatability: a f
 materialization is compared byte-for-byte against a blessed golden snapshot, so any
 refactor or story change that silently perturbs the pool fails loudly at author time.
 
-Two capabilities, one machine:
+Complementary offline checks:
 
 * :func:`assert_golden` — the gate. Materializes the Spool under the deny-LLM egress
   block and asserts byte-identity against the blessed golden.
+* :func:`assert_repeatable` — compares identical inputs across process hash seeds.
 * :func:`freeze` — ``synth-authoring freeze``. Materializes the Spool under the same block and
   writes it as the blessed golden, so a *deliberate* pool change (including refreshing an
   author-time LLM-generated fixture) is one intentional re-bless — never a hand-edit.
 
-Both run ``seed`` in a subprocess under :mod:`langfuse_synth_core.authoring.egress`, so
-the gate simultaneously proves determinism AND model-free-at-seed-runtime.
+All run ``seed`` in a subprocess under :mod:`langfuse_synth_core.authoring.egress`, so
+the checks cover snapshot drift, process-dependent ordering and model-free seed runtime.
 
 The ``target_traces`` derivation hook that runs at seed time is NOT here — it ships in
 the runtime library (:mod:`langfuse_synth_core.derivation`) and the kit's own ``seed``
@@ -59,6 +60,10 @@ class GoldenMismatch(GoldenError):
     """
 
 
+class RepeatabilityMismatch(GoldenError):
+    """Identical logical inputs produce different Spools across process hash seeds."""
+
+
 @dataclass(frozen=True)
 class GoldenSpec:
     """One golden case: a kit's seed pinned to a seed + params, and its golden path.
@@ -80,8 +85,10 @@ class GoldenSpec:
         object.__setattr__(self, "golden_path", Path(self.golden_path))
 
 
-def materialize_spool(spec: GoldenSpec) -> bytes:
+def materialize_spool(spec: GoldenSpec, *, hash_seed: int = 0) -> bytes:
     """Run ``seed`` in a subprocess under the deny-LLM egress block; return Spool bytes.
+
+    ``hash_seed`` defaults to 0 to preserve existing golden snapshot bytes.
 
     Raises :class:`~langfuse_synth_core.authoring.egress.EgressBlockedError` if the seed
     attempts any non-loopback network access (e.g. a planted LLM call), and
@@ -103,14 +110,10 @@ def materialize_spool(spec: GoldenSpec) -> bytes:
             encoding="utf-8",
         )
 
-        # Pin the hash seed so a kit careless about set/dict ordering cannot perturb the
-        # Spool bytes across runs. Python salts str/bytes hashing per process, so an
-        # unpinned seed subprocess would iterate a set in a run-dependent order and
-        # materialize different bytes each time — a false GoldenMismatch. Pinning here
-        # makes `seed + target_traces + params -> byte-identical Spool` hold by the
-        # gate's construction, not by the kit author's vigilance.
+        # Keep snapshot comparisons on the historical hash seed; the independent
+        # repeatability gate varies it to expose unordered Recipe output.
         env = egress_block_env(os.environ)
-        env["PYTHONHASHSEED"] = "0"
+        env["PYTHONHASHSEED"] = str(hash_seed)
 
         result = subprocess.run(
             [sys.executable, "-m", "langfuse_synth_core.authoring._seed_runner",
@@ -132,6 +135,27 @@ def materialize_spool(spec: GoldenSpec) -> bytes:
                 f"{result.stderr.strip()}"
             )
         return out_path.read_bytes()
+
+
+def assert_repeatable(spec: GoldenSpec) -> None:
+    """Check identical inputs under process hash seeds 0, 1 and 2, offline.
+
+    No golden is required or written. Raises :class:`RepeatabilityMismatch` for
+    process-dependent bytes. Every run uses the same deny-LLM egress block as the
+    golden gate. This samples process ordering; it cannot prove all possible seeds.
+    """
+    baseline = materialize_spool(spec)
+    for hash_seed in (1, 2):
+        fresh = materialize_spool(spec, hash_seed=hash_seed)
+        if fresh != baseline:
+            raise RepeatabilityMismatch(
+                f"process-dependent Spool for {spec.seed_ref} "
+                f"(target_traces={spec.target_traces}, params={dict(spec.params)!r}): "
+                f"PYTHONHASHSEED=0 differs from PYTHONHASHSEED={hash_seed}. "
+                "Sort unordered collections before generating or serializing records. "
+                "This is a repeatability failure, not golden content drift; "
+                "`synth-authoring freeze` cannot bless it."
+            )
 
 
 def assert_golden(spec: GoldenSpec) -> None:
@@ -161,8 +185,10 @@ def assert_golden(spec: GoldenSpec) -> None:
 def freeze(spec: GoldenSpec) -> Path:
     """``synth-authoring freeze``: materialize under the egress block and bless as the golden.
 
-    One intentional step. Returns the golden path written. Creates parent dirs.
+    Refuses process-dependent output before touching any existing snapshot.
+    Returns the golden path written. Creates parent dirs.
     """
+    assert_repeatable(spec)
     fresh = materialize_spool(spec)
     spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
     spec.golden_path.write_bytes(fresh)

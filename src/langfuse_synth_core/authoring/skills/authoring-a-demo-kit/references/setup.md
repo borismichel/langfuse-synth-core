@@ -82,15 +82,16 @@ After installing the kit's dev dependencies, run in a separate process from the 
 python -m synth.companion.preview
 ```
 
-Open the printed loopback URL (default port 8765; use `--port` to change it). Exercise the
-visible fixture interaction through the same app factory as the live surface. The preview
+Open the printed loopback URL (default port 8765; use `--port` to change it). Follow
+**View sample trace** to exercise the fixture interaction through the same app factory as
+the live surface. The preview
 clears inherited credentials and target configuration and blocks outgoing connections,
 including loopback. Extend its explicit fixture adapter when your surface needs another
 read; unsupported clients fail rather than binding a real service.
 
-Keep the preview banner and fixture labels visible. Its health reports not-ready and it
-cannot prove Langfuse writes, live evaluations or admission. Use a fresh process for live
-checks. Older kits without `synth.companion.preview` need the preview scaffold changes or
+Keep the preview banner and fixture labels visible. Its health returns HTTP 503 with
+`ready: false`; it cannot prove Langfuse writes, live evaluations or admission. Use a fresh
+process for live checks. Older kits without `synth.companion.preview` need the preview scaffold changes or
 their own equivalent isolated fixture surface; the command is not available merely by
 upgrading an existing kit's dependency.
 

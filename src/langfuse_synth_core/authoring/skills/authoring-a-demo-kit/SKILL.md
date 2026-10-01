@@ -188,10 +188,13 @@ prerequisite. Continue offline work; never describe an unexecuted check as passe
 
 ## 7. Admit and rehearse
 
-For depot delivery, read [delivery.md](references/delivery.md). Follow the published
-release/admission workflow for the exact candidate, retain the admission run and failed-rung
-evidence, then rehearse through the actual delivered surfaces in staging. Local checks
-and a healthy Companion endpoint do not substitute for admission or the presenter journey.
+For depot delivery, use `synth-authoring admit` with the explicit repository, Manifest
+slug, immutable release ref, portal and progress file in
+[delivery.md](references/delivery.md). That reference covers admin session setup, safe
+resume, outcome codes and the manual API fallback for older authoring builds. Retain the
+exact candidate's admission run and failed-rung evidence, then rehearse through the actual
+delivered surfaces in staging. Local checks and a healthy Companion endpoint do not
+substitute for admission or the presenter journey.
 
 Execute every runbook beat as the presenter: screen, action, expected result. Record the
 actual outcome, representative links/IDs and a timestamped action log or screenshots.

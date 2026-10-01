@@ -106,6 +106,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
 COMPANION_FILES: tuple[tuple[str, str], ...] = (
     ("companion__init__.py.tmpl", "src/synth/companion/__init__.py"),
     ("companion_app.py.tmpl", "src/synth/companion/app.py"),
+    ("companion_preview.py.tmpl", "src/synth/companion/preview.py"),
 )
 
 # Emitted ONLY when `--anchors` is passed (portal #199): the kit's anchors payload on the
@@ -195,7 +196,7 @@ _ANCHORS_PAGE_HELPER = (
     "\n"
     "\n"
 )
-_ANCHORS_PAGE_BODY = "\n        + _anchors_line()"
+_ANCHORS_PAGE_BODY = "\n        + (_anchors_line() if not preview else '')"
 
 
 class ScaffoldError(ValueError):
@@ -260,7 +261,7 @@ def _companion_manifest_blocks(slug: str) -> dict:
     }
 
 
-def build_manifest(slug: str, *, with_companion: bool = False) -> dict:
+def build_manifest(slug: str, *, with_companion: bool = False, starter: str = "basic") -> dict:
     """Build the schema-valid ``usecase.yaml`` document for ``slug`` (dumped to YAML by
     :func:`scaffold_kit`). The canonical volume knob is injected via the authoring SDK so
     the emitted ``config_schema.generation.target_traces`` is schema-valid by construction.
@@ -316,6 +317,15 @@ def build_manifest(slug: str, *, with_companion: bool = False) -> dict:
         # (portal #161).
         "assets": {"docs": [{"path": "README.md", "title": "Overview"}]},
     }
+    if starter == "regression-recovery":
+        manifest["tagline"] = "Find a refund-policy regression and prove the recovery."
+        manifest["story"] = (
+            "A support assistant answers a refund question correctly, regresses when retrieval "
+            "selects a retired policy, then recovers with a current-policy filter. Compare the "
+            "linked traces, retrieved evidence, outputs and seeded correctness scores in Langfuse."
+        )
+        knob = config_schema["properties"]["generation.target_traces"]
+        knob.update(minimum=3, default=24)
     if with_companion:
         manifest.update(_companion_manifest_blocks(slug))
     return manifest
@@ -328,10 +338,11 @@ _MANIFEST_HEADER = (
 )
 
 
-def render_manifest(slug: str, *, with_companion: bool = False) -> str:
+def render_manifest(slug: str, *, with_companion: bool = False, starter: str = "basic") -> str:
     """The full ``usecase.yaml`` text (header comment + dumped, schema-valid document)."""
     body = yaml.safe_dump(
-        build_manifest(slug, with_companion=with_companion), sort_keys=False, allow_unicode=True
+        build_manifest(slug, with_companion=with_companion, starter=starter),
+        sort_keys=False, allow_unicode=True
     )
     return _MANIFEST_HEADER + body
 
@@ -351,6 +362,7 @@ def scaffold_kit(
     *,
     with_companion: bool = False,
     with_anchors: bool = False,
+    starter: str = "basic",
     core_ref: str = DEFAULT_CORE_REF,
     force: bool = False,
 ) -> ScaffoldResult:
@@ -360,6 +372,8 @@ def scaffold_kit(
     non-empty ``dest`` unless ``force``. Raises :class:`ScaffoldError` on a bad slug or an
     occupied destination.
     """
+    if starter not in ("basic", "regression-recovery"):
+        raise ScaffoldError(f"unknown starter {starter!r}; choose basic or regression-recovery")
     if not SLUG_RE.match(slug):
         raise ScaffoldError(
             f"invalid slug {slug!r}: must be kebab-case matching {SLUG_RE.pattern} "
@@ -378,6 +392,14 @@ def scaffold_kit(
         "__NAME__": slug_to_name(slug),
         "__CORE_PIN__": core_ref,
         "__GOLDEN_TT__": str(GOLDEN_TARGET_TRACES),
+        "__DEFAULT_TARGET__": "24" if starter == "regression-recovery" else "1000",
+        "__SCENARIO_IMPORT__": (
+            "from .story import check_story" if starter == "regression-recovery" else ""
+        ),
+        "__SCENARIO_CHECK__": (
+            '    report.add("refund_story", *check_story(reader, examples))\n'
+            if starter == "regression-recovery" else ""
+        ),
         # Companion placeholders: empty in the base scaffold (so cli.py / pyproject.toml are
         # byte-identical to today), filled only under `--companion`. `__CORE_EXTRA__` pulls
         # the core web-server deps via the `[companion]` extra; `__COMPANION_DISPATCH__`
@@ -395,6 +417,15 @@ def scaffold_kit(
     result = ScaffoldResult(slug=slug, dest=dest)
 
     files = list(BASE_FILES)
+    if starter == "regression-recovery":
+        story_templates = {
+            "materialize.py.tmpl": "regression_materialize.py.tmpl",
+            "DEMO_SCRIPT.md.tmpl": "regression_runbook.md.tmpl",
+            "README.md.tmpl": "regression_README.md.tmpl",
+        }
+        files = [(story_templates.get(name, name), path) for name, path in files]
+        files.append(("test_story.py.tmpl", "tests/test_story.py"))
+        files.append(("regression_story.py.tmpl", "src/synth/story.py"))
     if with_companion:
         files += list(COMPANION_FILES)
     if with_anchors:
@@ -405,7 +436,9 @@ def scaffold_kit(
 
     # The manifest is generated (not templated) so the canonical knob is injected via the
     # authoring SDK and proven schema-valid by construction.
-    _write(dest / "usecase.yaml", render_manifest(slug, with_companion=with_companion))
+    _write(dest / "usecase.yaml", render_manifest(
+        slug, with_companion=with_companion, starter=starter,
+    ))
     result.files.append("usecase.yaml")
 
     # Bless the initial golden: run the just-emitted seed through the determinism golden

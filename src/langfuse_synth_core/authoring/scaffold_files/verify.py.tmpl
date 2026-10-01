@@ -33,6 +33,7 @@ from langfuse_synth_core.timegen import iso
 
 from .config import Config
 from .receipt import RunReceipt, SAMPLE_LIMIT
+__SCENARIO_IMPORT__
 
 
 @dataclass
@@ -73,7 +74,7 @@ def _read_examples(reader, examples: list[dict]) -> VerifyReport:
         report.add(f"score:{score_id}", score_ok,
                    "expected score, value and trace relationship visible" if score_ok
                    else f"missing or mismatched score {score_id} on trace {trace_id}")
-    return report
+__SCENARIO_CHECK__    return report
 
 
 def run_verify(

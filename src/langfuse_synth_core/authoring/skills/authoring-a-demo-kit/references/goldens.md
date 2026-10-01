@@ -15,8 +15,9 @@ First identify the failure:
   [model-free-seed.md](model-free-seed.md).
 
 Run the generated process-repeatability test before freezing when that test is present.
-It compares identical inputs in fresh processes with different Python hash seeds; keep
-this gate separate from the fixed-hash content snapshot.
+It compares identical inputs in fresh processes with Python hash seeds `0`, `1` and `2`,
+with egress blocked for every run. Keep this gate separate from the hash-`0` full-wire
+content snapshot (OTLP and score payloads).
 Newer core provides `assert_repeatable(GoldenSpec(...))` and makes `freeze` reject detected
 repeatability failures. The default older v4.1.1 `freeze` does **not** enforce that new
 check. A generated compatibility test can run it with the older pin; run that test first
