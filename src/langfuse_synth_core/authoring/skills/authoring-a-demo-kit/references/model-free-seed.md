@@ -30,8 +30,8 @@ A static provider-scan ("grep for `anthropic`") is theatre — a dynamic import 
 binding enforcement is a **real runtime egress block**. Every determinism gate run
 (`pytest`, `synth-authoring freeze`, `synth-authoring new`'s initial bless) does this:
 
-- `seed` runs in a **subprocess** under `PYTHONHASHSEED=0` (so set/dict ordering can't
-  perturb bytes) and a **deny-LLM egress block**:
+- The snapshot comparison runs `seed` in a **subprocess** under `PYTHONHASHSEED=0`
+  for compatibility with existing goldens, with a **deny-LLM egress block**:
   - a **socket-level guard** monkeypatches `getaddrinfo` / `create_connection` /
     `socket.connect[_ex]` so any **non-loopback** target raises `EgressBlockedError`
     *before* DNS or a connection happens;
@@ -103,8 +103,9 @@ The pattern, step by step:
        ...
    ```
 
-4. **Bless the golden.** Because the pool changed on purpose, re-bless the oracle in one
-   intentional step (never hand-edit the snapshot):
+4. **Check repeatability, then bless the golden.** Follow
+   [goldens.md](goldens.md) for the check supported by your installed core. Because the
+   pool changed on purpose, re-bless the oracle in one intentional step:
 
    ```bash
    synth-authoring freeze golden_seed:seed \

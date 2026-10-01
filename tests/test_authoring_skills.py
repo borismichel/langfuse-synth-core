@@ -2,11 +2,11 @@
 
 Two things are proven here: (1) the ``authoring-a-demo-kit`` orchestrator skill ships as
 package data under ``langfuse_synth_core.authoring`` — so contract, validator, and skill
-can never drift, being one version in one repo; and (2) the ``synth-authoring skills``
+travel together as one version in one repo; and (2) the ``synth-authoring skills``
 locate/install surface makes the shipped skill reachable in a coding agent's skills dir.
 
 The skill's *content* obligations from the acceptance criteria are asserted too — it walks
-scaffold → trace tree → derivation → runbook → gates, teaches the model-free-seed rule and
+audience → small walkthrough → scale → delivery, teaches the model-free-seed rule and
 the ``synth freeze`` frozen-fixture escape hatch, and delegates Langfuse craft to the
 existing ``langfuse`` skill — so a rewrite that drops one of those load-bearing pieces
 reddens CI rather than shipping a hollow skill.
@@ -76,19 +76,26 @@ def test_skill_delegates_langfuse_craft(skill_body: str):
     assert "observation" in lowered and "evaluator" in lowered
 
 
-def test_skill_teaches_the_v4_write_path_without_restating_the_observation_model(skill_body):
+def test_skill_teaches_the_v4_write_path_without_restating_the_observation_model(
+    skill_body, tmp_path,
+):
     """AC (portal #207, revised by #213): the skill teaches the write path — OTLP, the
     score exception, the append-not-upsert consequence, and where the wire is documented —
     while the split it was built on holds: *which* observation type a step is stays the
     `langfuse` skill's. There is no pin to teach any more: the batch path is gone, so the
     skill must NOT still be telling authors to select one."""
-    lowered = skill_body.lower()
+    from langfuse_synth_core.authoring import skills
+
+    skills.install_skills(tmp_path)
+    reference = tmp_path / SKILL_NAME / "references" / "recipe-and-transport.md"
+    assert "references/recipe-and-transport.md" in skill_body
+    lowered = reference.read_text().lower()
     assert "set_spool_write_path" not in lowered
     assert "score-create" in lowered
     assert "docs/write_paths.md" in lowered
     assert "otlp" in lowered and "2026-11-16" in lowered
     assert "appends" in lowered and "non-resumable" in lowered
-    assert "langfuse` skill" in skill_body.split("**The wire is core's", 1)[1][:2500]
+    assert "langfuse` skill" in lowered
 
 
 def test_skill_teaches_the_observation_type_vocabulary_and_its_failure_mode(skill_body, tmp_path):
@@ -100,7 +107,8 @@ def test_skill_teaches_the_observation_type_vocabulary_and_its_failure_mode(skil
 
     skills.install_skills(tmp_path)
     craft = (tmp_path / SKILL_NAME / "references" / "langfuse-craft.md").read_text()
-    pack = (skill_body + craft).lower()
+    pack = "\n".join(path.read_text() for path in (tmp_path / SKILL_NAME).rglob("*.md"))
+    pack = pack.lower()
 
     for value in ("agent", "tool", "chain", "retriever", "embedding", "evaluator",
                   "guardrail", "span", "generation", "event"):
@@ -117,10 +125,7 @@ def test_skill_seed_guidance_promises_no_idempotent_re_run(skill_body: str, tmp_
     from langfuse_synth_core.authoring import skills
 
     skills.install_skills(tmp_path)
-    refs = tmp_path / SKILL_NAME / "references"
-    pack = skill_body + "".join(
-        (refs / name).read_text() for name in ("model-free-seed.md", "langfuse-craft.md")
-    )
+    pack = "\n".join(path.read_text() for path in (tmp_path / SKILL_NAME).rglob("*.md"))
     lowered = pack.lower()
     for retired in ("idempotent upsert", "re-seeds idempotently", "deterministic upsert",
                     "re-run to resume", "safe to re-seed"):
@@ -136,7 +141,7 @@ def test_skill_states_the_runbook_executability_rule(skill_body: str):
     lowered = skill_body.lower()
     assert "delivered surfaces" in lowered
     assert "developer-mode" in lowered
-    assert "companion route" in lowered
+    assert "companion route" in " ".join(lowered.split())
     assert "tucked away" in lowered
     assert "#180" in skill_body, "the EV counter-example anchors the failure shape"
     checklist = skill_body.split('## What "done" looks like', 1)[1]
@@ -177,3 +182,46 @@ def test_skills_cli_install_refuses_overwrite_without_force(tmp_path):
     assert main(["skills", "--install", "--dest", str(dest)]) == 0
     assert main(["skills", "--install", "--dest", str(dest)]) != 0
     assert main(["skills", "--install", "--dest", str(dest), "--force"]) == 0
+
+
+def test_installed_workflow_starts_with_three_evidenced_beats_before_scaling(tmp_path):
+    """The agent receives the story contract and separate readiness stages in order."""
+    from langfuse_synth_core.authoring import skills
+
+    skills.install_skills(tmp_path)
+    body = (tmp_path / SKILL_NAME / "SKILL.md").read_text()
+    stages = [
+        "## 1. Frame the demo", "## 2. Reuse or scaffold", "## 3. Build the small walkthrough",
+        "## 4. Check offline", "## 5. Scale the story", "## 6. Verify the live run",
+        "## 7. Admit and rehearse",
+    ]
+    positions = [body.index(stage) for stage in stages]
+    assert positions == sorted(positions)
+    brief = body[positions[0]:positions[1]].lower()
+    for field in ("audience", "problem", "visible failure", "presenter action", "payoff",
+                  "screen", "expected result", "evidence"):
+        assert field in brief
+    assert "three" in brief
+    offline = body[positions[3]:positions[4]]
+    assert "synth-authoring conformance" in offline
+    assert "synth verify" not in offline
+    assert "synth seed --config" not in offline
+
+
+def test_installed_reference_links_resolve_without_a_core_checkout(tmp_path):
+    """Progressive disclosure remains usable after copying only the skill package."""
+    import re
+    from urllib.parse import unquote, urlsplit
+
+    from langfuse_synth_core.authoring import skills
+
+    skills.install_skills(tmp_path)
+    root = tmp_path / SKILL_NAME
+    for doc in root.rglob("*.md"):
+        for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", doc.read_text()):
+            parsed = urlsplit(target)
+            if parsed.scheme or not parsed.path:
+                continue
+            linked = (doc.parent / unquote(parsed.path)).resolve()
+            assert linked.is_relative_to(root), f"{doc.name}: {target} escapes installed skill"
+            assert linked.is_file(), f"{doc.name}: missing {target}"
