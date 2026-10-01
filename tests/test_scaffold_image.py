@@ -159,10 +159,14 @@ def test_seed_dry_run_writes_the_spool_as_uid_10001(image):
     assert "spooled" in result.stdout, "seed exited 0 but never reported spooling events"
 
 
-def test_artifact_dir_takes_writes_as_uid_10001(image):
-    """The second casualty: the worker collects declared artifacts from /app/out after a
-    step exits, so a kit that spooled fine still could not publish its Presenter Runbook."""
-    result = _run_as_job_user(image, "sh", "-c", "touch /app/out/probe")
+def test_seed_delivers_declared_runbook_as_uid_10001(image):
+    """Exercise the producing step and default collection directory as the depot uid."""
+    result = _run_as_job_user(
+        image, "sh", "-c",
+        "synth seed --config config/demo.yaml --dry-run "
+        "&& test -r /app/out/DEMO_SCRIPT.md "
+        "&& cmp /app/DEMO_SCRIPT.md /app/out/DEMO_SCRIPT.md",
+    )
     assert result.returncode == 0, (
-        f"/app/out is not writable as {JOB_RUN_USER}:\n{result.stderr}"
+        f"seed did not deliver its runbook as {JOB_RUN_USER}:\n{result.stdout}\n{result.stderr}"
     )
