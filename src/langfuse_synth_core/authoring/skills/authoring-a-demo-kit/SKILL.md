@@ -338,6 +338,18 @@ Seed runtime then replays frozen data; the rule stays a clean binary (no LLM at 
 runtime, once or per-unit). Full pattern in
 [references/model-free-seed.md](references/model-free-seed.md).
 
+### Companion preview during development
+
+For a scaffolded Companion, install its `.[dev]` extra and run
+`python -m synth.companion.preview --port 8765`. Open the local page and follow
+**View sample trace** to exercise the Surface through an explicit fixture reader.
+Extend the fixture data when adding interactions; unsupported client operations fail
+closed. The preview discards inherited credentials, blocks outgoing connections and
+shows a persistent preview indicator. Its `/healthz` is intentionally 503 with
+`ready: false`. Use this loop for rendering and interaction work, then stop it and
+rehearse the deployed Surface with its live Adapter. Successful preview is neither
+live verification nor admission evidence.
+
 ## What "done" looks like
 
 - `synth-authoring validate usecase.yaml` — valid.
