@@ -26,6 +26,7 @@ from langfuse_synth_core.seed.ingest import Ingestor, assert_demo_project
 from langfuse_synth_core.timegen import resolve_run_date
 
 from .config import Config
+from .receipt import RunReceipt, SAMPLE_LIMIT
 from .materialize import build_events__ANCHORS_IMPORT__
 
 DEFAULT_SPOOL = Path(".synth_spool") / "events.ndjson"
@@ -46,6 +47,8 @@ def run_seed(
     Run from the kit root, or pass `runbook_source` explicitly. `output_dir` overrides
     SYNTH_OUT_DIR (default /app/out); offline callers should select a writable local dir.
     """
+    # A failed or spool-only attempt must not leave a previous successful receipt.
+    Path(RunReceipt.state_path()).unlink(missing_ok=True)
     # The committed runbook is required output, even in offline rehearsals. Write it
     # before any remote mutation so a missing source or unwritable destination fails early.
     source = Path(runbook_source)
@@ -70,7 +73,6 @@ def run_seed(
             "(/app/out in the depot container)."
         ) from exc
     log(f"· Presenter Runbook -> {runbook}")
-
     spool_path = Path(spool_path) if spool_path else DEFAULT_SPOOL
     # The run anchor: the operator's as-of date (portal `--set generation.as_of_date=…`),
     # or the wall clock when none was set. The only place either is read — `materialize`
@@ -85,8 +87,11 @@ def run_seed(
 
     # Guardrail: refuse to run unless the key's project name matches `project_hint`.
     if not dry_run:
-        _project_id, project_name = assert_demo_project(cfg.target.base_url, cfg.target.project_hint)
-        log(f"✓ guardrail passed: project {project_name!r} matches hint {cfg.target.project_hint!r}")
+        _project_id, project_name = assert_demo_project(
+            cfg.target.base_url, cfg.target.project_hint
+        )
+        log(f"✓ guardrail passed: project {project_name!r} "
+            f"matches hint {cfg.target.project_hint!r}")
 
     ingestor = Ingestor.from_env(cfg.target.base_url, dry_run=dry_run, spool_path=spool_path)
     ingestor.open_spool()
@@ -97,4 +102,26 @@ def run_seed(
     if do_import and not dry_run:
         sent = ingestor.import_spool(path=spool_path, log=log)
         log(f"✓ imported {sent} events")
-__ANCHORS_WRITE__    return spool_path
+        examples = []
+        for event in events:
+            if event.get("type") == "score-create" and event["body"].get("traceId"):
+                body = event["body"]
+                examples.append({
+                    "trace_id": body["traceId"], "score_id": body["id"],
+                    "name": body["name"], "value": body["value"],
+                    "data_type": body["dataType"], "trace_timestamp": event["timestamp"],
+                })
+                if len(examples) == SAMPLE_LIMIT:
+                    break
+        receipt = RunReceipt(
+            base_url=cfg.target.base_url,
+            public_key=os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+            seed=cfg.generation.seed,
+            target_traces=cfg.generation.target_traces,
+            as_of_date=str(cfg.generation.as_of_date or ""),
+            examples=examples,
+        )
+__ANCHORS_WRITE__    if do_import and not dry_run:
+        receipt.save()
+        log(f"· verification receipt -> {RunReceipt.state_path()}")
+    return spool_path
