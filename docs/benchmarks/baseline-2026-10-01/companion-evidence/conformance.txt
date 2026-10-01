@@ -1,0 +1,11 @@
+["/private/tmp/demo-kit-review-venv/bin/python", "-m", "langfuse_synth_core.authoring.cli", "conformance", "/var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs/benchmark-kit"]
+conformance: /var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-ffpgcfzs/benchmark-kit/usecase.yaml
+  ✓ manifest passes the blocking Contract lint (synth-authoring validate)
+  ✓ live surface declared per contract; command parses clean under the fixed companion invocation and rejects `--set`
+  ✓ companion serves its declared health path and renders its index offline, secret-free
+  ✓ no deprecated Langfuse endpoint reached: observations go out as OTLP spans, scores as `score-create`, and every read goes through the read seam
+  · stateless kit — no `synth.state` module; anchors checks skipped (statelessness is a legitimate contract citizen, CONTRACT.md §"Per-run anchors (opt-in)")
+  · no observation type is named outright in the kit's sources — nothing for the vocabulary check to read, so it claims nothing (a kit of spans, generations and events names none; a type assembled at runtime is caught at seed time instead)
+✓ conformance: the Contract holds
+/private/tmp/demo-kit-delivery-20261001/core/src/langfuse_synth_core/authoring/conformance.py:333: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient
