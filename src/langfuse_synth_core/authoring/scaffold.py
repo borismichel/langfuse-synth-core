@@ -31,7 +31,8 @@ File floor of the emitted kit:
   ``src/synth/state.py`` — its anchors payload on the core ``AnchorsIO`` mechanism
   (``CONTRACT.md`` §"Per-run anchors (opt-in)") — its ``seed`` writes the state file, and
   a ``--companion`` surface reads it back from the spool mount. Without the flag the kit
-  is stateless (the contract's other legitimate citizen) and the scaffold is unchanged.
+  has no Companion anchors. Every scaffold has a separate bounded verification receipt
+  on the same spool mount, without taking over the optional RunState payload.
 
 As its final step the generator **blesses the initial golden** by running the emitted
 seed through the determinism golden gate under the deny-LLM egress block — so the freshly
@@ -89,6 +90,7 @@ BASE_FILES: tuple[tuple[str, str], ...] = (
     ("materialize.py.tmpl", "src/synth/materialize.py"),
     ("seed.py.tmpl", "src/synth/seed.py"),
     ("verify.py.tmpl", "src/synth/verify.py"),
+    ("receipt.py.tmpl", "src/synth/receipt.py"),
     ("cli.py.tmpl", "src/synth/cli.py"),
     ("golden_seed.py.tmpl", "tests/golden_seed.py"),
     ("test_determinism.py.tmpl", "tests/test_determinism.py"),
