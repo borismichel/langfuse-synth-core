@@ -1,0 +1,8 @@
+["/private/tmp/demo-kit-review-venv/bin/python", "-m", "langfuse_synth_core.authoring.cli", "conformance", "/var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-aexjycwz/benchmark-kit"]
+conformance: /var/folders/bt/gjvthw215n95yps8kvr7hhyr0000gn/T/synth-benchmark-aexjycwz/benchmark-kit/usecase.yaml
+  ✓ manifest passes the blocking Contract lint (synth-authoring validate)
+  ✓ no deprecated Langfuse endpoint reached: observations go out as OTLP spans, scores as `score-create`, and every read goes through the read seam
+  · no live components declared — companion serve checks skipped
+  · stateless kit — no `synth.state` module; anchors checks skipped (statelessness is a legitimate contract citizen, CONTRACT.md §"Per-run anchors (opt-in)")
+  · no observation type is named outright in the kit's sources — nothing for the vocabulary check to read, so it claims nothing (a kit of spans, generations and events names none; a type assembled at runtime is caught at seed time instead)
+✓ conformance: the Contract holds

@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "protocol_version": 1,
+  "run_id": "551593a3-41f3-4ec9-9b6f-9479f3d5606c",
+  "brief": "interactive-companion",
+  "mode": "offline",
+  "source_revision": "7eabcbb5e71a447fba40ddbbd3de5785bf257db0",
+  "source_dirty": false,
+  "started_at": "2026-10-01T10:08:15.070178+00:00",
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.14",
+    "dependencies": {
+      "PyYAML": "6.0.3",
+      "Pygments": "2.21.0",
+      "annotated-doc": "0.0.5",
+      "annotated-types": "0.8.0",
+      "anyio": "4.15.1",
+      "attrs": "26.1.0",
+      "backoff": "2.2.1",
+      "certifi": "2026.7.22",
+      "charset-normalizer": "3.5.2",
+      "click": "8.5.0",
+      "fastapi": "0.142.2",
+      "googleapis-common-protos": "1.75.5",
+      "h11": "0.16.0",
+      "httpcore": "1.0.9",
+      "httpx": "0.28.1",
+      "idna": "3.20",
+      "iniconfig": "2.3.0",
+      "jsonschema": "4.26.0",
+      "jsonschema-specifications": "2025.9.1",
+      "langfuse": "4.16.0",
+      "opentelemetry-api": "1.45.0",
+      "opentelemetry-exporter-http-transport": "0.66b0",
+      "opentelemetry-exporter-otlp-common": "0.66b0",
+      "opentelemetry-exporter-otlp-proto-common": "1.45.0",
+      "opentelemetry-exporter-otlp-proto-http": "1.45.0",
+      "opentelemetry-proto": "1.45.0",
+      "opentelemetry-sdk": "1.45.0",
+      "opentelemetry-semantic-conventions": "0.66b0",
+      "packaging": "26.3",
+      "pip": "25.0.1",
+      "pluggy": "1.6.0",
+      "protobuf": "7.36.2",
+      "pydantic": "2.13.5",
+      "pydantic_core": "2.46.5",
+      "pytest": "8.4.2",
+      "python-multipart": "0.0.32",
+      "referencing": "0.37.0",
+      "requests": "2.34.2",
+      "rpds-py": "2026.6.3",
+      "ruff": "0.16.9",
+      "starlette": "1.7.0",
+      "typing-inspection": "0.4.4",
+      "typing_extensions": "4.16.0",
+      "urllib3": "2.8.0",
+      "uvicorn": "0.54.0",
+      "wrapt": "2.5.0"
+    },
+    "context": "Local subprocesses; existing Python environment; no install, image build or deployment. System load and filesystem caches uncontrolled."
+  },
+  "agent": null,
+  "inputs": {
+    "scaffold": "companion"
+  },
+  "status": "completed",
+  "first_walkthrough": {
+    "status": "pending",
+    "evidence": [],
+    "seconds": null
+  },
+  "human_interventions": null,
+  "intervention_evidence": [],
+  "admission": {
+    "status": "pending",
+    "evidence": []
+  },
+  "rehearsal": {
+    "status": "pending",
+    "evidence": []
+  },
+  "offline_checks": [
+    {
+      "name": "scaffold",
+      "seconds": 0.2079582919832319,
+      "exit_code": 0,
+      "evidence": [
+        "companion-evidence/scaffold.txt"
+      ]
+    },
+    {
+      "name": "validate",
+      "seconds": 0.09923049993813038,
+      "exit_code": 0,
+      "evidence": [
+        "companion-evidence/validate.txt"
+      ]
+    },
+    {
+      "name": "conformance",
+      "seconds": 0.25141487503424287,
+      "exit_code": 0,
+      "evidence": [
+        "companion-evidence/conformance.txt"
+      ]
+    },
+    {
+      "name": "kit-tests",
+      "seconds": 0.24246350000612438,
+      "exit_code": 0,
+      "evidence": [
+        "companion-evidence/kit-tests.txt"
+      ]
+    }
+  ],
+  "notes": "Observed scaffold/check timings only. No agent authored the brief; first coherent walkthrough, interventions, admission and rehearsal remain pending."
+}

@@ -71,5 +71,9 @@ def seed(target_traces: int, params: Mapping[str, Any]) -> bytes:
     with tempfile.TemporaryDirectory(prefix="synth-golden-") as tmp:
         spool_path = Path(tmp) / "events.ndjson"
         # dry_run: no guardrail call, no network; do_import=False: never touch Langfuse.
-        run_seed(cfg, dry_run=True, do_import=False, spool_path=spool_path, log=lambda _m: None)
+        run_seed(
+            cfg, dry_run=True, do_import=False, spool_path=spool_path,
+            output_dir=Path(tmp) / "out", runbook_source=CONFIG.parent.parent / "DEMO_SCRIPT.md",
+            log=lambda _m: None,
+        )
         return spool_path.read_bytes()
