@@ -92,3 +92,48 @@ def test_skipped_checks_are_not_reported_ready(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["stages"][-1]["status"] == "skipped"
     assert not report["local_ready"]
+
+
+def test_collection_skip_is_not_reported_ready(tmp_path, capsys):
+    from langfuse_synth_core.authoring.cli import main
+    kit = _kit(tmp_path)
+    (kit / "tests" / "test_optional.py").write_text(
+        'import pytest\npytest.importorskip("nonexistent_optional_demo_dependency")\n'
+    )
+    assert main(["check", str(kit), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["stages"][-1]["status"] == "skipped"
+    assert not report["local_ready"]
+
+
+def test_selected_environment_is_not_shadowed_by_tool_sources(tmp_path, capsys):
+    from pathlib import Path
+    from langfuse_synth_core.authoring.cli import main
+    kit = _kit(tmp_path)
+    source = str(Path(__file__).resolve().parents[1] / "src")
+    (kit / "tests" / "test_environment.py").write_text(
+        'import os\ndef test_environment():\n'
+        f'    assert {source!r} not in os.environ["PYTHONPATH"].split(os.pathsep)\n'
+    )
+    assert main(["check", str(kit), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert "core:" in report["stages"][-1]["output"]
+
+
+def test_partial_companion_conformance_is_incomplete(tmp_path, capsys):
+    import copy
+    import yaml
+    from langfuse_synth_core.authoring.cli import main
+    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+    kit = tmp_path / "demo-kit"
+    scaffold_kit("demo-kit", kit, with_companion=True)
+    manifest = kit / "usecase.yaml"
+    doc = yaml.safe_load(manifest.read_text())
+    second = copy.deepcopy(doc["live_components"][0])
+    second["name"] = "second"
+    doc["live_components"].append(second)
+    manifest.write_text(yaml.safe_dump(doc))
+    assert main(["check", str(kit), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["stages"][1]["status"] == "skipped"
+    assert not report["local_ready"]

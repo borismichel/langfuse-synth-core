@@ -39,7 +39,7 @@ def _result(name: str, status: str, code: int | None, output: str, action: str =
 
 
 def _run_stage(name: str, kit: Path, python: str, timeout: float, env: dict) -> dict:
-    command = [python, "-m", __name__, name, str(kit)]
+    command = [python, str(Path(__file__).resolve()), name, str(kit)]
     try:
         proc = subprocess.run(command, cwd=kit, env=env, capture_output=True,
                               text=True, timeout=timeout)
@@ -72,8 +72,9 @@ def execute(args: argparse.Namespace) -> int:
         env = {k: v for k, v in os.environ.items() if k in {
             "PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "LANG", "LC_ALL",
         }}
-        core_src = Path(__file__).resolve().parents[2]
-        env["PYTHONPATH"] = os.pathsep.join(map(str, (core_src, kit / "src", kit / "tests")))
+        # Resolve dependencies from the selected interpreter, never the tool's source
+        # or site-packages: the kit pin must be the build its tests exercise.
+        env["PYTHONPATH"] = os.pathsep.join(map(str, (kit / "src", kit / "tests")))
         env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
         with tempfile.TemporaryDirectory(prefix="synth-check-") as tmp:
             env["SYNTH_STATE_DIR"] = tmp
@@ -123,6 +124,8 @@ def _worker(name: str, kit: Path) -> dict:
     code = 0
     try:
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            import langfuse_synth_core
+            print(f"Python: {sys.executable}; core: {langfuse_synth_core.__file__}")
             if name == "validate":
                 from langfuse_synth_core.authoring.validate import run
                 code = run([str(kit / "usecase.yaml")])
@@ -133,12 +136,19 @@ def _worker(name: str, kit: Path) -> dict:
                 code = 0 if report.ok else 1
                 if report.ok and any("not installed" in note for note in report.notes):
                     status = "unavailable"
+                elif report.ok and any("only the first is exercised" in note
+                                       for note in report.notes):
+                    status = "skipped"
             else:
                 import pytest
                 class Outcomes:
                     skipped = 0
 
                     def pytest_runtest_logreport(self, report):
+                        if report.skipped:
+                            self.skipped += 1
+
+                    def pytest_collectreport(self, report):
                         if report.skipped:
                             self.skipped += 1
 
