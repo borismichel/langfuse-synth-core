@@ -131,7 +131,13 @@
             "type": "string",
             "description": "Command that replays the Spool from the shared volume (CONTRACT.md, The spool): re-runnable after a failure on the batch write path, non-resumable on the OTLP one."
           },
-          "timeout_minutes": { "type": "integer", "minimum": 1 }
+          "timeout_minutes": { "type": "integer", "minimum": 1 },
+          "requires_secrets": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "enum": ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY"] },
+            "description": "Optional explicit secret capability. Omitted preserves the Langfuse credential pair; an explicit list injects only the listed secrets. LLM_API_KEY resolves to the selected provider's canonical key and is allowed only for custom setup steps, with top-level llm.providers. Reserved steps and seed/import/verify commands may never request it."
+          }
         }
       }
     },
@@ -191,7 +197,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["providers"],
-      "description": "Optional LLM-provider contract (LAN-378, additive — schema_version stays 1). Declares which LLM providers this use case supports; the portal injects the deployment's SELECTED provider key wherever a live component's requires_secrets lists the LLM_API_KEY sentinel. Manifests with a bare ANTHROPIC_API_KEY and no `llm` block stay valid and behave as an implicit `providers: [anthropic]` (back-compat). Provider id → env-var mapping lives ONLY in the portal provider table (api/app/providers.py), never here.",
+      "description": "Optional LLM-provider contract (LAN-378, additive — schema_version stays 1). Declares which LLM providers this use case supports; the portal injects the deployment's SELECTED provider key wherever a live component or custom setup step's requires_secrets lists the LLM_API_KEY sentinel. Manifests with a bare ANTHROPIC_API_KEY and no `llm` block stay valid and behave as an implicit `providers: [anthropic]` (back-compat). Provider id → env-var mapping lives ONLY in the portal provider table (api/app/providers.py), never here.",
       "properties": {
         "providers": {
           "type": "array",

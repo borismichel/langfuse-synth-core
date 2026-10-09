@@ -18,6 +18,7 @@ the new core but serves through the old one.)
 | --- | --- | --- |
 | `langfuse-synth-ev` | `pyproject.toml` | `langfuse-synth-core @ …@<ref>` (runtime) + `langfuse-synth-core[companion] @ …@<ref>` (the `[playground]` extra) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
 | `langfuse-synth-lender` | `pyproject.toml` | same three pins |
+| `langfuse-synth-prompt` | `pyproject.toml` | runtime `langfuse-synth-core[companion]` + `[authoring]` dev pin, plus its publish workflow ref |
 | `langfuse-synth-support` | `pyproject.toml` | the runtime pin IS `langfuse-synth-core[companion] @ …@<ref>` (scaffolded with `--companion`, so the extra rides the runtime dependency) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
 
 > Add a row here whenever a new kit starts consuming the lib, so this table stays the
@@ -61,6 +62,15 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 ## Pending for the next release (unreleased on `main`)
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
+
+## v4.2.0
+
+Adds optional `pipeline[].requires_secrets` for explicit custom setup capabilities.
+The allowlist is the Langfuse credential pair and the `LLM_API_KEY` sentinel, which
+requires `llm.providers` and is forbidden on canonical steps and commands. Existing
+manifests retain their credential behavior; deterministic seed/import/verify receive
+no provider key. Depot must adopt this schema and the matching worker enforcement
+before a kit declares the new field. No runtime transport or fixture generation changes.
 
 ## Release checklist
 
