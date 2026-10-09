@@ -35,6 +35,15 @@ from jsonschema import Draft7Validator
 # CONTRACT.md. A reserved-verb step must actually run that verb.
 RESERVED_VERBS = frozenset({"probe", "plan", "seed", "verify", "resume", "teardown"})
 
+# Provider credentials are an explicit custom-step capability, never a seed-family or
+# canonical-job capability. Exported so Depot can enforce the same policy at job intake.
+PIPELINE_PROVIDER_FORBIDDEN_STEPS = RESERVED_VERBS | frozenset(
+    {"generate-spool", "import-spool", "import"}
+)
+PIPELINE_SECRET_NAMES = frozenset(
+    {"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LLM_API_KEY"}
+)
+
 # The step ids a spec-compliant kit must always wire (the determinism + read-back spine).
 REQUIRED_STEPS = ("seed", "verify")
 
@@ -68,28 +77,79 @@ def load_schema() -> dict:
 
 
 # --------------------------------------------------------------------------------------
-# Portal-parity layer: reproduced verbatim from tools/validate_manifest.py so the
-# relocated validator is a STRICT SUPERSET of what the portal enforced (LAN-378/LAN-400).
+# Portal-parity layer, extended with explicit custom setup capabilities. Historical
+# manifests retain the provider rules from tools/validate_manifest.py (LAN-378/LAN-400).
 # --------------------------------------------------------------------------------------
 
 
 def _declared_secrets(doc: dict) -> set[str]:
-    """Union of every ``requires_secrets`` token across all live components."""
+    """Union of every declared secret across live components and pipeline steps."""
     secrets: set[str] = set()
-    components = doc.get("live_components")
-    if isinstance(components, list):
-        for comp in components:
-            if isinstance(comp, dict):
-                reqs = comp.get("requires_secrets")
-                if isinstance(reqs, list):
-                    secrets.update(s for s in reqs if isinstance(s, str))
+    for field in ("live_components", "pipeline"):
+        components = doc.get(field)
+        if isinstance(components, list):
+            for comp in components:
+                if isinstance(comp, dict):
+                    reqs = comp.get("requires_secrets")
+                    if isinstance(reqs, list):
+                        secrets.update(s for s in reqs if isinstance(s, str))
     return secrets
+
+
+def pipeline_secret_errors(doc: dict) -> list[str]:
+    """Validate the opt-in pipeline capability, also usable at Depot job intake.
+
+    Commands remain manifest-author controlled; this check detects canonical ``synth``
+    commands behind custom IDs, not arbitrary behaviour inside a custom executable.
+    The worker must independently withhold provider keys from canonical job kinds.
+    """
+    errors: list[str] = []
+    for i, step in enumerate(_pipeline_steps(doc)):
+        if "requires_secrets" not in step:
+            continue
+        reqs = step["requires_secrets"]
+        loc = f"  at pipeline/{i}/requires_secrets"
+        if not isinstance(reqs, list) or any(
+            not isinstance(s, str) or s not in PIPELINE_SECRET_NAMES for s in reqs
+        ):
+            errors.append(
+                f"{loc}: must be a list containing only {sorted(PIPELINE_SECRET_NAMES)}"
+            )
+            continue
+        if len(reqs) != len(set(reqs)):
+            errors.append(f"{loc}: secret names must be unique")
+        if "LLM_API_KEY" not in reqs:
+            continue
+        llm = doc.get("llm")
+        if not isinstance(llm, dict) or not llm.get("providers"):
+            errors.append(f"{loc}: LLM_API_KEY requires top-level llm.providers")
+        if step.get("id") in PIPELINE_PROVIDER_FORBIDDEN_STEPS:
+            errors.append(f"{loc}: LLM_API_KEY is allowed only for custom setup steps")
+        for field in ("run", "resumable"):
+            command = step.get(field)
+            if not isinstance(command, str):
+                continue
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                errors.append(f"  at pipeline/{i}/{field}: cannot parse a secret-enabled command")
+                continue
+            for pos, token in enumerate(tokens[:-1]):
+                if (
+                    token.rsplit("/", 1)[-1] == "synth"
+                    and tokens[pos + 1] in PIPELINE_PROVIDER_FORBIDDEN_STEPS
+                ):
+                    errors.append(
+                        f"  at pipeline/{i}/{field}: LLM_API_KEY may not accompany "
+                        f"the canonical `synth {tokens[pos + 1]}` command"
+                    )
+    return errors
 
 
 def semantic_errors(doc: dict) -> list[str]:
     """LLM-provider contract rules not expressible in JSON Schema (LAN-378 / LAN-400).
 
-    Reproduced exactly from the portal validator:
+    Preserves the historical portal rules and extends them to opted-in setup steps:
 
       (a) ``LLM_API_KEY`` in any ``requires_secrets`` requires a top-level ``llm`` block.
       (b) a manifest may NOT mix ``LLM_API_KEY`` and ``ANTHROPIC_API_KEY``.
@@ -97,14 +157,14 @@ def semantic_errors(doc: dict) -> list[str]:
 
     Back-compat: a bare ``ANTHROPIC_API_KEY`` with no ``llm`` block trips none of these.
     """
-    errors: list[str] = []
+    errors: list[str] = pipeline_secret_errors(doc)
     secrets = _declared_secrets(doc)
     llm = doc.get("llm")
     has_llm = isinstance(llm, dict)
 
     if "LLM_API_KEY" in secrets and not has_llm:
         errors.append(
-            "  at (root): a live component's requires_secrets lists the LLM_API_KEY "
+            "  at (root): requires_secrets lists the LLM_API_KEY "
             "sentinel but there is no top-level `llm` block declaring providers"
         )
     if "LLM_API_KEY" in secrets and "ANTHROPIC_API_KEY" in secrets:

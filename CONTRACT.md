@@ -174,13 +174,27 @@ listed here, and must tolerate every listed one.
 | Var | Meaning |
 | --- | ------- |
 | `PORTAL_JOB_ID` | The portal job row this container executes. |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | The step-declared project credentials — the **only** secrets a pipeline step may declare. |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Project credentials. Both are injected when `requires_secrets` is omitted; an explicit list requests only its named secrets. |
 
-**Pipeline steps never receive a provider LLM key.** Seed-family steps
-(`seed`/`generate-spool`/`import-spool`/`resume`) have every provider key and the
-`LLM_API_KEY` sentinel defensively stripped: `generate` materializes the deterministic
-Spool with no LLM at runtime, and `import` replays bytes. Only `live_components` may
-declare an LLM secret.
+Pipeline steps receive no provider LLM key by default. A custom setup step may opt in
+with `requires_secrets: [LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LLM_API_KEY]`, for
+example to configure a Langfuse model connection before seed. The list is optional,
+unique, and restricted to those three names; `[]` requests no secrets. The sentinel
+requires top-level `llm.providers`. Depot resolves the selected provider (the deployment
+selection, or the first declared provider) through its existing credential lookup,
+injects only that provider's canonical key name and `LLM_PROVIDER`/`LLM_MODEL` selection,
+and never injects a literal `LLM_API_KEY`. Custom steps without the sentinel receive no
+provider credentials, including inherited worker credentials.
+
+The capability is forbidden on canonical steps (`probe`, `plan`, `seed`, `verify`,
+`resume`, `teardown`) and the `generate-spool`, `import-spool`, and `import` aliases.
+Canonical `synth` commands in `run` or `resumable` may not request it behind a custom
+step ID either. The validator checks declared IDs and commands; authors remain
+responsible for the behaviour of their custom executable. The worker independently
+strips provider credentials from canonical job kinds. Seed-family steps have every
+provider key and the `LLM_API_KEY` sentinel defensively stripped: `generate` materializes
+the deterministic Spool with no LLM at runtime, and `import` replays bytes. Keep
+connection and evaluator configuration in a separate custom step before or after seed.
 
 **Live containers additionally:**
 
@@ -391,9 +405,10 @@ the canonical knob or none.
 
 ## LLM-provider rules (semantic, not schema-expressible)
 
-Reproduced exactly from the portal validator (LAN-378 / LAN-400):
+Preserves the portal's provider rules (LAN-378 / LAN-400), including explicit custom
+setup capabilities:
 
-- `LLM_API_KEY` in any live component's `requires_secrets` requires a top-level `llm`
+- `LLM_API_KEY` in a live component's or custom pipeline step's `requires_secrets` requires a top-level `llm`
   block declaring providers (otherwise the sentinel is unresolvable).
 - A manifest may not **mix** `LLM_API_KEY` and `ANTHROPIC_API_KEY` — the two express the
   same slot ambiguously.
@@ -402,7 +417,7 @@ Reproduced exactly from the portal validator (LAN-378 / LAN-400):
 Back-compat: a manifest with a bare `ANTHROPIC_API_KEY` and no `llm` block trips none of
 these — it stays valid and behaves as an implicit `providers: [anthropic]`.
 
-At runtime, provider/model selection reaches the live container as env only
+At runtime, provider/model selection reaches the live or opted-in setup container as env only
 (`LLM_PROVIDER` / `LLM_MODEL` + the resolved key — see the environment contract), never
 as a command flag.
 
