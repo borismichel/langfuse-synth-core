@@ -63,7 +63,21 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
-## v4.3.0 candidate
+## v5.0.0 candidate
+
+Requires Python SDK >=5.0.1,<6 and Cloud or self-hosted Langfuse >=4.59.0.
+The major version reflects the SDK/target compatibility change; public core interfaces
+remain stable. Retains all v4.3.0 contract/setup capabilities. SDK-managed live scores
+now batch to `/api/public/scores`; historical Spool ingestion and goldens are unchanged.
+Real-SDK tests cover root IO, nesting, typed context, usage/cost, prompt association,
+score subjects and flushing. Exact candidate SDK: **5.0.1** (stable, 2026-10-14).
+
+Released guidance: https://langfuse.com/docs/observability/sdk/upgrade-path/python-v4-to-v5
+
+The coordinated four-kit re-pin, released-image admission and scenario read-back are
+still required before this release is complete (Depot #318 / #319–#323).
+
+## v4.3.0
 
 Adds optional versioned setup metadata for schedule, field groups, rehearsal presets and
 host defaults, with structural and semantic validation. Adds opt-in inclusive calendar
