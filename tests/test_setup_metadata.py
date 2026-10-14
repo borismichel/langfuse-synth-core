@@ -45,3 +45,10 @@ def test_malformed_schedule_is_a_validation_error_not_an_exception(schedule):
     doc=manifest()
     doc['setup']['schedule']=schedule
     assert validate_doc(doc,Draft7Validator(load_schema()))
+
+
+@pytest.mark.parametrize('field,value',[('target','cloud_eu'),('target',['cloud_eu']),('setup',{'version':1,'schedule':{'history':{'field':[]}},'presets':{'quick_rehearsal':{'label':'Quick rehearsal','values':{'generation.seed':0}}}})])
+def test_malformed_contract_objects_return_validation_errors(field,value):
+    doc=manifest()
+    doc[field]=value
+    assert validate_doc(doc,Draft7Validator(load_schema()))

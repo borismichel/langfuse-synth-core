@@ -32,11 +32,14 @@ def setup_errors(doc: dict) -> list[str]:
             if isinstance(preset, dict):
                 values = preset.get('values')
                 maps.append((f'presets/{name}/values', values))
-                if isinstance(values, dict) and history in values:
+                if isinstance(values, dict) and isinstance(history, str) and history in values:
                     errors.append(f'  at setup/presets/{name}: data presets cannot override the schedule history field')
     defaults = setup.get('host_defaults') or {}
     if isinstance(defaults, dict):
-        supports = (doc.get('target') or {}).get('supports') or []
+        target = doc.get('target')
+        supports = target.get('supports') if isinstance(target, dict) else []
+        if not isinstance(supports, list):
+            supports = []
         for host, values in defaults.items():
             maps.append((f'host_defaults/{host}', values))
             if host not in supports:
