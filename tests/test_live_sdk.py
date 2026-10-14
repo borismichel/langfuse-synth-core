@@ -27,7 +27,7 @@ def live():
         if request.url.path == "/api/public/scores" and request.method == "POST":
             batch = json.loads(request.content)
             scores.extend(batch)
-            return httpx.Response(200, json={"message": "Accepted"})
+            return httpx.Response(202, json={"message": "Accepted"})
         raise AssertionError(f"Unexpected SDK request: {request.method} {request.url.path}")
 
     client = Langfuse(
