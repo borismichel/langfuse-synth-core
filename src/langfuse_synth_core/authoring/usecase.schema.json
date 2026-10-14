@@ -6,6 +6,24 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "slug", "name", "tagline", "target", "pipeline"],
+  "definitions": {
+    "setupSchedule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["timezone", "end", "history"],
+      "properties": {
+        "timezone": {"type": "string", "minLength": 1},
+        "end": {"const": "inclusive"},
+        "history": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["field"],
+             "properties": {"field": {"type": "string", "minLength": 1}}},
+            {"type": "object", "additionalProperties": false, "required": ["fixed_days"],
+             "properties": {"fixed_days": {"type": "integer", "minimum": 1}}}
+          ]
+        }
+      }
+    }
+  },
   "properties": {
     "schema_version": {
       "type": "integer",
