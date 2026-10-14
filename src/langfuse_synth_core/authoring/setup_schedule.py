@@ -2,7 +2,7 @@
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from jsonschema import Draft7Validator
+from .setup_schema import field_schema, value_errors
 
 
 def setup_schedule_errors(doc: dict) -> list[str]:
@@ -25,6 +25,12 @@ def setup_schedule_errors(doc: dict) -> list[str]:
     schema = doc.get("config_schema")
     properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
     field = properties.get(key) if isinstance(key, str) and isinstance(properties, dict) else None
+    original_field = field
+    if isinstance(field, (dict, bool)):
+        field, field_errors = field_schema(schema, field)
+        errors.extend(f"setup.schedule.history.field: {error}" for error in field_errors)
+        if field_errors:
+            return errors
     if not isinstance(field, dict) or field.get("type") != "integer":
         errors.append(
             "setup.schedule.history.field must reference a declared integer configuration field"
@@ -37,7 +43,7 @@ def setup_schedule_errors(doc: dict) -> list[str]:
         or any(type(value) is not int or value < 1 for value in choices)
     ):
         errors.append("setup.schedule.history.field must declare a positive integer enum")
-    elif any(not Draft7Validator(field).is_valid(value) for value in choices):
+    elif any(value_errors(schema, original_field, value) for value in choices):
         errors.append("setup.schedule.history choices must satisfy their configuration schema")
     default = field.get("default")
     if type(default) is not int or not isinstance(choices, list) or default not in choices:

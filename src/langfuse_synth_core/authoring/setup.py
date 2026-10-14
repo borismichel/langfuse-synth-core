@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import math
 from jsonschema import Draft7Validator
+from jsonschema.exceptions import SchemaError
 from .setup_schedule import setup_schedule_errors
+from .setup_schema import field_schema, value_errors
 
 
 def setup_errors(doc: dict) -> list[str]:
     setup = doc.get("setup")
     if not isinstance(setup, dict):
         return []
-    config = doc.get("config_schema")
+    config = doc.get("config_schema", {})
+    try:
+        Draft7Validator.check_schema(config)
+    except SchemaError as error:
+        path = "/".join(str(part) for part in error.path)
+        return [f"  at config_schema/{path}: {error.message}"]
     props = config.get("properties", {}) if isinstance(config, dict) else {}
     if not isinstance(props, dict):
         props = {}
@@ -23,12 +30,9 @@ def setup_errors(doc: dict) -> list[str]:
                 errors.append(
                     f"  at setup/fields/{key}: must name a declared config_schema property"
                 )
-            elif isinstance(props[key], dict) and (
-                props[key].get("writeOnly")
-                or props[key].get("format") == "password"
-                or props[key].get("secret")
-            ):
-                errors.append(f"  at setup/fields/{key}: secrets cannot be declared in setup")
+            else:
+                _, field_errors = field_schema(config, props[key])
+                errors.extend(f"  at setup/fields/{key}: {error}" for error in field_errors)
     schedule = setup.get("schedule")
     history_spec = schedule.get("history") if isinstance(schedule, dict) else None
     history = history_spec.get("field") if isinstance(history_spec, dict) else None
@@ -63,16 +67,12 @@ def setup_errors(doc: dict) -> list[str]:
                 errors.append(f"{loc}: must name a declared config_schema property")
                 continue
             schema = props[key]
-            if not isinstance(schema, dict):
+            _, field_errors = field_schema(config, schema)
+            errors.extend(f"{loc}: {error}" for error in field_errors)
+            if field_errors:
                 continue
-            if (
-                schema.get("writeOnly")
-                or schema.get("format") == "password"
-                or schema.get("secret")
-            ):
-                errors.append(f"{loc}: secrets cannot be declared in setup")
             if isinstance(value, float) and not math.isfinite(value):
                 errors.append(f"{loc}: must be finite")
-            for err in Draft7Validator(schema).iter_errors(value):
-                errors.append(f"{loc}: {err.message}")
+            for error in value_errors(config, schema, value):
+                errors.append(f"{loc}: {error}")
     return errors
