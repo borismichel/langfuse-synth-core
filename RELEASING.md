@@ -63,6 +63,13 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
+## v4.3.0 candidate
+
+Adds optional versioned setup metadata for schedule, field groups, rehearsal presets and
+host defaults, with structural and semantic validation. Adds opt-in inclusive calendar
+window helpers; existing timestamp helpers retain their behavior. All consuming kits
+require the coordinated core re-pin and their own verification before release completion.
+
 ## v4.2.0
 
 Adds optional `pipeline[].requires_secrets` for explicit custom setup capabilities.
@@ -79,8 +86,8 @@ before a kit declares the new field. No runtime transport or fixture generation 
    `DEFAULT_CORE_REF` in `src/langfuse_synth_core/authoring/scaffold.py` (the pin every
    freshly scaffolded kit resolves — a default left behind emits kits on the old core)
    and the `--core-ref` examples in `README.md` and the shipped
-   `authoring-a-demo-kit/SKILL.md`. (`__version__` needs no bump: it is derived from the
-   distribution metadata and guarded by `tests/test_runtime_import.py`; #145.)
+   `authoring-a-demo-kit/references/setup.md`. (`__version__` needs no bump: it is derived
+   from the distribution metadata and guarded by `tests/test_runtime_import.py`; #145.)
 2. **Tag** `vX.Y.Z` on the landed `main` commit and **push the tag** (`git push origin
    vX.Y.Z`). The tag must be on origin before any kit or CI can resolve `@vX.Y.Z`.
 3. **Re-pin every kit** in the table above — on a branch per kit, from the kit checkout:

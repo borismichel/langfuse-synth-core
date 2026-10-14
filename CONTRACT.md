@@ -510,3 +510,25 @@ fall-backs** (Ring 2, #34) — scenario substance stays in the kit by the seam r
 
 See [`docs/SEAM.md`](docs/SEAM.md) for the library/kit hand-off rule that frames why the
 Contract lives here.
+
+### Optional setup schedule (version 1)
+
+`setup.version: 1` may declare `schedule: {timezone: UTC, end: inclusive,
+history: {field: generation.window_days}}`. The field references an exposed integer
+configuration property with a positive integer enum and supported default. Fixed-history
+kits instead declare `history: {fixed_days: 28}`. `timezone` is a valid IANA timestamp
+calendar; it does not coerce the operator's selected YYYY-MM-DD. An absent schedule has
+unknown history capability, not an inferred window. Data presets cannot overwrite history.
+
+Setup fields, preset values, host defaults and editable history share the configuration
+schema's local reference context. Referenced schemas must be valid Draft7 schemas; missing
+or unavailable references return Manifest validation errors without fetching remote schemas.
+Boolean property schemas also apply to setup values. Secret fields (`writeOnly`,
+`format: password` or `secret`), including annotations reached through schema references,
+cannot be declared by any of these setup bindings.
+
+`timegen.inclusive_window_start` and the UTC-only `sample_inclusive_timestamps` are opt-in
+helpers. Existing `window_start`/`sample_timestamps` retain their exclusive-as-of behavior.
+Recipes own their observation durations and must keep children within their declared
+calendar range. Inclusive dates do not promise an event at every hour or on every day of
+a sparse run. A truthful actual range is measured from emitted observation timestamps.
