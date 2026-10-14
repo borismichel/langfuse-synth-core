@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from jsonschema import Draft7Validator
+from .setup_schedule import setup_schedule_errors
 
 
 def setup_errors(doc: dict) -> list[str]:
@@ -10,7 +11,7 @@ def setup_errors(doc: dict) -> list[str]:
     if not isinstance(setup, dict):
         return []
     props = (doc.get('config_schema') or {}).get('properties') or {}
-    errors: list[str] = []
+    errors: list[str] = setup_schedule_errors(doc)
     fields = setup.get('fields') or {}
     if isinstance(fields, dict):
         for key in fields:

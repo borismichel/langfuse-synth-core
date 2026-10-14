@@ -110,6 +110,7 @@
         "version"
       ],
       "properties": {
+        "schedule": {"$ref": "#/definitions/setupSchedule"},
         "version": {
           "type": "integer",
           "const": 1
