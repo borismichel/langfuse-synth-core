@@ -42,9 +42,9 @@ emitter.score("user_disagreement", 1, trace_id=trace.id, data_type="BOOLEAN")
 ```
 
 Scores stay on their own path — :meth:`LiveEmitter.score` calls the SDK's ``create_score``,
-which posts a ``score-create`` envelope to the legacy ingestion endpoint. That endpoint is
-the one that survives the v4 cutover, and this is the same decision the Spool's
-``score_event`` records: scores move only if and when Langfuse says so.
+which batches live scores to ``POST /api/public/scores`` in SDK v5. Call ``flush``
+after scoring outside a trace block. This is independent of the historical Spool's
+raw ``score-create`` ingestion, which preserves its producer-supplied timestamps.
 """
 
 from __future__ import annotations
@@ -125,8 +125,10 @@ class LiveEmitter:
 
         The block's exit ends the root observation and then (by default) flushes, so the
         whole trace is delivered before the surface answers its user — including when the
-        body raised. ``flush()`` guarantees *delivery*, not readability: Langfuse's
-        ingestion is asynchronous, so a read-back immediately after may still miss it.
+        body raised. ``flush()`` drains the SDK buffers; it does not guarantee acceptance
+        or readability.
+        Rejected batches are logged by the SDK. Verify persisted data with bounded
+        read-back retries because ingestion is asynchronous.
         """
         attributes = _pruned({
             "trace_name": name, "user_id": user_id, "session_id": session_id,
@@ -156,8 +158,8 @@ class LiveEmitter:
         """Attach a score to a trace, an observation, a session or a dataset run.
 
         Exactly one subject, as the data model requires. Rides the SDK's ``create_score``,
-        which posts a ``score-create`` envelope on the legacy ingestion endpoint — the one
-        envelope type that survives the v4 cutover.
+        which batches live scores to ``POST /api/public/scores``. Call ``flush`` before
+        returning a short-lived response; verify delivery with bounded read-back retries.
         """
         self.client.create_score(**_pruned({
             "name": name, "value": value, "trace_id": trace_id,

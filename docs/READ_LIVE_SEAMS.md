@@ -168,12 +168,14 @@ emitter.score("user_disagreement", 1, trace_id=trace.id, data_type="BOOLEAN")
   so `trace()` opens the root observation *and* propagates name / user / session / tags /
   environment onto everything nested inside it. Overall input and output go on the root
   observation; the deprecated trace-IO helpers are forbidden.
-* **Scores stay on their own path.** `emitter.score(...)` rides the SDK's `create_score`,
-  which posts a `score-create` envelope to `POST /api/public/ingestion` — the one envelope
-  type that survives the cutover. Same decision as the Spool's `score_event`.
-* **Flush is delivery, not readability.** The block flushes on exit so the trace is on its
-  way before the surface answers its user; Langfuse's ingestion is asynchronous, so an
-  immediate read-back may still miss it.
+* **Live scores use SDK-managed batching.** `emitter.score(...)` uses `create_score`,
+  which SDK v5 delivers to `POST /api/public/scores`. Call `flush()` after feedback
+  submitted outside a trace block. A flush drains buffers; rejected batches can still
+  be logged and dropped, so rehearsal must verify the intended subject through bounded
+  read-back retries. The historical Spool retains its raw `score-create` ingestion.
+
+* **Flush drains buffers.** The block flushes on exit; ingestion is asynchronous and
+  rejection is reported in SDK logs. Read-back proves persistence and score acceptance.
 * **It sends the real-time ingestion header.** `x-langfuse-ingestion-version: 4`, on the
   SDK client's OTLP exporter — the same header the Spool's writer sends. Without it a v4
   target processes the spans on the slow path and the trace is unreadable for up to fifteen
