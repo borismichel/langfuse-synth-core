@@ -449,6 +449,9 @@ def validate_doc(doc: dict, validator: Draft7Validator) -> list[str]:
         errors.append(f"  at {loc}: {err.message}")
     errors.extend(semantic_errors(doc))
     errors.extend(authoring_errors(doc))
+    from .setup import setup_errors
+
+    errors.extend(setup_errors(doc))
     return errors
 
 
