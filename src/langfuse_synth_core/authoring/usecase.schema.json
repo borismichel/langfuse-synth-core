@@ -103,6 +103,124 @@
         "self_hosted": { "type": "string" }
       }
     },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "group"
+            ],
+            "properties": {
+              "group": {
+                "enum": [
+                  "volume",
+                  "scenario",
+                  "advanced"
+                ]
+              }
+            }
+          }
+        },
+        "presets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quick_rehearsal": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "values"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "host_defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cloud_eu": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "cloud_us": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "cloud_hipaa": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "cloud_jp": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "self_hosted": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "config_schema": {
       "type": "object",
       "description": "JSON Schema. The deploy wizard renders a form from this. v1 CONTRACT: each property NAME is a dotted kit-config key passed verbatim as `--set <name>=<value>` — no portal-side mapping table, preserving the zero-code invariant.",
