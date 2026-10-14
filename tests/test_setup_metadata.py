@@ -38,3 +38,10 @@ def test_unknown_field_and_unsupported_host_rejected():
     doc=manifest()
     doc['setup']['host_defaults']={'cloud_jp':{'generation.seed':0}}
     assert validate_doc(doc,Draft7Validator(load_schema()))
+
+
+@pytest.mark.parametrize('schedule',[[], 'UTC', {'history':42}])
+def test_malformed_schedule_is_a_validation_error_not_an_exception(schedule):
+    doc=manifest()
+    doc['setup']['schedule']=schedule
+    assert validate_doc(doc,Draft7Validator(load_schema()))

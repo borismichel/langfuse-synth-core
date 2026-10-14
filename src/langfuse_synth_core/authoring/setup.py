@@ -10,14 +10,21 @@ def setup_errors(doc: dict) -> list[str]:
     setup = doc.get('setup')
     if not isinstance(setup, dict):
         return []
-    props = (doc.get('config_schema') or {}).get('properties') or {}
+    config = doc.get('config_schema')
+    props = config.get('properties', {}) if isinstance(config, dict) else {}
+    if not isinstance(props, dict):
+        props = {}
     errors: list[str] = setup_schedule_errors(doc)
     fields = setup.get('fields') or {}
     if isinstance(fields, dict):
         for key in fields:
             if key not in props:
                 errors.append(f'  at setup/fields/{key}: must name a declared config_schema property')
-    history = ((setup.get('schedule') or {}).get('history') or {}).get('field')
+            elif isinstance(props[key], dict) and (props[key].get('writeOnly') or props[key].get('format') == 'password' or props[key].get('secret')):
+                errors.append(f'  at setup/fields/{key}: secrets cannot be declared in setup')
+    schedule = setup.get('schedule')
+    history_spec = schedule.get('history') if isinstance(schedule, dict) else None
+    history = history_spec.get('field') if isinstance(history_spec, dict) else None
     presets = setup.get('presets') or {}
     maps: list[tuple[str, object]] = []
     if isinstance(presets, dict):
