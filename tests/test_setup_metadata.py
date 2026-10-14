@@ -160,6 +160,30 @@ def test_setup_rejects_malformed_reference_targets_outside_schema_keywords():
     assert validate_doc(doc, Draft7Validator(load_schema()))
 
 
+@pytest.mark.parametrize("binding", ["field", "preset", "host_default", "schedule"])
+@pytest.mark.parametrize("pointer", ["allOf/nope", "allOf/-", "allOf/0/default/value"])
+def test_malformed_configuration_reference_pointers_return_errors(binding, pointer):
+    doc = manifest()
+    doc["config_schema"]["definitions"] = {
+        "base": {"allOf": [{"type": "integer", "enum": [14, 30], "default": 14}]}
+    }
+    doc["config_schema"]["properties"]["demo.days"] = {"$ref": f"#/definitions/base/{pointer}"}
+    if binding == "field":
+        doc["setup"]["fields"]["demo.days"] = {"group": "advanced"}
+    elif binding == "preset":
+        doc["setup"]["presets"]["quick_rehearsal"]["values"]["demo.days"] = 14
+    elif binding == "host_default":
+        doc["setup"]["host_defaults"]["self_hosted"]["demo.days"] = 14
+    else:
+        doc["setup"]["schedule"] = {
+            "timezone": "UTC",
+            "end": "inclusive",
+            "history": {"field": "demo.days"},
+        }
+    errors = validate_doc(doc, Draft7Validator(load_schema()))
+    assert any("invalid configuration schema reference" in error for error in errors)
+
+
 def test_schedule_resolves_local_schema_and_validates_every_choice(tmp_path):
     doc = manifest()
     doc["config_schema"]["definitions"] = {

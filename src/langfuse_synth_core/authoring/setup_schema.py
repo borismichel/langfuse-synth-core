@@ -31,7 +31,7 @@ def _field_schema(field, resolver, ancestors):
             break
         try:
             resolved = resolver.lookup(field["$ref"])
-        except Unresolvable as error:
+        except (Unresolvable, ValueError, TypeError) as error:
             errors.append(f"invalid configuration schema reference: {error}")
             break
         field, resolver = resolved.contents, resolved.resolver
@@ -58,5 +58,5 @@ def value_errors(config: dict, field: dict | bool, value: object) -> list[str]:
     try:
         validator = Draft7Validator(config, registry=Registry())
         return [error.message for error in validator.descend(value, field)]
-    except (Unresolvable, RecursionError) as error:
+    except (Unresolvable, ValueError, TypeError, RecursionError) as error:
         return [f"invalid configuration schema reference: {error}"]
