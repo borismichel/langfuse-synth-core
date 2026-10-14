@@ -848,3 +848,24 @@ def test_emitted_kit_pins_the_as_of_date_in_the_gate_not_in_src(kit):
                          if not line.lstrip().startswith("#"))
         assert not re.search(r"datetime\(\s*20\d\d\s*,", body), path
         assert "RUN_DATE" not in body, path
+
+
+@pytest.mark.parametrize("companion", [False, True])
+def test_new_kit_accepts_the_rehearsed_sdk_with_its_core_dependency(tmp_path, companion):
+    """Both generated installation modes must accept the same released SDK as core."""
+    import tomllib
+    from importlib.metadata import requires
+
+    from packaging.requirements import Requirement
+
+    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+
+    kit = scaffold_kit("sdk-compatible", tmp_path / "kit", with_companion=companion)
+    project = tomllib.loads((kit.dest / "pyproject.toml").read_text())["project"]
+    generated = [Requirement(value) for value in project["dependencies"]]
+    installed_core = [Requirement(value) for value in requires("langfuse-synth-core")]
+    sdk_constraints = [req for req in generated + installed_core if req.name == "langfuse"]
+    assert len(sdk_constraints) == 2
+    for requirement in sdk_constraints:
+        assert "5.0.1" in requirement.specifier, str(requirement)
+        assert "4.18.0" not in requirement.specifier, str(requirement)

@@ -8,7 +8,7 @@ delivery locally. Keep an existing kit's agreed dependency pin.
 Core is distributed by a released git tag, not assumed to be on PyPI:
 
 ```bash
-pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.3.0'
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v5.0.0'
 synth-authoring --help
 synth-authoring skills --help
 ```
@@ -55,7 +55,7 @@ synth-authoring new my-kit --dir ../kits
 # Add these options to that invocation only when the beats require them:
 # --companion         interactive surface
 # --anchors           per-run kit state for the surface
-# --core-ref v4.3.0    explicit released core dependency pin
+# --core-ref v5.0.0    explicit released core dependency pin
 # --starter regression-recovery   complete refund-policy comparison (newer tooling)
 ```
 

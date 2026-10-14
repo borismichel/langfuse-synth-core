@@ -56,13 +56,11 @@ from langfuse_synth_core.authoring.knob import inject_target_traces
 # usecase.yaml carries, so an invalid slug is rejected here rather than at validate time.
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-# The oldest core release an emitted kit can install against. The `seed` template stopped
-# selecting a write path when the batch path was removed (portal #213, released by v4.0.0),
-# so on an older core an emitted kit writes ingestion envelopes to an endpoint that no longer
-# takes them. Unlike DEFAULT_CORE_REF this moves only when the scaffold starts using a newer
-# core feature — `tests/test_scaffold_image.py` reads it to tell "the emitted kit needs a
-# core nobody has published yet" from a real failure.
-MIN_CORE_REF = "v4.1.0"
+# The oldest core release compatible with the emitted kit. SDK v5 templates require
+# core v5's matching dependency range; core v4 pins SDK <5 and cannot be installed with
+# them. Unlike DEFAULT_CORE_REF this moves only when scaffold compatibility changes.
+# The built-image gate reads it to distinguish a pending core release from a bad image.
+MIN_CORE_REF = "v5.0.0"
 
 # The default lib pin the emitted kit references (a TAG, never a branch — see
 # RELEASING.md) — both the runtime dependency AND the `publish.yml` -> `kit-publish.yml`
@@ -70,7 +68,7 @@ MIN_CORE_REF = "v4.1.0"
 # `synth-authoring new --core-ref` overrides it. Must name a ref that actually contains
 # `kit-publish.yml` (v1.2.0+) or a freshly scaffolded kit's CI cannot resolve the call, and
 # must be >= MIN_CORE_REF or the emitted kit cannot run at all.
-DEFAULT_CORE_REF = "v4.3.0"
+DEFAULT_CORE_REF = "v5.0.0"
 
 # The determinism oracle is pinned at a small floor: determinism is scale-independent, so a
 # tiny committed golden proves the byte-identity law while staying reviewable. The emitted

@@ -21,10 +21,10 @@ flexibility > deduplication). See [`docs/SEAM.md`](docs/SEAM.md) for the hand-of
 
 ```bash
 # Runtime (deployed kit / portal) — carries none of the authoring deps:
-pip install 'langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v4.3.0'
+pip install 'langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v5.0.0'
 
 # Authoring (a kit author's dev box):
-pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.3.0'
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v5.0.0'
 ```
 
 Kits pin it as a **git dependency** by tag/SHA. The repo is **public** (consistent with
@@ -80,7 +80,7 @@ toolchain (namespaced `synth-authoring`, never `synth`, so it can't shadow a kit
 synth-authoring new my-kit                 # -> ./my-kit/
 synth-authoring new my-kit --dir ../kits   # parent dir; kit lands at ../kits/my-kit
 synth-authoring new my-kit --companion     # also emit the companion stub (full: Spec G)
-synth-authoring new my-kit --core-ref v4.3.0    # lib git ref the kit pins to (a tag)
+synth-authoring new my-kit --core-ref v5.0.0    # lib git ref the kit pins to (a tag)
 synth-authoring new refund-demo --starter regression-recovery  # complete seeded story
 
 # Offline Contract lint of a manifest (#27) — same validator the portal runs at sync time.
@@ -158,3 +158,10 @@ existing depot admission run and print its registry handoff after success. It sa
 nonsecret progress and keeps registration, staging rehearsal and publication separate.
 See [admission setup and resume](docs/ADMISSION.md) for session credentials, immutable
 release tags, bounded polling and exit codes. This command is not in the older v4.1.1 pin.
+
+## Python SDK compatibility
+
+Core v5 requires Python >=3.11 and Langfuse Cloud or self-hosted Langfuse >=4.59.0.
+The SDK range is >=5.0.1,<6; released Demo Packages pin the exact rehearsed patch.
+Live scores use SDK-managed batches; the deterministic historical Spool keeps its raw
+ingestion path. See [live delivery](docs/READ_LIVE_SEAMS.md) and [releases](RELEASING.md).
