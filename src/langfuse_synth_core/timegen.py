@@ -167,3 +167,32 @@ def in_window(ts: datetime, start: datetime, end: datetime) -> bool:
 def day_anchor(run_date: datetime, day_offset: int) -> datetime:
     """A timestamp ``day_offset`` days from the run date (offset is typically negative)."""
     return (run_date + timedelta(days=day_offset)).replace(microsecond=0)
+
+
+def inclusive_window_start(run_date: datetime, window_days: int) -> datetime:
+    """Midnight of the first of N calendar days, including the as-of day.
+
+    Opt-in contract: legacy window_start and sample_timestamps retain their
+    exclusive-as-of behaviour. Callers supply an anchor in the kit's declared
+    timestamp timezone; a selected calendar date is never converted here.
+    """
+    if isinstance(window_days, bool) or not isinstance(window_days, int) or window_days < 1:
+        raise ValueError("window_days must be a positive integer")
+    return (run_date - timedelta(days=window_days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+
+
+def sample_inclusive_timestamps(
+    rng: Rng, run_date: datetime, window_days: int, n: int,
+) -> list[datetime]:
+    """Sample N inclusive calendar days with the existing deterministic weighting.
+
+    This UTC sampler retains intra-hour jitter and does not guarantee saturation
+    of every day at sparse volumes. Kit-specific reserved cohorts can ensure
+    representative final-day activity.
+    """
+    inclusive_window_start(run_date, window_days)
+    if run_date.utcoffset() != timedelta(0):
+        raise ValueError("sample_inclusive_timestamps requires a UTC anchor")
+    return sample_timestamps(rng, run_date + timedelta(days=1), window_days, n)

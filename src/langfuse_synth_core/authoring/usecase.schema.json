@@ -6,6 +6,24 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "slug", "name", "tagline", "target", "pipeline"],
+  "definitions": {
+    "setupSchedule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["timezone", "end", "history"],
+      "properties": {
+        "timezone": {"type": "string", "minLength": 1},
+        "end": {"const": "inclusive"},
+        "history": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["field"],
+             "properties": {"field": {"type": "string", "minLength": 1}}},
+            {"type": "object", "additionalProperties": false, "required": ["fixed_days"],
+             "properties": {"fixed_days": {"type": "integer", "minimum": 1}}}
+          ]
+        }
+      }
+    }
+  },
   "properties": {
     "schema_version": {
       "type": "integer",
@@ -83,6 +101,125 @@
         "cloud_us": { "type": "string" },
         "cloud_hipaa": { "type": "string" },
         "self_hosted": { "type": "string" }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "schedule": {"$ref": "#/definitions/setupSchedule"},
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "group"
+            ],
+            "properties": {
+              "group": {
+                "enum": [
+                  "volume",
+                  "scenario",
+                  "advanced"
+                ]
+              }
+            }
+          }
+        },
+        "presets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quick_rehearsal": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "values"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "host_defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cloud_eu": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "cloud_us": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "cloud_hipaa": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "cloud_jp": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            },
+            "self_hosted": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "config_schema": {

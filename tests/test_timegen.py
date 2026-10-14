@@ -108,3 +108,18 @@ def test_parse_as_of_date_normalises_every_loader_shape():
         timegen.parse_as_of_date("next tuesday")
     with pytest.raises(ValueError):
         timegen.parse_as_of_date(20260904)
+
+
+@pytest.mark.parametrize(('as_of', 'days', 'first'), [
+    ('2026-10-16', 14, '2026-10-03'),
+    ('2026-10-16', 30, '2026-09-17'),
+    ('2027-01-02', 14, '2026-12-20'),
+    ('2028-03-01', 14, '2028-02-17'),
+])
+def test_inclusive_sampler_contains_the_requested_final_calendar_day(as_of, days, first):
+    anchor = timegen.resolve_run_date(as_of)
+    timestamps = timegen.sample_inclusive_timestamps(Rng(42), anchor, days, 2000)
+    assert min(timestamps).date().isoformat() == first
+    assert max(timestamps).date().isoformat() == as_of
+    assert timestamps == timegen.sample_inclusive_timestamps(Rng(42), anchor, days, 2000)
+    assert len({t.minute for t in timestamps}) > 40
