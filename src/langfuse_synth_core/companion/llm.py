@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from inspect import signature
 
 DEFAULT_PROVIDER = "anthropic"
 
@@ -105,12 +106,29 @@ class LLMClient:
         messages: list[dict],
         temperature: float = 0,
         max_tokens: int = 512,
+        response_schema: dict | None = None,
+        provider_tracing: bool = True,
     ) -> ChatResult:
         """Run one completion and return the text plus token usage.
 
         ``messages`` is a list of ``{"role", "content"}`` turns (no system role — the
         system prompt is passed separately, mirroring the Anthropic API shape). An empty
         ``system`` sends no system prompt.
+
+        ``response_schema`` optionally requests structured JSON using a plain JSON
+        Schema: Anthropic receives ``output_config.format``; OpenAI receives a strict
+        ``response_format`` named ``response``. Omit it (or pass ``None``) to retain the
+        existing unconstrained request. The schema must be supported by the selected
+        model/provider; SDK and API errors propagate without an unconstrained retry.
+        The result remains raw text: callers must validate JSON and business rules,
+        including refusals or truncated output, before acting on it.
+
+        ``provider_tracing=False`` disables Anthropic's built-in SDK tracing for this
+        request when a caller already records the generation. A public SDK client copy
+        preserves the cached client's settings for other calls. SDKs predating built-in
+        tracing need no change; a client exposing tracing without the disabling option
+        raises instead of silently emitting duplicate observations. This option does
+        not control external instrumentation and has no effect on the OpenAI path.
 
         ``temperature`` reaches the OpenAI provider only. The Anthropic SDK's 1.0.0
         release removed the sampling parameters (``temperature`` / ``top_p`` / ``top_k``)
@@ -121,18 +139,33 @@ class LLMClient:
         """
         client = self._client()
         if self.provider == "anthropic":
+            if not provider_tracing:
+                # Older SDKs have no built-in tracing or open_telemetry option.
+                if "open_telemetry" in signature(client.with_options).parameters:
+                    client = client.with_options(open_telemetry=False)
+                elif hasattr(client, "open_telemetry"):
+                    raise RuntimeError("Anthropic client cannot disable built-in tracing via with_options")
+            output_options = {} if response_schema is None else {
+                "output_config": {"format": {"type": "json_schema", "schema": response_schema}},
+            }
             resp = client.messages.create(
                 model=self.model, system=system, messages=messages,
-                max_tokens=max_tokens,
+                max_tokens=max_tokens, **output_options,
             )
             text = "".join(b.text for b in resp.content if b.type == "text")
             return ChatResult(text, resp.usage.input_tokens, resp.usage.output_tokens)
 
         # OpenAI: the system prompt is a leading message role.
         oai_messages = ([{"role": "system", "content": system}] if system else []) + list(messages)
+        output_options = {} if response_schema is None else {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "strict": True, "schema": response_schema},
+            },
+        }
         resp = client.chat.completions.create(
             model=self.model, messages=oai_messages,
-            temperature=temperature, max_tokens=max_tokens,
+            temperature=temperature, max_tokens=max_tokens, **output_options,
         )
         text = resp.choices[0].message.content or ""
         return ChatResult(text, resp.usage.prompt_tokens, resp.usage.completion_tokens)

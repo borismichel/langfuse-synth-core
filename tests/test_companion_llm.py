@@ -89,7 +89,8 @@ def test_get_llm_openai_ignores_anthropic_caller_model(monkeypatch):
 # Call shapes (fake SDK clients — the real SDKs are never imported here)
 # ---------------------------------------------------------------------------
 
-def test_complete_routes_to_anthropic_shape():
+@pytest.mark.parametrize("options", [{}, {"response_schema": None}])
+def test_complete_routes_to_anthropic_shape(options):
     client = llm.LLMClient("anthropic", "claude-sonnet-4-6")
     captured = {}
 
@@ -101,17 +102,23 @@ def test_complete_routes_to_anthropic_shape():
         )
 
     client._impl = SimpleNamespace(messages=SimpleNamespace(create=create))
-    res = client.complete(system="S", messages=[{"role": "user", "content": "hi"}], temperature=0)
+    res = client.complete(
+        system="S", messages=[{"role": "user", "content": "hi"}], temperature=0, **options,
+    )
     assert (res.text, res.input_tokens, res.output_tokens) == ("ok", 11, 3)
     assert captured["system"] == "S"  # Anthropic keeps system separate
     assert captured["max_tokens"] == 512
+    assert "output_config" not in captured
     # anthropic SDK 1.0.0 removed the sampling parameters from `messages.create()`
     # (passing one is a TypeError, portal #231): the Anthropic branch must never forward
     # them, whatever the caller asked for.
     assert not {"temperature", "top_p", "top_k"} & captured.keys()
 
 
-def test_complete_routes_to_openai_shape():
+@pytest.mark.parametrize("options", [
+    {}, {"response_schema": None}, {"provider_tracing": False}, {"provider_tracing": True},
+])
+def test_complete_routes_to_openai_shape(options):
     client = llm.LLMClient("openai", "gpt-4o")
     captured = {}
 
@@ -123,13 +130,14 @@ def test_complete_routes_to_openai_shape():
         )
 
     client._impl = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    res = client.complete(system="S", messages=[{"role": "user", "content": "hi"}])
+    res = client.complete(system="S", messages=[{"role": "user", "content": "hi"}], **options)
     assert (res.text, res.input_tokens, res.output_tokens) == ("ok", 11, 3)
     # OpenAI folds the system prompt into a leading message role.
     assert captured["messages"][0] == {"role": "system", "content": "S"}
     assert captured["messages"][1] == {"role": "user", "content": "hi"}
     # The sampling knob still reaches OpenAI — it is only the Anthropic branch that lost it.
     assert captured["temperature"] == 0
+    assert "response_format" not in captured
 
 
 def test_complete_openai_empty_system_sends_no_system_message():
@@ -204,3 +212,128 @@ def test_openai_client_construction_reads_openai_key_env(monkeypatch):
     client = llm.LLMClient("openai", "gpt-4o")
     assert isinstance(client._client(), FakeOpenAI)
     assert seen["api_key"] == "resolved-openai-key"
+
+
+def test_complete_requests_anthropic_json_schema(monkeypatch):
+    """The public client translates a plain schema at the external SDK boundary."""
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text='{"accepted":true}')],
+            usage=SimpleNamespace(input_tokens=12, output_tokens=5),
+        )
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(
+        Anthropic=lambda **kwargs: SimpleNamespace(messages=SimpleNamespace(create=create)),
+    ))
+    schema = {
+        "type": "object", "properties": {"accepted": {"type": "boolean"}},
+        "required": ["accepted"], "additionalProperties": False,
+    }
+    result = llm.LLMClient("anthropic", "claude-sonnet-4-6").complete(
+        system="Decide.", messages=[{"role": "user", "content": "Example"}],
+        response_schema=schema,
+    )
+    assert captured["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+    assert result == llm.ChatResult('{"accepted":true}', 12, 5)
+
+
+def test_complete_requests_openai_strict_json_schema(monkeypatch):
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"accepted":true}'))],
+            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=5),
+        )
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(
+        OpenAI=lambda **kwargs: SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+    ))
+    schema = {
+        "type": "object", "properties": {"accepted": {"type": "boolean"}},
+        "required": ["accepted"], "additionalProperties": False,
+    }
+    result = llm.LLMClient("openai", "gpt-4o").complete(
+        system="Decide.", messages=[{"role": "user", "content": "Example"}],
+        response_schema=schema,
+    )
+    assert captured["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "response", "strict": True, "schema": schema},
+    }
+    assert result == llm.ChatResult('{"accepted":true}', 12, 5)
+
+
+def test_complete_can_disable_sdk_tracing_without_changing_later_requests(monkeypatch):
+    """A caller that already records generations can opt out per completion."""
+    tracing = []
+
+    class Anthropic:
+        def __init__(self, *, api_key=None, open_telemetry=True):
+            self.open_telemetry = open_telemetry
+            self.messages = SimpleNamespace(create=self.create)
+
+        def with_options(self, *, open_telemetry=None):
+            return Anthropic(open_telemetry=open_telemetry)
+
+        def create(self, **kwargs):
+            tracing.append(self.open_telemetry)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")],
+                usage=SimpleNamespace(input_tokens=11, output_tokens=3),
+            )
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=Anthropic))
+    client = llm.LLMClient("anthropic", "claude-sonnet-4-6")
+    result = client.complete(system="S", messages=[], provider_tracing=False)
+    client.complete(system="S", messages=[])
+    client.complete(system="S", messages=[], provider_tracing=True)
+    assert result == llm.ChatResult("ok", 11, 3)
+    assert tracing == [False, True, True]
+
+
+def test_complete_supports_anthropic_before_builtin_tracing(monkeypatch):
+    """Older supported SDKs have neither the telemetry option nor built-in spans."""
+    class Anthropic:
+        def __init__(self, *, api_key=None):
+            self.messages = SimpleNamespace(create=self.create)
+
+        def with_options(self, *, timeout=None):
+            raise AssertionError("No copy is needed when SDK tracing does not exist")
+
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="legacy")],
+                usage=SimpleNamespace(input_tokens=11, output_tokens=3),
+            )
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=Anthropic))
+    result = llm.LLMClient("anthropic", "claude-sonnet-4-6").complete(
+        system="S", messages=[], provider_tracing=False,
+    )
+    assert result == llm.ChatResult("legacy", 11, 3)
+
+
+def test_complete_refuses_to_ignore_sdk_tracing_it_cannot_disable(monkeypatch):
+    class Anthropic:
+        open_telemetry = {"traces": {"content_mode": "metadata_only"}}
+
+        def __init__(self, *, api_key=None):
+            self.messages = SimpleNamespace(create=self.create)
+
+        def with_options(self, *, timeout=None):
+            return self
+
+        def create(self, **kwargs):
+            pytest.fail("A request must not run with unwanted SDK tracing")
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=Anthropic))
+    with pytest.raises(RuntimeError, match="cannot disable.*tracing"):
+        llm.LLMClient("anthropic", "claude-sonnet-4-6").complete(
+            system="S", messages=[], provider_tracing=False,
+        )
