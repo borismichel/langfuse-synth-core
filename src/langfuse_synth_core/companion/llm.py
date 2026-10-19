@@ -105,12 +105,21 @@ class LLMClient:
         messages: list[dict],
         temperature: float = 0,
         max_tokens: int = 512,
+        response_schema: dict | None = None,
     ) -> ChatResult:
         """Run one completion and return the text plus token usage.
 
         ``messages`` is a list of ``{"role", "content"}`` turns (no system role — the
         system prompt is passed separately, mirroring the Anthropic API shape). An empty
         ``system`` sends no system prompt.
+
+        ``response_schema`` optionally requests structured JSON using a plain JSON
+        Schema: Anthropic receives ``output_config.format``; OpenAI receives a strict
+        ``response_format`` named ``response``. Omit it (or pass ``None``) to retain the
+        existing unconstrained request. The schema must be supported by the selected
+        model/provider; SDK and API errors propagate without an unconstrained retry.
+        The result remains raw text: callers must validate JSON and business rules,
+        including refusals or truncated output, before acting on it.
 
         ``temperature`` reaches the OpenAI provider only. The Anthropic SDK's 1.0.0
         release removed the sampling parameters (``temperature`` / ``top_p`` / ``top_k``)
@@ -121,18 +130,27 @@ class LLMClient:
         """
         client = self._client()
         if self.provider == "anthropic":
+            output_options = {} if response_schema is None else {
+                "output_config": {"format": {"type": "json_schema", "schema": response_schema}},
+            }
             resp = client.messages.create(
                 model=self.model, system=system, messages=messages,
-                max_tokens=max_tokens,
+                max_tokens=max_tokens, **output_options,
             )
             text = "".join(b.text for b in resp.content if b.type == "text")
             return ChatResult(text, resp.usage.input_tokens, resp.usage.output_tokens)
 
         # OpenAI: the system prompt is a leading message role.
         oai_messages = ([{"role": "system", "content": system}] if system else []) + list(messages)
+        output_options = {} if response_schema is None else {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "strict": True, "schema": response_schema},
+            },
+        }
         resp = client.chat.completions.create(
             model=self.model, messages=oai_messages,
-            temperature=temperature, max_tokens=max_tokens,
+            temperature=temperature, max_tokens=max_tokens, **output_options,
         )
         text = resp.choices[0].message.content or ""
         return ChatResult(text, resp.usage.prompt_tokens, resp.usage.completion_tokens)
