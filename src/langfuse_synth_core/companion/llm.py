@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from inspect import signature
 
 DEFAULT_PROVIDER = "anthropic"
 
@@ -106,6 +107,7 @@ class LLMClient:
         temperature: float = 0,
         max_tokens: int = 512,
         response_schema: dict | None = None,
+        provider_tracing: bool = True,
     ) -> ChatResult:
         """Run one completion and return the text plus token usage.
 
@@ -121,6 +123,13 @@ class LLMClient:
         The result remains raw text: callers must validate JSON and business rules,
         including refusals or truncated output, before acting on it.
 
+        ``provider_tracing=False`` disables Anthropic's built-in SDK tracing for this
+        request when a caller already records the generation. A public SDK client copy
+        preserves the cached client's settings for other calls. SDKs predating built-in
+        tracing need no change; a client exposing tracing without the disabling option
+        raises instead of silently emitting duplicate observations. This option does
+        not control external instrumentation and has no effect on the OpenAI path.
+
         ``temperature`` reaches the OpenAI provider only. The Anthropic SDK's 1.0.0
         release removed the sampling parameters (``temperature`` / ``top_p`` / ``top_k``)
         from ``messages.create()`` — passing one is a ``TypeError``, and its migration
@@ -130,6 +139,12 @@ class LLMClient:
         """
         client = self._client()
         if self.provider == "anthropic":
+            if not provider_tracing:
+                # Older SDKs have no built-in tracing or open_telemetry option.
+                if "open_telemetry" in signature(client.with_options).parameters:
+                    client = client.with_options(open_telemetry=False)
+                elif hasattr(client, "open_telemetry"):
+                    raise RuntimeError("Anthropic client cannot disable built-in tracing via with_options")
             output_options = {} if response_schema is None else {
                 "output_config": {"format": {"type": "json_schema", "schema": response_schema}},
             }
