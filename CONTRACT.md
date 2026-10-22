@@ -556,3 +556,31 @@ helpers. Existing `window_start`/`sample_timestamps` retain their exclusive-as-o
 Recipes own their observation durations and must keep children within their declared
 calendar range. Inclusive dates do not promise an event at every hour or on every day of
 a sparse run. A truthful actual range is measured from emitted observation timestamps.
+
+### Protected live routes (opt-in)
+
+A `live_components` entry may declare `protected_paths`, up to 32 objects with
+`path` (an absolute segment prefix, e.g. `/apm`) and `access` (`presenter` or
+`manage`). The most restrictive matching scope wins. Depot snapshots this policy
+when creating the live instance. Presenter means the owner, an administrator, or
+an active collaborator; manage means the owner or an administrator. This applies
+also when the participant surface is public.
+
+A protected component must use the Companion Adapter server boundary. Depot
+requires `LIVE_PROXY_SIGNING_SECRET` in its API and worker, derives a separate
+proof per live instance, and injects only that proof and the immutable policy as
+`PORTAL_LIVE_PROOF` / `PORTAL_LIVE_PROTECTED_PATHS` into the component. No portal
+session or signing secret reaches a kit. The API strips caller proof headers and
+authorizes the decoded path, then forwards its own proof. Caddy requires that
+proof on the entire component, closing direct wildcard access. The Adapter checks
+it again against container-network bypass, rejects ambiguous paths, and consumes
+it before application middleware, telemetry or child-service forwarding. The
+exact GET/HEAD health path is the only direct-container exception and must return
+no secrets. It cannot be under a protected prefix. Browser links use the normal
+Depot `/live/{instance}` prefix and never contain a proof.
+
+Components without `protected_paths` retain their previous behavior. Protected
+components fail closed when configuration is missing. A change in signing key
+invalidates existing instance traffic until those instances are stopped and
+started to refresh their derived proof; a process restart alone keeps the old
+container environment. Stop/start creates a fresh isolated identity and policy.

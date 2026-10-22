@@ -404,6 +404,9 @@ class CompanionAdapter:
         ``server.should_exit`` (the flag uvicorn's own SIGTERM/SIGINT handlers set)."""
         import uvicorn
 
+        from .access import guarded_app
+
+        app = guarded_app(app, health_path=self.health_path)
         config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         return uvicorn.Server(config)
 
