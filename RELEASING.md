@@ -63,6 +63,12 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
+- Add optional trusted Companion Adapter construction factories for a custom Langfuse
+  client and native async/tool-capable framework clients (Depot #367). No framework
+  dependency or extra-provider credential is added. Existing kits retain their client
+  behavior; custom factories participate in no-inference readiness and single-client
+  caching. This additive public API warrants a minor release with coordinated pins.
+
 - Restore authoring validation for the existing Depot `pipeline[].generate` contract,
   including its required nonempty `resumable` import command and the provider-secret
   guard on generated commands (Depot #366). This is a backward-compatible contract

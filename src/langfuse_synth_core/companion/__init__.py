@@ -23,6 +23,10 @@ Protocol whose signatures were explicitly illustrative:
   Protocol, mirroring the ``Config`` house style.
 * :class:`Invocation` / :func:`parse_invocation` — the fixed ``--config/--host/--port`` parse.
 * :class:`ReadinessReport` — the secret-free readiness the health body carries.
+* :class:`LangfuseFactory` / :class:`NativeLLMFactory` — optional trusted construction
+  callbacks for custom tracing and native framework clients; resolution stays in core.
+* :class:`NativeCompanionAdapterContract` — optional extension of the existing structural
+  contract for surfaces using ``native_llm()``; legacy structural adapters remain valid.
 * :mod:`llm` — the G1 (#138) LLM-resolution module the adapter hands out.
 """
 
@@ -33,6 +37,9 @@ from .adapter import (
     CompanionAdapter,
     CompanionAdapterContract,
     Invocation,
+    LangfuseFactory,
+    NativeCompanionAdapterContract,
+    NativeLLMFactory,
     ReadinessReport,
     parse_invocation,
 )
@@ -41,6 +48,9 @@ __all__ = [
     "CompanionAdapter",
     "CompanionAdapterContract",
     "Invocation",
+    "LangfuseFactory",
+    "NativeCompanionAdapterContract",
+    "NativeLLMFactory",
     "ReadinessReport",
     "parse_invocation",
     "llm",
