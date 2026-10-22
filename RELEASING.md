@@ -63,6 +63,13 @@ that moves ANY runtime code takes the full step 3 — all three pins, every kit.
 
 Whoever cuts the next version ships these; delete each entry when its tag lands.
 
+- Restore authoring validation for the existing Depot `pipeline[].generate` contract,
+  including its required nonempty `resumable` import command and the provider-secret
+  guard on generated commands (Depot #366). This is a backward-compatible contract
+  correction; Manifest schema version remains 1. It changes the authoring package, so
+  release it with the coordinated consuming-kit and Depot pins described above, not
+  an authoring-only pin. Deterministic Spool generation and runtime transport are unchanged.
+
 ## v5.0.0 candidate
 
 Requires Python SDK >=5.0.1,<6 and Cloud or self-hosted Langfuse >=4.59.0.
