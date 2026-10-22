@@ -454,11 +454,35 @@ A kit's live surface (companion) is declared in `live_components[]`: `command`, 
   read seam additionally means kit code names no Langfuse endpoint, and so did not have to
   be edited when the read APIs cut over.
 - **The Companion Adapter** (`langfuse_synth_core.companion`) is the surface between the
-  portal-injected env and kit code: it owns secret intake (kit code never touches a raw
-  key — D4), Langfuse client/emitter/reader access, LLM provider resolution (pinned
+  portal-injected env and kit code: it owns secret intake (request handlers receive ready
+  clients, never raw keys — D4), Langfuse client/emitter/reader access, LLM provider resolution (pinned
   `LLM_MODEL` > per-request model > kit default > provider built-in), the readiness
   report, and serving. `CompanionAdapterContract` is the structural seam the portal's
   live runtime relies on.
+- **Native framework and custom tracing construction:** optional constructor callbacks
+  `langfuse_factory` and `native_llm_factory` let trusted SDK construction code adapt the
+  resolved connection without another credential resolver. The `LangfuseFactory` Protocol
+  receives keyword-only `host`, `public_key`, `secret_key` and returns the custom SDK
+  client. `adapter.langfuse()` caches that exact client; no default client is constructed
+  beside it. It may configure a single custom tracer provider, masking and export filters.
+  The `NativeLLMFactory` Protocol receives keyword-only `provider`, `model`, `api_key`;
+  `adapter.native_llm(model=None)` returns its native object with async, streaming and tool
+  APIs intact. No LangChain or other framework dependency is added to core. Native clients
+  extend the structural seam as `NativeCompanionAdapterContract`; the base
+  `CompanionAdapterContract` stays compatible with existing fixture/custom adapters. Clients
+  cache per resolved provider/model, and construction is synchronized to avoid duplicate
+  clients on concurrent first requests. Resolution matches `adapter.llm()`: a deployment
+  `LLM_MODEL` wins; caller/kit defaults apply only to Anthropic, while a different selected
+  provider uses its own built-in default unless deployment-pinned. No provider is inferred
+  from a model name.
+  These factories are the only trusted construction callbacks receiving raw keys; never
+  log or store them in browser state, read workstation profiles, resolve credentials again,
+  or run inference/network calls during construction. Missing credentials and a factory
+  returning `None` fail explicitly; requesting `native_llm()` without its factory fails.
+  Readiness constructs configured clients and makes only the existing empty Langfuse
+  write probe, never inference; failures keep health HTTP 200 with false readiness and
+  exception type only. The kit flushes/shuts down its returned SDK client at application
+  shutdown. Existing `llm()` and no-factory construction remain supported unchanged.
 - **Run state:** read-only, via the spool mount — see "Per-run anchors". A live surface
   may be stateless instead.
 
