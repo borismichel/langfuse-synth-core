@@ -125,7 +125,7 @@ def pipeline_secret_errors(doc: dict) -> list[str]:
             errors.append(f"{loc}: LLM_API_KEY requires top-level llm.providers")
         if step.get("id") in PIPELINE_PROVIDER_FORBIDDEN_STEPS:
             errors.append(f"{loc}: LLM_API_KEY is allowed only for custom setup steps")
-        for field in ("run", "resumable"):
+        for field in ("run", "resumable", "generate"):
             command = step.get(field)
             if not isinstance(command, str):
                 continue

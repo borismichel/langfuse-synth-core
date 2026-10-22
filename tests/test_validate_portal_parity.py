@@ -78,6 +78,33 @@ def test_base_manifest_valid(tmp_path):
     assert _validate(tmp_path, BASE) == []
 
 
+def test_generate_capable_seed_with_exact_plan_counts_valid(tmp_path):
+    """Authors can declare Depot's measured-volume gate without bypassing validation."""
+    m = copy.deepcopy(BASE)
+    m["pipeline"][0].update({
+        "generate": "synth generate-spool --config {config}",
+        "resumable": "synth import-spool --config {config}",
+    })
+    m["pipeline"].insert(0, {
+        "id": "plan",
+        "run": "synth plan --config {config}",
+        "gate": "confirm",
+        "parse": {"plan_counts": r"regex:PLAN_COUNTS=(\{[^\n]+\})"},
+    })
+    assert _validate(tmp_path, m) == []
+
+
+@pytest.mark.parametrize("resumable", [None, ""])
+def test_generate_requires_an_import_command(tmp_path, resumable):
+    """Reject a split seed before deployment if it cannot advance past generation."""
+    m = copy.deepcopy(BASE)
+    m["pipeline"][0]["generate"] = "synth generate-spool --config {config}"
+    if resumable is not None:
+        m["pipeline"][0]["resumable"] = resumable
+    errs = _validate(tmp_path, m)
+    assert any("resumable" in err for err in errs), errs
+
+
 def test_bare_anthropic_no_llm_block_stays_valid(tmp_path):
     """The shape every current kit ships: ANTHROPIC_API_KEY, no `llm` block."""
     m = _with_live(["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "ANTHROPIC_API_KEY"])

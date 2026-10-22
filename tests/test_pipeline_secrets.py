@@ -91,7 +91,7 @@ def test_canonical_step_ids_cannot_request_provider_key(step_id):
 
 
 @pytest.mark.parametrize("verb", sorted(PIPELINE_PROVIDER_FORBIDDEN_STEPS))
-@pytest.mark.parametrize("field", ["run", "resumable"])
+@pytest.mark.parametrize("field", ["run", "resumable", "generate"])
 def test_canonical_commands_cannot_hide_behind_custom_ids(verb, field):
     doc = manifest()
     doc["pipeline"][0][field] = f"/usr/local/bin/synth {verb} --config {{config}}"

@@ -239,6 +239,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["id", "run"],
+        "if": { "required": ["generate"] },
+        "then": {
+          "required": ["resumable"],
+          "properties": { "resumable": { "minLength": 1 } }
+        },
         "properties": {
           "id": {
             "type": "string",
@@ -267,6 +272,10 @@
           "resumable": {
             "type": "string",
             "description": "Command that replays the Spool from the shared volume (CONTRACT.md, The spool): re-runnable after a failure on the batch write path, non-resumable on the OTLP one."
+          },
+          "generate": {
+            "type": "string",
+            "description": "Command that materializes the Spool without Langfuse writes. Depot runs it before the measured-volume cap gate, then imports via the required resumable command (CONTRACT.md, Reserved-verb semantics)."
           },
           "timeout_minutes": { "type": "integer", "minimum": 1 },
           "requires_secrets": {
