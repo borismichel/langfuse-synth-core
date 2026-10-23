@@ -214,6 +214,7 @@ class CompanionAdapter:
         self._langfuse_factory = langfuse_factory
         self._native_llm_factory = native_llm_factory
         self._roles = decode_role_bindings(os.environ.get("LLM_ROLES_JSON"))
+        self._role_capability = "LLM_ROLES_JSON" in os.environ
         self._role_factories = dict(role_factories or {})
         self._role_llm: dict[str, _llm.LLMClient] = {}
         self._role_native: dict[str, Any] = {}
@@ -408,13 +409,21 @@ class CompanionAdapter:
         and without leaking secret material. Both probes are best-effort: on failure the
         flag is False and only the exception *type name* is recorded (never its message)."""
         lf_ok, lf_err = self._safe(self._probe_langfuse_write)
-        llm_ok, llm_err = self._safe(self._probe_llm_bound)
+        primary_required = (
+            not self._role_capability
+            or bool({"LLM_API_KEY", "ANTHROPIC_API_KEY"} & set(self.requires_secrets))
+            or self._native_llm_factory is not None
+        )
+        llm_ok, llm_err = self._safe(self._probe_llm_bound) if primary_required else (True, None)
 
         lf_detail: dict[str, Any] = {"ok": lf_ok, "base_url": self.base_url}
         if lf_err:
             lf_detail["error"] = lf_err
         llm_detail: dict[str, Any] = {"ok": llm_ok}
-        llm_detail.update(self._llm_identity())
+        if primary_required:
+            llm_detail.update(self._llm_identity())
+        else:
+            llm_detail["required"] = False
         if llm_err:
             llm_detail["error"] = llm_err
 

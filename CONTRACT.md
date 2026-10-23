@@ -654,6 +654,10 @@ SDK APIs separate from chat framework constructors. Disabled or unknown roles
 raise `ValueError`. The optional `RoleCompanionAdapterContract` adds these three
 methods without changing the legacy structural Protocol.
 
+A role-only surface need not declare a primary LLM secret; its readiness checks
+only its enabled roles. Legacy surfaces without the role envelope keep their
+existing primary readiness behavior.
+
 Readiness binds every enabled role without inference, reports provider/model,
 bind status and exception class only, and sets `llm_bound=false` if any role
 cannot bind. This proves client construction, not remote model availability or

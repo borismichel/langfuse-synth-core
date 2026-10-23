@@ -680,3 +680,30 @@ def test_readiness_includes_all_enabled_roles_without_calls_or_secret_errors(
     assert failed["detail"]["roles"]["speech"]["error"] == "RuntimeError"
     assert "resolved-sensitive-fixture" not in json.dumps(failed)
     assert fake_anthropic["completions"] == 0
+
+
+def test_role_only_surface_readiness_does_not_require_an_undeclared_primary(
+    seeded_env, monkeypatch
+):
+    import json
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setenv("OPENAI_API_KEY", "resolved-speech-fixture")
+    monkeypatch.setenv(
+        "LLM_ROLES_JSON",
+        json.dumps(
+            {
+                "version": 1,
+                "bindings": {"speech": {"provider": "openai", "model": "explicit-speech"}},
+            }
+        ),
+    )
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResp())
+    subject = CompanionAdapter(
+        _FakeConfig(),
+        requires_secrets=["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"],
+        role_factories={"speech": lambda **kw: SimpleNamespace(model=kw["model"])},
+    )
+    report = subject.readiness().as_dict()
+    assert report["ready"] is True
+    assert report["detail"]["llm"] == {"ok": True, "required": False}
