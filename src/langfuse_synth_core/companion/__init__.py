@@ -42,6 +42,7 @@ from .adapter import (
     NativeLLMFactory,
     ReadinessReport,
     RoleCompanionAdapterContract,
+    SpendingCompanionAdapterContract,
     parse_invocation,
 )
 
@@ -54,6 +55,12 @@ __all__ = [
     "NativeLLMFactory",
     "ReadinessReport",
     "RoleCompanionAdapterContract",
+    "SpendingCompanionAdapterContract",
+    "SpendingDecision",
+    "SpendingDenied",
+    "SpendingUnavailable",
     "parse_invocation",
     "llm",
 ]
+
+from .spending import SpendingDecision, SpendingDenied, SpendingUnavailable

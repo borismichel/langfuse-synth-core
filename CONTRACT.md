@@ -662,3 +662,40 @@ Readiness binds every enabled role without inference, reports provider/model,
 bind status and exception class only, and sets `llm_bound=false` if any role
 cannot bind. This proves client construction, not remote model availability or
 provider entitlement; actual requests must retain their real error/usage outcome.
+
+### Per-operation spending checks (optional capability, version 1)
+
+A live component may declare `spending_check: {version: 1}`. Depot must explicitly
+support and enable this capability before starting that component. Existing kits
+that omit it keep their selected-provider and readiness behavior.
+
+`SpendingCompanionAdapterContract.check_spending(provider=None)` makes a fresh,
+bounded synchronous check immediately before **each actual paid dispatch**, including
+retries, judge rows and independent speech calls. The default is the selected chat
+provider; use `adapter.role_binding(role).provider` for a role. Async handlers must
+offload the check from their event loop. Construction and readiness never check or
+perform inference. Stop scheduling when `SpendingDenied` or `SpendingUnavailable`
+is raised; both expose only a safe `reason` code. Never reuse an allowed decision
+as authorization for later calls or a whole batch.
+
+The immutable `SpendingDecision` contains `allowed`, `provider`, `source`,
+`checked_at`, `accounting='hourly-estimate'` and `scope`. `shared-company` applies
+the actual provider's shared monthly cap against current container-hour estimates;
+`external-provider` reports that the deployment owns its key and the company cap
+does not apply. This is point-in-time authorization, **not** a token-level hard
+billing ceiling, reservation, exact cost measurement or cancellation of in-flight
+provider work. Native remote evaluator queues are outside this local check.
+
+Depot injects a private, per-instance `DEPOT_OPERATION_TOKEN` plus the fixed
+`DEPOT_OPERATION_CHECK_URL` (`http://caddy:8081/api/v1/live-assets/{uuid}/operation-permit`).
+It has a separate HMAC purpose from browser/live ingress authority. The Adapter
+accepts no arbitrary destination, follows no redirects and ignores process proxy
+settings for this private bridge. The host signing secret and provider keys are
+never sent to this endpoint. The endpoint verifies active instance/deployment
+lifecycle and exactly one open usage binding for the requested provider; caller
+model/source/pricing overrides are rejected. Unavailable transport fails closed.
+
+A kit supervisor must remove both operation variables from MCP, APM, automation
+and other child process environments. Never forward the token to browsers,
+telemetry, provider clients or tools. Trusted native factories receive only their
+resolved provider credentials; operation authority stays in the owning app.
