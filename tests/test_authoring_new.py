@@ -169,7 +169,7 @@ def test_new_kit_aligns_dependency_and_publish_pins_for_the_release(tmp_path, co
     project = tomllib.loads((kit.dest / "pyproject.toml").read_text())["project"]
     dependencies = [Requirement(value) for value in
                     project["dependencies"] + project["optional-dependencies"]["dev"]]
-    expected = "v5.1.0" if core_ref is None else "v5.0.0"
+    expected = "v5.1.1" if core_ref is None else "v5.0.0"
     core = [requirement for requirement in dependencies
             if requirement.name == "langfuse-synth-core"]
 
