@@ -464,8 +464,9 @@ A kit's live surface (companion) is declared in `live_components[]`: `command`, 
   `langfuse_factory` and `native_llm_factory` let trusted SDK construction code adapt the
   resolved connection without another credential resolver. The `LangfuseFactory` Protocol
   receives keyword-only `host`, `public_key`, `secret_key` and returns the custom SDK
-  client. `adapter.langfuse()` caches that exact client; no default client is constructed
-  beside it. It may configure a single custom tracer provider, masking and export filters.
+  client. `adapter.langfuse()` caches that exact client; `adapter.emitter()` shares it
+  unless explicitly passed a client. No default client is constructed beside it. It may
+  configure a single custom tracer provider, masking and export filters.
   The `NativeLLMFactory` Protocol receives keyword-only `provider`, `model`, `api_key`;
   `adapter.native_llm(model=None)` returns its native object with async, streaming and tool
   APIs intact. No LangChain or other framework dependency is added to core. Native clients
@@ -596,7 +597,10 @@ observations are created. It follows the host egress proxy and never follows a
 redirect, accepts a caller destination, exposes credentials to the child runtime,
 or retries a potentially accepted batch. A non-200 response, missing credentials,
 network failure or oversized response raises; the original protobuf partial-success
-response is returned for the native exporter to interpret.
+response is returned for the native exporter to interpret. A ten-second response deadline
+closes the active connection, including a target dripping headers or body bytes, and raises
+`requests.Timeout`. Connection establishment retains its three-second timeout. No network
+worker continues after return.
 
 A consumer must restrict its collector to authenticated loopback intake, bound
 request size/concurrency/rate, validate provenance and observation eligibility,

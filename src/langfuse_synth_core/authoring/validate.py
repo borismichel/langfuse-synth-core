@@ -167,7 +167,7 @@ def role_errors(doc: dict) -> list[str]:
         if isinstance(models, dict) and isinstance(providers, list):
             if any(
                 not isinstance(models.get(p), str) or not models[p].strip()
-                for p in providers
+                for p in providers if isinstance(p, str)
             ):
                 errors.append(
                     f"{prefix}: explicit model required for every possible provider"

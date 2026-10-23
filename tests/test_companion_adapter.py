@@ -207,6 +207,27 @@ def test_custom_langfuse_factory_owns_the_only_sdk_client(seeded_env, fake_langf
     assert fake_langfuse_sdk == {}  # No second SDK client/tracer is constructed.
 
 
+@pytest.mark.parametrize("emitter_first", [False, True])
+def test_live_emission_uses_the_custom_langfuse_client(seeded_env, monkeypatch, emitter_first):
+    custom_client = object()
+
+    def default_sdk(**kwargs):
+        pytest.fail("live emission must retain the custom tracer and masking client")
+
+    monkeypatch.setitem(__import__("sys").modules, "langfuse",
+                        SimpleNamespace(Langfuse=default_sdk))
+    adapter = CompanionAdapter(_FakeConfig(), langfuse_factory=lambda **_: custom_client)
+    if not emitter_first:
+        assert adapter.langfuse() is custom_client
+
+    emitter = adapter.emitter(environment="acceptance", flush_on_exit=False)
+
+    assert emitter.client is adapter.langfuse() is custom_client
+    assert adapter.emitter().client is custom_client
+    assert emitter.environment == "acceptance"
+    assert emitter.flush_on_exit is False
+
+
 def test_the_spool_writer_is_not_on_the_adapter_surface(adapter):
     """A Surface emits at *now* and rides `emitter()`. The Spool's writer backdates weeks of
     history and has no business on a wall-clock surface, so it is not reachable from the
