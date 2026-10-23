@@ -333,6 +333,10 @@
               }
             }
           },
+          "llm_roles": {
+            "type": "array", "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"}
+          },
           "protected_paths": {
             "type": "array", "maxItems": 32, "default": [],
             "description": "Route prefixes requiring Depot presenter or owner/admin access even for public assets. Requires the Companion Adapter transport gate and configured Depot signing secret. Direct wildcard access is disabled for the entire component.",
@@ -362,6 +366,64 @@
           "uniqueItems": true,
           "description": "Ordered list of supported provider ids; the FIRST entry is the deploy-time default. The set of valid ids mirrors the portal provider table (a drift test pins them together).",
           "items": { "enum": ["anthropic", "openai"] }
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "bindings"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "bindings": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider",
+                  "models"
+                ],
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "selected",
+                      "anthropic",
+                      "openai"
+                    ]
+                  },
+                  "models": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": false,
+                    "properties": {
+                      "anthropic": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "openai": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "enabled_by": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
         },
         "models": {
           "type": "object",

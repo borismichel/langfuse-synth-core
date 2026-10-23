@@ -146,6 +146,54 @@ def pipeline_secret_errors(doc: dict) -> list[str]:
     return errors
 
 
+def role_errors(doc: dict) -> list[str]:
+    """Cross-field references for versioned, feature-specific model roles."""
+    llm = doc.get("llm", {})
+    if not isinstance(llm, dict):
+        return []  # schema reports malformed structure
+    roles = llm.get("roles", {})
+    if not isinstance(roles, dict) or not isinstance(roles.get("bindings", {}), dict):
+        return []
+    definitions = roles.get("bindings", {})
+    errors = []
+    properties = _config_schema_properties(doc)
+    for name, definition in definitions.items():
+        if not isinstance(definition, dict):
+            continue
+        prefix = f"  at llm/roles/bindings/{name}"
+        provider = definition.get("provider")
+        providers = llm.get("providers", []) if provider == "selected" else [provider]
+        models = definition.get("models", {})
+        if isinstance(models, dict) and isinstance(providers, list):
+            if any(
+                not isinstance(models.get(p), str) or not models[p].strip()
+                for p in providers
+            ):
+                errors.append(
+                    f"{prefix}: explicit model required for every possible provider"
+                )
+        switch = definition.get("enabled_by")
+        if switch is not None:
+            prop = properties.get(switch, {}) if isinstance(switch, str) else {}
+            if (
+                not isinstance(prop, dict)
+                or prop.get("type") != "boolean"
+                or not isinstance(prop.get("default"), bool)
+            ):
+                errors.append(
+                    f"{prefix}: enabled_by requires a declared boolean Configuration "
+                    "property with a default"
+                )
+    components = doc.get("live_components", [])
+    for i, component in enumerate(components if isinstance(components, list) else []):
+        if not isinstance(component, dict) or not isinstance(
+            component.get("llm_roles", []), list
+        ):
+            continue
+        for name in component.get("llm_roles", []):
+            if not isinstance(name, str) or name not in definitions:
+                errors.append(f"  at live_components/{i}/llm_roles: undefined LLM role")
+    return errors
 def semantic_errors(doc: dict) -> list[str]:
     """LLM-provider contract rules not expressible in JSON Schema (LAN-378 / LAN-400).
 
@@ -157,7 +205,7 @@ def semantic_errors(doc: dict) -> list[str]:
 
     Back-compat: a bare ``ANTHROPIC_API_KEY`` with no ``llm`` block trips none of these.
     """
-    errors: list[str] = pipeline_secret_errors(doc)
+    errors: list[str] = pipeline_secret_errors(doc) + role_errors(doc)
     secrets = _declared_secrets(doc)
     llm = doc.get("llm")
     has_llm = isinstance(llm, dict)

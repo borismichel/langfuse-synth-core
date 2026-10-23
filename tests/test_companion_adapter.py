@@ -589,3 +589,94 @@ def test_run_builds_surface_and_serves(adapter, monkeypatch):
 
     adapter.run(app_factory, host="0.0.0.0", port=9090)
     assert served == {"app": sentinel_app, "host": "0.0.0.0", "port": 9090}
+
+
+def test_roles_preserve_explicit_models_and_ready_native_clients(
+    seeded_env, monkeypatch, fake_anthropic
+):
+    import json
+
+    monkeypatch.setenv("LLM_MODEL", "primary-chat-override")
+    monkeypatch.setenv("OPENAI_API_KEY", "resolved-openai-fixture")
+    monkeypatch.setenv(
+        "LLM_ROLES_JSON",
+        json.dumps(
+            {
+                "version": 1,
+                "bindings": {
+                    "judge": {"provider": "anthropic", "model": "explicit-judge"},
+                    "speech": {"provider": "openai", "model": "explicit-speech"},
+                },
+            }
+        ),
+    )
+    constructions = []
+
+    def native_factory(**binding):
+        constructions.append(binding)
+        return SimpleNamespace(transcribe=lambda: "native speech result")
+
+    subject = CompanionAdapter(_FakeConfig(), role_factories={"speech": native_factory})
+    assert subject.llm().model == "primary-chat-override"
+    assert subject.llm_for("judge").model == "explicit-judge"
+    assert subject.llm_for("judge").provider == "anthropic"
+    client = subject.native_llm_for("speech")
+    assert client.transcribe() == "native speech result"
+    assert subject.native_llm_for("speech") is client
+    assert constructions == [
+        {
+            "provider": "openai",
+            "model": "explicit-speech",
+            "api_key": "resolved-openai-fixture",
+        }
+    ]
+    with pytest.raises(ValueError, match="not enabled"):
+        subject.role_binding("disabled_comparison")
+    with pytest.raises(ValueError, match="factory"):
+        subject.native_llm_for("judge")
+    from langfuse_synth_core.companion import RoleCompanionAdapterContract
+
+    assert isinstance(subject, RoleCompanionAdapterContract)
+
+
+def test_readiness_includes_all_enabled_roles_without_calls_or_secret_errors(
+    seeded_env, fake_anthropic, monkeypatch
+):
+    import json
+
+    monkeypatch.setenv(
+        "LLM_ROLES_JSON",
+        json.dumps(
+            {
+                "version": 1,
+                "bindings": {
+                    "judge": {"provider": "anthropic", "model": "judge"},
+                    "speech": {"provider": "openai", "model": "speech"},
+                },
+            }
+        ),
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResp())
+
+    def factory(**kw):
+        raise RuntimeError("must not leak " + kw["api_key"])
+
+    subject = CompanionAdapter(_FakeConfig(), role_factories={"speech": factory})
+    missing = subject.readiness().as_dict()
+    assert missing["ready"] is False
+    assert missing["llm_bound"] is False
+    assert missing["detail"]["roles"] == {
+        "judge": {"provider": "anthropic", "model": "judge", "ok": True},
+        "speech": {
+            "provider": "openai",
+            "model": "speech",
+            "ok": False,
+            "error": "ValueError",
+        },
+    }
+    monkeypatch.setenv("OPENAI_API_KEY", "resolved-sensitive-fixture")
+    failed = subject.readiness().as_dict()
+    assert failed["detail"]["roles"]["speech"]["error"] == "RuntimeError"
+    assert "resolved-sensitive-fixture" not in json.dumps(failed)
+    assert fake_anthropic["completions"] == 0
