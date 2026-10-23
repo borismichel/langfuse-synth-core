@@ -138,3 +138,82 @@ def test_native_export_preserves_host_egress_proxy_and_response_byte_limit(monke
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+@pytest.mark.parametrize('body,rejected,message', [
+    (b'{}', 0, ''),
+    (b'{"partialSuccess":{"rejectedSpans":"2","errorMessage":"two invalid spans"}}',
+     2, 'two invalid spans'),
+    (b'{"partialSuccess":{"errorMessage":"warning"}}', 0, 'warning'),
+])
+def test_native_export_normalizes_json_success_for_protobuf_exporter(
+        monkeypatch, body, rejected, message):
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
+
+    class JsonTarget(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), JsonTarget)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv('LANGFUSE_BASE_URL', f'http://127.0.0.1:{server.server_port}')
+    monkeypatch.setenv('LANGFUSE_PUBLIC_KEY', 'pk-fixture')
+    monkeypatch.setenv('LANGFUSE_SECRET_KEY', 'sk-fixture')
+    adapter = CompanionAdapter(SimpleNamespace(target=SimpleNamespace(base_url='')))
+    try:
+        report = ExportTraceServiceResponse.FromString(adapter.forward_otel(b'\x0a\x00'))
+        assert report.partial_success.rejected_spans == rejected
+        assert report.partial_success.error_message == message
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+@pytest.mark.parametrize('content_type,body', [
+    ('application/json', b'{"error":"failed"}'),
+    ('application/json', b'{"partialSuccess":{"rejectedSpans":"-1"}}'),
+    ('application/json', b'{"partialSuccess":{"rejectedSpans":"9223372036854775808"}}'),
+    ('application/json', b'{"partialSuccess":{"rejectedSpans":true}}'),
+    ('application/json', b'{"partialSuccess":{"rejectedSpans":"1"},"partialSuccess":{}}'),
+    ('application/json', b'[]'),
+    ('application/json', b'{'),
+    ('application/json', b'null'),
+    ('text/html', b'{}'),
+    ('application/x-protobuf', b'{}'),
+])
+def test_native_export_rejects_invalid_response_instead_of_claiming_success(
+        monkeypatch, content_type, body):
+    class InvalidTarget(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), InvalidTarget)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv('LANGFUSE_BASE_URL', f'http://127.0.0.1:{server.server_port}')
+    monkeypatch.setenv('LANGFUSE_PUBLIC_KEY', 'pk-fixture')
+    monkeypatch.setenv('LANGFUSE_SECRET_KEY', 'sk-fixture')
+    adapter = CompanionAdapter(SimpleNamespace(target=SimpleNamespace(base_url='')))
+    try:
+        with pytest.raises(ValueError, match='Invalid OTLP target response'):
+            adapter.forward_otel(b'\x0a\x00')
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()

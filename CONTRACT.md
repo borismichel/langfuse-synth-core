@@ -596,8 +596,12 @@ producer trace/span/parent identity and timestamps; no SDK or historical Spool
 observations are created. It follows the host egress proxy and never follows a
 redirect, accepts a caller destination, exposes credentials to the child runtime,
 or retries a potentially accepted batch. A non-200 response, missing credentials,
-network failure or oversized response raises; the original protobuf partial-success
-response is returned for the native exporter to interpret. A ten-second response deadline
+network failure or oversized response raises. A valid `application/x-protobuf`
+acknowledgement is returned unchanged. An `application/json` OTLP acknowledgement
+is converted to protobuf, preserving rejected span counts and error messages for the
+native exporter to interpret. An unsupported content type or malformed acknowledgement
+raises without exposing the target response body; a negative rejected count is invalid.
+A successful HTTP status alone never establishes acceptance. A ten-second response deadline
 closes the active connection, including a target dripping headers or body bytes, and raises
 `requests.Timeout`. Connection establishment retains its three-second timeout. No network
 worker continues after return.
