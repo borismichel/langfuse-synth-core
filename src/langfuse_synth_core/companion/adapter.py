@@ -59,6 +59,7 @@ from threading import RLock
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from . import llm as _llm
+from .spending import OperationSpending, SpendingDecision, SpendingUnavailable
 from ..llm_roles import RoleBinding, decode_role_bindings
 
 # ---------------------------------------------------------------------------
@@ -161,6 +162,13 @@ class RoleCompanionAdapterContract(CompanionAdapterContract, Protocol):
     def native_llm_for(self, name: str) -> Any: ...
 
 
+@runtime_checkable
+class SpendingCompanionAdapterContract(CompanionAdapterContract, Protocol):
+    """Optional fresh authorization immediately before each paid operation."""
+
+    def check_spending(self, provider: str | None = ...) -> SpendingDecision: ...
+
+
 class LangfuseFactory(Protocol):
     """Trusted SDK construction with the Adapter's resolved project connection.
 
@@ -207,6 +215,7 @@ class CompanionAdapter:
         native_llm_factory: NativeLLMFactory | None = None,
         role_factories: dict[str, NativeLLMFactory] | None = None,
     ):
+        self._spending = OperationSpending()
         self.cfg = cfg
         self.requires_secrets = tuple(requires_secrets)
         self.health_path = health_path
@@ -224,6 +233,19 @@ class CompanionAdapter:
         # Keyed by the model the caller asked for (``None`` = the adapter's own default), so a
         # Surface with a per-request model selector still constructs one SDK client per model.
         self._llm: dict[str | None, _llm.LLMClient] = {}
+
+    def check_spending(self, provider: str | None = None) -> SpendingDecision:
+        """Check immediately before dispatch; denial or unavailability must stop work.
+
+        Pass a role's resolved provider for independent models. No inference, key
+        lookup, reservation or permission cache occurs here. Async callers offload
+        this bounded synchronous request from their event loop.
+        """
+        try:
+            selected = _llm.resolve_provider() if provider is None else provider
+        except ValueError:
+            raise SpendingUnavailable() from None
+        return self._spending.check(selected)
 
     # -- connection identity (D5): the deployment's own base URL ----------
     @property
