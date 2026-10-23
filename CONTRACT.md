@@ -202,6 +202,7 @@ connection and evaluator configuration in a separate custom step before or after
 | --- | ------- |
 | `PORTAL_LIVE_INSTANCE_ID` | The live-instance identity. |
 | `LIVE_BASE_PATH` | `/live/{instance_id}` — the public path prefix. Routes stay mounted at `/` (the proxy strips the prefix); the kit uses this var **only** to render internal hrefs/redirects (`langfuse_synth_core.live.paths.local`). Never for external URLs. |
+| `PORTAL_LIVE_PUBLIC_ORIGIN` | Optional validated canonical HTTP(S) origin, without credentials, path or trailing slash. Injected from operator configuration; never inferred from request headers. `langfuse_synth_core.live.paths.public_origin()` returns it or `None`. Combine with `LIVE_BASE_PATH` only for managed-service editor/callback URLs; ordinary links remain relative. Only enabled capabilities needing absolute URLs may require it. |
 | declared `requires_secrets` | The Langfuse pair, plus the selected provider's key under its **canonical** name (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). The manifest's `LLM_API_KEY` sentinel is resolved portal-side; no container ever carries a literal `LLM_API_KEY` env. |
 | `LLM_PROVIDER` / `LLM_MODEL` | Which provider/model the deployment selected (sentinel components only). Env-only by law (LAN-173); read by `langfuse_synth_core.companion.llm`. A pinned `LLM_MODEL` outranks any per-request model choice. |
 | `ANTHROPIC_METADATA_USER_ID` | Attribution id, when the deployment has one; the kit passes it through as `metadata.user_id` on LLM calls. |
