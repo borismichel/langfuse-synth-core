@@ -165,3 +165,8 @@ Core v5 requires Python >=3.11 and Langfuse Cloud or self-hosted Langfuse >=4.59
 The SDK range is >=5.0.1,<6; released Demo Packages pin the exact rehearsed patch.
 Live scores use SDK-managed batches; the deterministic historical Spool keeps its raw
 ingestion path. See [live delivery](docs/READ_LIVE_SEAMS.md) and [releases](RELEASING.md).
+
+Feature-specific additional models use the optional versioned `llm.roles`
+capability and `CompanionAdapter.llm_for(name)` / `native_llm_for(name)`.
+See [the role contract](CONTRACT.md#optional-feature-specific-llm-roles-capability-version-1)
+for enablement, independent model selection and secret-free readiness.

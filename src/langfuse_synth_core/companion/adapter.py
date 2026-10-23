@@ -59,6 +59,7 @@ from threading import RLock
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from . import llm as _llm
+from ..llm_roles import RoleBinding, decode_role_bindings
 
 # ---------------------------------------------------------------------------
 # 1. Invocation contract (D3) — the fixed launch string, and nothing else
@@ -151,6 +152,15 @@ class NativeCompanionAdapterContract(CompanionAdapterContract, Protocol):
     def native_llm(self, model: str | None = ...) -> Any: ...
 
 
+@runtime_checkable
+class RoleCompanionAdapterContract(CompanionAdapterContract, Protocol):
+    """Optional independent model roles; the selected-provider API is unchanged."""
+
+    def role_binding(self, name: str) -> RoleBinding: ...
+    def llm_for(self, name: str) -> _llm.LLMClient: ...
+    def native_llm_for(self, name: str) -> Any: ...
+
+
 class LangfuseFactory(Protocol):
     """Trusted SDK construction with the Adapter's resolved project connection.
 
@@ -195,6 +205,7 @@ class CompanionAdapter:
         llm_model_default: str | None = None,
         langfuse_factory: LangfuseFactory | None = None,
         native_llm_factory: NativeLLMFactory | None = None,
+        role_factories: dict[str, NativeLLMFactory] | None = None,
     ):
         self.cfg = cfg
         self.requires_secrets = tuple(requires_secrets)
@@ -202,6 +213,11 @@ class CompanionAdapter:
         self.llm_model_default = llm_model_default
         self._langfuse_factory = langfuse_factory
         self._native_llm_factory = native_llm_factory
+        self._roles = decode_role_bindings(os.environ.get("LLM_ROLES_JSON"))
+        self._role_capability = "LLM_ROLES_JSON" in os.environ
+        self._role_factories = dict(role_factories or {})
+        self._role_llm: dict[str, _llm.LLMClient] = {}
+        self._role_native: dict[str, Any] = {}
         self._native_llm: dict[tuple[str, str], Any] = {}
         self._construction_lock = RLock()
         self._langfuse: Any = None
@@ -348,19 +364,66 @@ class CompanionAdapter:
                 self._native_llm[identity] = client
             return self._native_llm[identity]
 
+    def role_binding(self, name: str) -> RoleBinding:
+        """Inspect an enabled role's immutable provider/model, never its credential."""
+        if name not in self._roles:
+            raise ValueError(f"LLM role is not enabled: {name}")
+        return self._roles[name]
+
+
+    def llm_for(self, name: str) -> _llm.LLMClient:
+        """Completion client for an explicit role; primary LLM_MODEL never applies."""
+        with self._construction_lock:
+            binding = self.role_binding(name)
+            if name not in self._role_llm:
+                self._role_llm[name] = _llm.LLMClient(binding.provider, binding.model)
+            return self._role_llm[name]
+
+
+    def native_llm_for(self, name: str) -> Any:
+        """Ready native client using this role's explicit trusted construction factory.
+
+        Separate factories avoid handing a speech role to a chat-only constructor.
+        """
+        with self._construction_lock:
+            binding = self.role_binding(name)
+            factory = self._role_factories.get(name)
+            if factory is None:
+                raise ValueError(f"LLM role {name} requires a native factory")
+            if name not in self._role_native:
+                key = os.environ.get(_llm.API_KEY_ENV[binding.provider])
+                if not key:
+                    raise ValueError(f"LLM role {name} requires its provider credential")
+                client = factory(
+                    provider=binding.provider, model=binding.model, api_key=key
+                )
+                if client is None:
+                    raise ValueError("Native LLM role factory must return a client")
+                self._role_native[name] = client
+            return self._role_native[name]
+
+
     # -- readiness surface ------------------------------------------------
     def readiness(self) -> ReadinessReport:
         """Report "Langfuse write path ok / LLM client bound" without a billable LLM call
         and without leaking secret material. Both probes are best-effort: on failure the
         flag is False and only the exception *type name* is recorded (never its message)."""
         lf_ok, lf_err = self._safe(self._probe_langfuse_write)
-        llm_ok, llm_err = self._safe(self._probe_llm_bound)
+        primary_required = (
+            not self._role_capability
+            or bool({"LLM_API_KEY", "ANTHROPIC_API_KEY"} & set(self.requires_secrets))
+            or self._native_llm_factory is not None
+        )
+        llm_ok, llm_err = self._safe(self._probe_llm_bound) if primary_required else (True, None)
 
         lf_detail: dict[str, Any] = {"ok": lf_ok, "base_url": self.base_url}
         if lf_err:
             lf_detail["error"] = lf_err
         llm_detail: dict[str, Any] = {"ok": llm_ok}
-        llm_detail.update(self._llm_identity())
+        if primary_required:
+            llm_detail.update(self._llm_identity())
+        else:
+            llm_detail["required"] = False
         if llm_err:
             llm_detail["error"] = llm_err
 
@@ -370,8 +433,27 @@ class CompanionAdapter:
             # names + presence only — never a secret value.
             "secrets_present": {name: name in os.environ for name in self.requires_secrets},
         }
-        return ReadinessReport(langfuse_write_ok=lf_ok, llm_bound=llm_ok, detail=detail)
+        if self._roles:
+            role_detail = {}
+            for name, binding in self._roles.items():
 
+                def bind_role():
+                    if name in self._role_factories:
+                        self.native_llm_for(name)
+                    else:
+                        self.llm_for(name).bind()
+
+                bound, error = self._safe(bind_role)
+                role_detail[name] = {
+                    "provider": binding.provider,
+                    "model": binding.model,
+                    "ok": bound,
+                }
+                if error:
+                    role_detail[name]["error"] = error
+                llm_ok = llm_ok and bound
+            detail["roles"] = role_detail
+        return ReadinessReport(langfuse_write_ok=lf_ok, llm_bound=llm_ok, detail=detail)
     def _probe_langfuse_write(self) -> None:
         """Prove the write path with an empty OTLP export — auth + endpoint reachability,
         zero spans emitted (the seeded pool is untouched). Raises on any failure.

@@ -606,3 +606,59 @@ flush the native producer while its local receiver is still running, then stop
 the receiver. Readiness must distinguish successful local startup from a failed
 export; health probes must not submit billable work. This method is transport only,
 not a public collector, evaluator eligibility policy or durable delivery guarantee.
+
+### Optional feature-specific LLM roles (capability version 1)
+
+The existing `llm.providers` / `llm.models`, `LLM_API_KEY` sentinel and Adapter
+`llm(model)` / `native_llm(model)` semantics remain unchanged. A live component
+may opt into independent models with `llm_roles: [judge, speech]` and:
+
+```yaml
+llm:
+  providers: [anthropic, openai]
+  roles:
+    version: 1
+    bindings:
+      judge:
+        provider: selected
+        models: {anthropic: judge-model-a, openai: judge-model-b}
+      speech:
+        provider: openai
+        models: {openai: speech-model}
+        enabled_by: features.voice
+```
+
+These example model IDs are placeholders; the kit must name available models.
+`selected` follows the deployment's primary provider but uses the role's own
+explicit model. Every possible selected provider needs an entry. An explicit
+provider may be additional to `llm.providers`. `enabled_by` names a boolean
+`config_schema.properties` key with a boolean default; validated deployment
+Configuration overrides the default. Missing switches/models/providers fail;
+there is no implicit provider or model substitution. No switch means always enabled.
+
+The pure runtime module `langfuse_synth_core.llm_roles` exposes immutable
+`RoleBinding(provider, model)`, `resolve_manifest_roles`, and the versioned
+`encode_role_bindings` / `decode_role_bindings` envelope. Depot resolves only the
+roles named by that component and enabled by Configuration, then injects the
+secret-free `LLM_ROLES_JSON` envelope. Each distinct enabled provider uses its
+canonical key environment variable. Browser input never supplies that envelope
+or credentials. Canonical seed/verify jobs still receive no provider credentials.
+
+`CompanionAdapter.role_binding(name)` exposes only provider/model identity.
+`llm_for(name)` returns the uniform completion client for that exact model;
+`LLM_MODEL` does not override it. `native_llm_for(name)` requires a constructor
+in `role_factories={name: factory}` using the existing `NativeLLMFactory`
+contract. A native factory receives the resolved provider/model/key and returns
+a ready client without network requests. Explicit factories keep speech/native
+SDK APIs separate from chat framework constructors. Disabled or unknown roles
+raise `ValueError`. The optional `RoleCompanionAdapterContract` adds these three
+methods without changing the legacy structural Protocol.
+
+A role-only surface need not declare a primary LLM secret; its readiness checks
+only its enabled roles. Legacy surfaces without the role envelope keep their
+existing primary readiness behavior.
+
+Readiness binds every enabled role without inference, reports provider/model,
+bind status and exception class only, and sets `llm_bound=false` if any role
+cannot bind. This proves client construction, not remote model availability or
+provider entitlement; actual requests must retain their real error/usage outcome.
