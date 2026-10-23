@@ -585,3 +585,24 @@ components fail closed when configuration is missing. A change in signing key
 invalidates existing instance traffic until those instances are stopped and
 started to refresh their derived proof; a process restart alone keeps the old
 container environment. Stop/start creates a fresh isolated identity and policy.
+
+### Native runtime OTLP bridge (optional)
+
+`CompanionAdapter.forward_otel(payload: bytes) -> bytes` forwards at most 1 MiB of
+OTLP/protobuf to the Adapter's bound Langfuse `/api/public/otel/v1/traces` endpoint,
+using its resolved project credentials and the v4 ingestion header. It preserves
+producer trace/span/parent identity and timestamps; no SDK or historical Spool
+observations are created. It follows the host egress proxy and never follows a
+redirect, accepts a caller destination, exposes credentials to the child runtime,
+or retries a potentially accepted batch. A non-200 response, missing credentials,
+network failure or oversized response raises; the original protobuf partial-success
+response is returned for the native exporter to interpret.
+
+A consumer must restrict its collector to authenticated loopback intake, bound
+request size/concurrency/rate, validate provenance and observation eligibility,
+and filter fields before forwarding. Native operational spans must not impersonate
+application answer/evaluator subjects. Stop accepting new work before shutdown;
+flush the native producer while its local receiver is still running, then stop
+the receiver. Readiness must distinguish successful local startup from a failed
+export; health probes must not submit billable work. This method is transport only,
+not a public collector, evaluator eligibility policy or durable delivery guarantee.

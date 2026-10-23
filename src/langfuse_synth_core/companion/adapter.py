@@ -276,6 +276,36 @@ class CompanionAdapter:
 
         return lfread.get_json(self.base_url, path, params, throttle=throttle)
 
+    def forward_otel(self, payload: bytes) -> bytes:
+        """Forward a bounded foreign-runtime OTLP/protobuf batch to this target only.
+
+        The kit owns authenticated local intake, span provenance/filtering and rate
+        limits. Native trace IDs/timestamps are preserved; this transport neither
+        creates SDK spans nor replays a Spool. No redirects or retries are performed.
+        The original partial-success protobuf response is returned to the exporter.
+        """
+        import requests
+        from ..ingestion import INGESTION_VERSION, INGESTION_VERSION_HEADER
+
+        if not isinstance(payload, bytes) or len(payload) > 1024 * 1024:
+            raise ValueError('OTLP payload must be bytes of at most 1 MiB')
+        public = os.environ.get('LANGFUSE_PUBLIC_KEY')
+        secret = os.environ.get('LANGFUSE_SECRET_KEY')
+        if not public or not secret:
+            raise ValueError('Langfuse connection is unavailable')
+        with requests.post(self.base_url + '/api/public/otel/v1/traces', data=payload,
+                auth=(public, secret), headers={'Content-Type': 'application/x-protobuf',
+                    INGESTION_VERSION_HEADER: INGESTION_VERSION},
+                timeout=(3, 10), allow_redirects=False, stream=True) as response:
+            if response.status_code != 200:
+                raise RuntimeError('OTLP target did not accept the batch')
+            result = bytearray()
+            for chunk in response.iter_content(65536):
+                result.extend(chunk)
+                if len(result) > 1024 * 1024:
+                    raise ValueError('OTLP target response exceeds 1 MiB')
+            return bytes(result)
+
     # -- 6. LLM credential resolution (D6) -> ready client ----------------
     def llm(self, model: str | None = None) -> _llm.LLMClient:
         """The ready LLM client for the environment-selected provider (G1 resolution, #138).
