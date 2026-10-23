@@ -289,9 +289,13 @@ class CompanionAdapter:
         (portal #208). A live surface emits at *now*, so it belongs on the Langfuse SDK and
         not on the Spool's backdating machinery — see
         :mod:`langfuse_synth_core.live.emit`, and the determinism line in ``CONTRACT.md``.
-        A fresh emitter each call, keyed to the deployment's connection."""
+        A fresh emitter each call, keyed to the deployment's connection. A configured
+        Langfuse factory supplies its cached client unless the caller explicitly provides
+        a client, preserving the custom tracing/masking pipeline for live emission."""
         from ..live.emit import LiveEmitter
 
+        if self._langfuse_factory is not None and kw.get("client") is None:
+            kw["client"] = self.langfuse()
         return LiveEmitter(self.base_url, public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
                            secret_key=os.environ.get("LANGFUSE_SECRET_KEY"), **kw)
 
@@ -322,7 +326,7 @@ class CompanionAdapter:
         creates SDK spans nor replays a Spool. No redirects or retries are performed.
         The original partial-success protobuf response is returned to the exporter.
         """
-        import requests
+        from ._otel import response_deadline
         from ..ingestion import INGESTION_VERSION, INGESTION_VERSION_HEADER
 
         if not isinstance(payload, bytes) or len(payload) > 1024 * 1024:
@@ -331,7 +335,8 @@ class CompanionAdapter:
         secret = os.environ.get('LANGFUSE_SECRET_KEY')
         if not public or not secret:
             raise ValueError('Langfuse connection is unavailable')
-        with requests.post(self.base_url + '/api/public/otel/v1/traces', data=payload,
+        with response_deadline(10) as session, session.post(
+                self.base_url + '/api/public/otel/v1/traces', data=payload,
                 auth=(public, secret), headers={'Content-Type': 'application/x-protobuf',
                     INGESTION_VERSION_HEADER: INGESTION_VERSION},
                 timeout=(3, 10), allow_redirects=False, stream=True) as response:

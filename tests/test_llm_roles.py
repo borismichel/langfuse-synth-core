@@ -84,6 +84,24 @@ def test_authoring_rejects_unresolvable_role_capabilities(change):
     assert validate_doc(doc, Draft7Validator(load_schema()))
 
 
+@pytest.mark.parametrize("invalid_provider", [[], {}])
+@pytest.mark.parametrize("selected", [False, True])
+def test_malformed_role_providers_return_schema_findings(invalid_provider, selected):
+    doc = manifest()
+    if selected:
+        doc["llm"]["providers"].append(invalid_provider)
+        location = "llm/providers/1"
+        choices = "['anthropic', 'openai']"
+    else:
+        doc["llm"]["roles"]["bindings"]["judge"]["provider"] = invalid_provider
+        location = "llm/roles/bindings/judge/provider"
+        choices = "['selected', 'anthropic', 'openai']"
+
+    findings = validate_doc(doc, Draft7Validator(load_schema()))
+
+    assert f"  at {location}: {invalid_provider!r} is not one of {choices}" in findings
+
+
 def test_legacy_manifest_needs_no_role_capability():
     doc = manifest()
     del doc["llm"]["roles"]
