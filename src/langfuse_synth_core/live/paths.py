@@ -31,3 +31,27 @@ def local(path: str) -> str:
     """
     prefix = base_path()
     return f"{prefix}{path}" if prefix else path
+
+
+def public_origin() -> str | None:
+    """Optional operator-configured portal origin for absolute managed-service URLs.
+
+    Never inferred from caller headers. Existing hosts omit the value; only
+    capabilities needing absolute editor/callback URLs should require it.
+    """
+    import re
+    from urllib.parse import urlsplit
+
+    origin = os.environ.get('PORTAL_LIVE_PUBLIC_ORIGIN', '')
+    if not origin:
+        return None
+    message = 'PORTAL_LIVE_PUBLIC_ORIGIN must be an http(s) origin without credentials or path'
+    if not re.fullmatch(r'https?://[A-Za-z0-9.\[\]:-]+/?', origin):
+        raise ValueError(message)
+    try:
+        parsed = urlsplit(origin)
+        if not parsed.hostname or parsed.port == 0:
+            raise ValueError(message)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    return parsed.scheme + '://' + parsed.netloc

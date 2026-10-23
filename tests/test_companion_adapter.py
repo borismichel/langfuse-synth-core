@@ -14,6 +14,8 @@ patched at their call sites.
 """
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import socket
 import threading
 import time
@@ -27,6 +29,7 @@ from langfuse_synth_core.companion import (
     CompanionAdapter,
     CompanionAdapterContract,
     Invocation,
+    NativeCompanionAdapterContract,
     ReadinessReport,
     parse_invocation,
 )
@@ -189,6 +192,42 @@ def test_langfuse_sdk_client_bound_to_deployment_connection(adapter, fake_langfu
     assert adapter.langfuse() is client  # cached
 
 
+def test_custom_langfuse_factory_owns_the_only_sdk_client(seeded_env, fake_langfuse_sdk):
+    calls = []
+    custom_client = object()
+
+    def factory(**connection):
+        calls.append(connection)
+        return custom_client
+
+    adapter = CompanionAdapter(_FakeConfig(), langfuse_factory=factory)
+    assert adapter.langfuse() is custom_client
+    assert adapter.langfuse() is custom_client
+    assert calls == [{"host": BASE_URL, "public_key": "pk-seeded", "secret_key": "sk-seeded"}]
+    assert fake_langfuse_sdk == {}  # No second SDK client/tracer is constructed.
+
+
+@pytest.mark.parametrize("emitter_first", [False, True])
+def test_live_emission_uses_the_custom_langfuse_client(seeded_env, monkeypatch, emitter_first):
+    custom_client = object()
+
+    def default_sdk(**kwargs):
+        pytest.fail("live emission must retain the custom tracer and masking client")
+
+    monkeypatch.setitem(__import__("sys").modules, "langfuse",
+                        SimpleNamespace(Langfuse=default_sdk))
+    adapter = CompanionAdapter(_FakeConfig(), langfuse_factory=lambda **_: custom_client)
+    if not emitter_first:
+        assert adapter.langfuse() is custom_client
+
+    emitter = adapter.emitter(environment="acceptance", flush_on_exit=False)
+
+    assert emitter.client is adapter.langfuse() is custom_client
+    assert adapter.emitter().client is custom_client
+    assert emitter.environment == "acceptance"
+    assert emitter.flush_on_exit is False
+
+
 def test_the_spool_writer_is_not_on_the_adapter_surface(adapter):
     """A Surface emits at *now* and rides `emitter()`. The Spool's writer backdates weeks of
     history and has no business on a wall-clock surface, so it is not reachable from the
@@ -225,6 +264,86 @@ def test_llm_binds_without_a_billable_call(adapter, fake_anthropic):
     adapter.llm().bind()
     assert fake_anthropic["constructed_with"] == "anthropic-resolved-key"
     assert fake_anthropic["completions"] == 0
+
+
+def test_native_factory_preserves_async_tools_and_resolved_binding(seeded_env, monkeypatch):
+    bindings = []
+
+    class NativeModel:
+        def bind_tools(self, tools):
+            self.tools = tools
+            return self
+
+        async def ainvoke(self, message):
+            return {"answer": message, "tools": self.tools}
+
+    def factory(**binding):
+        bindings.append(binding)
+        return NativeModel()
+
+    monkeypatch.setenv("LLM_MODEL", "deployment-pinned")
+    adapter = CompanionAdapter(_FakeConfig(), native_llm_factory=factory)
+    client = adapter.native_llm("caller-model")
+    assert asyncio.run(client.bind_tools(["lookup"]).ainvoke("hello")) == {
+        "answer": "hello", "tools": ["lookup"],
+    }
+    assert bindings == [{
+        "provider": "anthropic", "model": "deployment-pinned",
+        "api_key": "anthropic-resolved-key",
+    }]
+    assert adapter.native_llm("another-caller-model") is client
+
+
+@pytest.mark.parametrize("missing", [
+    "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "ANTHROPIC_API_KEY",
+])
+def test_custom_factories_fail_before_binding_when_credentials_missing(
+    seeded_env, monkeypatch, missing,
+):
+    monkeypatch.delenv(missing)
+    calls = []
+
+    def factory(**binding):
+        calls.append(binding)
+        return object()
+
+    adapter = CompanionAdapter(
+        _FakeConfig(), langfuse_factory=factory, native_llm_factory=factory,
+    )
+    accessor = adapter.native_llm if missing == "ANTHROPIC_API_KEY" else adapter.langfuse
+    with pytest.raises(ValueError, match="credential"):
+        accessor()
+    assert calls == []
+
+
+@pytest.mark.parametrize("accessor_name", ["langfuse", "native_llm"])
+def test_concurrent_first_requests_share_one_factory_client(seeded_env, accessor_name):
+    def factory(**_):
+        time.sleep(0.03)  # An SDK constructor can yield while initializing telemetry.
+        return object()
+
+    adapter = CompanionAdapter(
+        _FakeConfig(), langfuse_factory=factory, native_llm_factory=factory,
+    )
+    accessor = getattr(adapter, accessor_name)
+    start = threading.Barrier(4)
+
+    def request(_):
+        start.wait(timeout=2)
+        return accessor()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        clients = list(executor.map(request, range(4)))
+    assert all(client is clients[0] for client in clients)
+
+
+@pytest.mark.parametrize("accessor_name", ["langfuse", "native_llm"])
+def test_factory_must_return_a_client(seeded_env, accessor_name):
+    adapter = CompanionAdapter(
+        _FakeConfig(), langfuse_factory=lambda **_: None, native_llm_factory=lambda **_: None,
+    )
+    with pytest.raises(ValueError, match="return a client"):
+        getattr(adapter, accessor_name)()
 
 
 # -- per-call model: the boundary amendment surfaced by the second migrated kit (G5, #144) --
@@ -319,6 +438,69 @@ def test_readiness_llm_bind_failure_is_flagged(adapter, monkeypatch):
     assert "error" in report.detail["llm"]
 
 
+def test_readiness_checks_custom_clients_without_default_sdk_or_inference(seeded_env, monkeypatch):
+    monkeypatch.setitem(__import__("sys").modules, "anthropic", None)
+    monkeypatch.setitem(__import__("sys").modules, "langfuse", None)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _FakeResp(200, {}))
+    model = SimpleNamespace(ainvoke=lambda *_: pytest.fail("health ran inference"))
+    adapter = CompanionAdapter(
+        _FakeConfig(), langfuse_factory=lambda **_: object(),
+        native_llm_factory=lambda **_: model,
+    )
+    report = adapter.readiness()
+    assert report.ok
+    assert adapter.native_llm() is model
+
+
+def test_native_openai_binding_and_health_use_the_selected_provider(seeded_env, monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-resolved-key")
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _FakeResp(200, {}))
+    bindings = []
+
+    def factory(**binding):
+        bindings.append(binding)
+        return object()
+
+    adapter = CompanionAdapter(
+        _FakeConfig(), llm_model_default="anthropic-only-default", native_llm_factory=factory,
+    )
+    report = adapter.readiness()
+    assert report.ok
+    assert report.detail["llm"] == {"ok": True, "provider": "openai", "model": "gpt-4o"}
+    assert bindings == [{"provider": "openai", "model": "gpt-4o", "api_key": "openai-resolved-key"}]
+
+
+@pytest.mark.parametrize("failed_factory", ["langfuse_factory", "native_llm_factory"])
+def test_factory_failure_keeps_health_alive_and_redacts_error(
+    seeded_env, monkeypatch, failed_factory,
+):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _FakeResp(200, {}))
+
+    def failing(**_):
+        raise RuntimeError("secret sk-seeded anthropic-resolved-key")
+
+    factories = {
+        "langfuse_factory": lambda **_: object(), "native_llm_factory": lambda **_: object(),
+    }
+    factories[failed_factory] = failing
+    adapter = CompanionAdapter(_FakeConfig(), **factories)
+    app = FastAPI()
+    adapter.mount_health(app)
+    response = TestClient(app).get("/healthz")
+    assert response.status_code == 200
+    assert response.json()["ready"] is False
+    detail = response.json()["detail"]
+    component = "langfuse" if failed_factory == "langfuse_factory" else "llm"
+    assert detail[component]["ok"] is False
+    assert detail[component]["error"] == "RuntimeError"
+    assert "sk-seeded" not in response.text
+    assert "anthropic-resolved-key" not in response.text
+
+
 # ---------------------------------------------------------------------------
 # Row: bind 0.0.0.0:<port> + health < 400 + graceful shutdown (the live seam)
 # ---------------------------------------------------------------------------
@@ -405,6 +587,7 @@ def test_adapter_hands_out_a_wall_clock_emitter_not_the_spools_ingestor(adapter)
 
 def test_shell_structurally_satisfies_the_contract(adapter):
     assert isinstance(adapter, CompanionAdapterContract)
+    assert isinstance(adapter, NativeCompanionAdapterContract)
 
 
 # ---------------------------------------------------------------------------
@@ -427,3 +610,121 @@ def test_run_builds_surface_and_serves(adapter, monkeypatch):
 
     adapter.run(app_factory, host="0.0.0.0", port=9090)
     assert served == {"app": sentinel_app, "host": "0.0.0.0", "port": 9090}
+
+
+def test_roles_preserve_explicit_models_and_ready_native_clients(
+    seeded_env, monkeypatch, fake_anthropic
+):
+    import json
+
+    monkeypatch.setenv("LLM_MODEL", "primary-chat-override")
+    monkeypatch.setenv("OPENAI_API_KEY", "resolved-openai-fixture")
+    monkeypatch.setenv(
+        "LLM_ROLES_JSON",
+        json.dumps(
+            {
+                "version": 1,
+                "bindings": {
+                    "judge": {"provider": "anthropic", "model": "explicit-judge"},
+                    "speech": {"provider": "openai", "model": "explicit-speech"},
+                },
+            }
+        ),
+    )
+    constructions = []
+
+    def native_factory(**binding):
+        constructions.append(binding)
+        return SimpleNamespace(transcribe=lambda: "native speech result")
+
+    subject = CompanionAdapter(_FakeConfig(), role_factories={"speech": native_factory})
+    assert subject.llm().model == "primary-chat-override"
+    assert subject.llm_for("judge").model == "explicit-judge"
+    assert subject.llm_for("judge").provider == "anthropic"
+    client = subject.native_llm_for("speech")
+    assert client.transcribe() == "native speech result"
+    assert subject.native_llm_for("speech") is client
+    assert constructions == [
+        {
+            "provider": "openai",
+            "model": "explicit-speech",
+            "api_key": "resolved-openai-fixture",
+        }
+    ]
+    with pytest.raises(ValueError, match="not enabled"):
+        subject.role_binding("disabled_comparison")
+    with pytest.raises(ValueError, match="factory"):
+        subject.native_llm_for("judge")
+    from langfuse_synth_core.companion import RoleCompanionAdapterContract
+
+    assert isinstance(subject, RoleCompanionAdapterContract)
+
+
+def test_readiness_includes_all_enabled_roles_without_calls_or_secret_errors(
+    seeded_env, fake_anthropic, monkeypatch
+):
+    import json
+
+    monkeypatch.setenv(
+        "LLM_ROLES_JSON",
+        json.dumps(
+            {
+                "version": 1,
+                "bindings": {
+                    "judge": {"provider": "anthropic", "model": "judge"},
+                    "speech": {"provider": "openai", "model": "speech"},
+                },
+            }
+        ),
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResp())
+
+    def factory(**kw):
+        raise RuntimeError("must not leak " + kw["api_key"])
+
+    subject = CompanionAdapter(_FakeConfig(), role_factories={"speech": factory})
+    missing = subject.readiness().as_dict()
+    assert missing["ready"] is False
+    assert missing["llm_bound"] is False
+    assert missing["detail"]["roles"] == {
+        "judge": {"provider": "anthropic", "model": "judge", "ok": True},
+        "speech": {
+            "provider": "openai",
+            "model": "speech",
+            "ok": False,
+            "error": "ValueError",
+        },
+    }
+    monkeypatch.setenv("OPENAI_API_KEY", "resolved-sensitive-fixture")
+    failed = subject.readiness().as_dict()
+    assert failed["detail"]["roles"]["speech"]["error"] == "RuntimeError"
+    assert "resolved-sensitive-fixture" not in json.dumps(failed)
+    assert fake_anthropic["completions"] == 0
+
+
+def test_role_only_surface_readiness_does_not_require_an_undeclared_primary(
+    seeded_env, monkeypatch
+):
+    import json
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setenv("OPENAI_API_KEY", "resolved-speech-fixture")
+    monkeypatch.setenv(
+        "LLM_ROLES_JSON",
+        json.dumps(
+            {
+                "version": 1,
+                "bindings": {"speech": {"provider": "openai", "model": "explicit-speech"}},
+            }
+        ),
+    )
+    monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResp())
+    subject = CompanionAdapter(
+        _FakeConfig(),
+        requires_secrets=["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"],
+        role_factories={"speech": lambda **kw: SimpleNamespace(model=kw["model"])},
+    )
+    report = subject.readiness().as_dict()
+    assert report["ready"] is True
+    assert report["detail"]["llm"] == {"ok": True, "required": False}

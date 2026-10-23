@@ -239,6 +239,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["id", "run"],
+        "if": { "required": ["generate"] },
+        "then": {
+          "required": ["resumable"],
+          "properties": { "resumable": { "minLength": 1 } }
+        },
         "properties": {
           "id": {
             "type": "string",
@@ -267,6 +272,10 @@
           "resumable": {
             "type": "string",
             "description": "Command that replays the Spool from the shared volume (CONTRACT.md, The spool): re-runnable after a failure on the batch write path, non-resumable on the OTLP one."
+          },
+          "generate": {
+            "type": "string",
+            "description": "Command that materializes the Spool without Langfuse writes. Depot runs it before the measured-volume cap gate, then imports via the required resumable command (CONTRACT.md, Reserved-verb semantics)."
           },
           "timeout_minutes": { "type": "integer", "minimum": 1 },
           "requires_secrets": {
@@ -324,6 +333,26 @@
               }
             }
           },
+          "llm_roles": {
+            "type": "array", "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"}
+          },
+          "spending_check": {
+            "type": "object", "additionalProperties": false,
+            "required": ["version"],
+            "properties": {"version": {"type": "integer", "const": 1}}
+          },
+          "protected_paths": {
+            "type": "array", "maxItems": 32, "default": [],
+            "description": "Route prefixes requiring Depot presenter or owner/admin access even for public assets. Requires the Companion Adapter transport gate and configured Depot signing secret. Direct wildcard access is disabled for the entire component.",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["path", "access"],
+              "properties": {
+                "path": {"type": "string", "pattern": "^/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*$"},
+                "access": {"enum": ["presenter", "manage"]}
+              }
+            }
+          },
           "default_ttl_hours": { "type": "integer", "minimum": 1, "default": 168 },
           "max_ttl_hours": { "type": "integer", "minimum": 1, "default": 720 },
           "health_path": { "type": "string", "default": "/" }
@@ -342,6 +371,64 @@
           "uniqueItems": true,
           "description": "Ordered list of supported provider ids; the FIRST entry is the deploy-time default. The set of valid ids mirrors the portal provider table (a drift test pins them together).",
           "items": { "enum": ["anthropic", "openai"] }
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "bindings"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "bindings": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider",
+                  "models"
+                ],
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "selected",
+                      "anthropic",
+                      "openai"
+                    ]
+                  },
+                  "models": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": false,
+                    "properties": {
+                      "anthropic": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "openai": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "enabled_by": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
         },
         "models": {
           "type": "object",

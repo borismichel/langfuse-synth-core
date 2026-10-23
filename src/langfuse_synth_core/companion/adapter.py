@@ -21,8 +21,8 @@ The eight rows of ``CompanionAdapterContract`` (#25) map onto this module as:
 3. **health** — :meth:`CompanionAdapter.mount_health` serves the declared ``health_path``
    with status < 400 once the server is up; its body carries the readiness report (story 9).
 4. **secret intake** — the client builders read the worker-injected env and hand the Surface
-   *ready clients only*; the Surface never sees a raw key, sentinel, or source marker (D4,
-   story 2/29).
+   *ready clients only* to request handlers. Optional trusted SDK factories receive resolved
+   credentials only at construction, without another resolver (D4, story 2/29).
 5. **Langfuse client** — bidirectional against the deployment's own connection: read the
    seeded pool (:meth:`reader`, the read seam — with :meth:`read_json` for the raw endpoints
    it does not model) AND emit live traces (:meth:`emitter`, the wall-clock live-emission
@@ -55,9 +55,12 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from . import llm as _llm
+from .spending import OperationSpending, SpendingDecision, SpendingUnavailable
+from ..llm_roles import RoleBinding, decode_role_bindings
 
 # ---------------------------------------------------------------------------
 # 1. Invocation contract (D3) — the fixed launch string, and nothing else
@@ -143,6 +146,49 @@ class CompanionAdapterContract(Protocol):
     def serve(self, app: Any, *, host: str, port: int) -> None: ...
 
 
+@runtime_checkable
+class NativeCompanionAdapterContract(CompanionAdapterContract, Protocol):
+    """Optional native-client capability; existing structural adapters remain valid."""
+
+    def native_llm(self, model: str | None = ...) -> Any: ...
+
+
+@runtime_checkable
+class RoleCompanionAdapterContract(CompanionAdapterContract, Protocol):
+    """Optional independent model roles; the selected-provider API is unchanged."""
+
+    def role_binding(self, name: str) -> RoleBinding: ...
+    def llm_for(self, name: str) -> _llm.LLMClient: ...
+    def native_llm_for(self, name: str) -> Any: ...
+
+
+@runtime_checkable
+class SpendingCompanionAdapterContract(CompanionAdapterContract, Protocol):
+    """Optional fresh authorization immediately before each paid operation."""
+
+    def check_spending(self, provider: str | None = ...) -> SpendingDecision: ...
+
+
+class LangfuseFactory(Protocol):
+    """Trusted SDK construction with the Adapter's resolved project connection.
+
+    Return one ready SDK client with any custom tracer/masking configuration. Do not
+    resolve credentials again, make network requests, or emit observations here.
+    """
+
+    def __call__(self, *, host: str, public_key: str, secret_key: str) -> Any: ...
+
+
+class NativeLLMFactory(Protocol):
+    """Construct a ready native framework client without inference or network calls.
+
+    The Adapter resolves the provider/model/key; the factory only adapts those explicit
+    arguments to its framework. Async, streaming and tool APIs remain framework-owned.
+    """
+
+    def __call__(self, *, provider: str, model: str, api_key: str) -> Any: ...
+
+
 # ---------------------------------------------------------------------------
 # The concrete runtime shell
 # ---------------------------------------------------------------------------
@@ -165,15 +211,41 @@ class CompanionAdapter:
         requires_secrets: list[str] | tuple[str, ...] = (),
         health_path: str = DEFAULT_HEALTH_PATH,
         llm_model_default: str | None = None,
+        langfuse_factory: LangfuseFactory | None = None,
+        native_llm_factory: NativeLLMFactory | None = None,
+        role_factories: dict[str, NativeLLMFactory] | None = None,
     ):
+        self._spending = OperationSpending()
         self.cfg = cfg
         self.requires_secrets = tuple(requires_secrets)
         self.health_path = health_path
         self.llm_model_default = llm_model_default
+        self._langfuse_factory = langfuse_factory
+        self._native_llm_factory = native_llm_factory
+        self._roles = decode_role_bindings(os.environ.get("LLM_ROLES_JSON"))
+        self._role_capability = "LLM_ROLES_JSON" in os.environ
+        self._role_factories = dict(role_factories or {})
+        self._role_llm: dict[str, _llm.LLMClient] = {}
+        self._role_native: dict[str, Any] = {}
+        self._native_llm: dict[tuple[str, str], Any] = {}
+        self._construction_lock = RLock()
         self._langfuse: Any = None
         # Keyed by the model the caller asked for (``None`` = the adapter's own default), so a
         # Surface with a per-request model selector still constructs one SDK client per model.
         self._llm: dict[str | None, _llm.LLMClient] = {}
+
+    def check_spending(self, provider: str | None = None) -> SpendingDecision:
+        """Check immediately before dispatch; denial or unavailability must stop work.
+
+        Pass a role's resolved provider for independent models. No inference, key
+        lookup, reservation or permission cache occurs here. Async callers offload
+        this bounded synchronous request from their event loop.
+        """
+        try:
+            selected = _llm.resolve_provider() if provider is None else provider
+        except ValueError:
+            raise SpendingUnavailable() from None
+        return self._spending.check(selected)
 
     # -- connection identity (D5): the deployment's own base URL ----------
     @property
@@ -188,25 +260,42 @@ class CompanionAdapter:
     def langfuse(self) -> Any:
         """The Langfuse SDK client (prompts/datasets/query surfaces), bound to the
         deployment's connection. Reuses core's ``lfclient`` construction pattern; the SDK is
-        imported lazily so this module loads on a bare runtime install. Cached per adapter."""
-        if self._langfuse is None:
-            from langfuse import Langfuse
+        imported lazily so this module loads on a bare runtime install. An optional
+        ``langfuse_factory`` replaces that construction, allowing one custom tracer/masker.
+        Cached per adapter, including concurrent first callers. The kit owns flush/shutdown
+        of the returned SDK client; factories must not perform network calls."""
+        with self._construction_lock:
+            if self._langfuse is None:
+                factory = self._langfuse_factory
+                public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
+                secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
+                if factory is not None and (not public_key or not secret_key):
+                    raise ValueError("Langfuse factory requires injected project credentials")
+                if factory is None:
+                    from langfuse import Langfuse
 
-            self._langfuse = Langfuse(
-                host=self.base_url,
-                public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
-                secret_key=os.environ.get("LANGFUSE_SECRET_KEY"),
-            )
-        return self._langfuse
+                    factory = Langfuse
+                self._langfuse = factory(
+                    host=self.base_url,
+                    public_key=public_key,
+                    secret_key=secret_key,
+                )
+                if self._langfuse is None:
+                    raise ValueError("Langfuse factory must return a client")
+            return self._langfuse
 
     def emitter(self, **kw: Any) -> Any:
         """The **live-emission** client: wall-clock traces for this Surface's submissions
         (portal #208). A live surface emits at *now*, so it belongs on the Langfuse SDK and
         not on the Spool's backdating machinery — see
         :mod:`langfuse_synth_core.live.emit`, and the determinism line in ``CONTRACT.md``.
-        A fresh emitter each call, keyed to the deployment's connection."""
+        A fresh emitter each call, keyed to the deployment's connection. A configured
+        Langfuse factory supplies its cached client unless the caller explicitly provides
+        a client, preserving the custom tracing/masking pipeline for live emission."""
         from ..live.emit import LiveEmitter
 
+        if self._langfuse_factory is not None and kw.get("client") is None:
+            kw["client"] = self.langfuse()
         return LiveEmitter(self.base_url, public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
                            secret_key=os.environ.get("LANGFUSE_SECRET_KEY"), **kw)
 
@@ -229,6 +318,37 @@ class CompanionAdapter:
 
         return lfread.get_json(self.base_url, path, params, throttle=throttle)
 
+    def forward_otel(self, payload: bytes) -> bytes:
+        """Forward a bounded foreign-runtime OTLP/protobuf batch to this target only.
+
+        The kit owns authenticated local intake, span provenance/filtering and rate
+        limits. Native trace IDs/timestamps are preserved; this transport neither
+        creates SDK spans nor replays a Spool. No redirects or retries are performed.
+        The original partial-success protobuf response is returned to the exporter.
+        """
+        from ._otel import response_deadline
+        from ..ingestion import INGESTION_VERSION, INGESTION_VERSION_HEADER
+
+        if not isinstance(payload, bytes) or len(payload) > 1024 * 1024:
+            raise ValueError('OTLP payload must be bytes of at most 1 MiB')
+        public = os.environ.get('LANGFUSE_PUBLIC_KEY')
+        secret = os.environ.get('LANGFUSE_SECRET_KEY')
+        if not public or not secret:
+            raise ValueError('Langfuse connection is unavailable')
+        with response_deadline(10) as session, session.post(
+                self.base_url + '/api/public/otel/v1/traces', data=payload,
+                auth=(public, secret), headers={'Content-Type': 'application/x-protobuf',
+                    INGESTION_VERSION_HEADER: INGESTION_VERSION},
+                timeout=(3, 10), allow_redirects=False, stream=True) as response:
+            if response.status_code != 200:
+                raise RuntimeError('OTLP target did not accept the batch')
+            result = bytearray()
+            for chunk in response.iter_content(65536):
+                result.extend(chunk)
+                if len(result) > 1024 * 1024:
+                    raise ValueError('OTLP target response exceeds 1 MiB')
+            return bytes(result)
+
     # -- 6. LLM credential resolution (D6) -> ready client ----------------
     def llm(self, model: str | None = None) -> _llm.LLMClient:
         """The ready LLM client for the environment-selected provider (G1 resolution, #138).
@@ -246,19 +366,91 @@ class CompanionAdapter:
             self._llm[model] = _llm.get_llm(model or self.llm_model_default)
         return self._llm[model]
 
+    def native_llm(self, model: str | None = None) -> Any:
+        """Return the configured framework's ready client, preserving its native APIs.
+
+        Uses the same provider/model precedence as :meth:`llm`, cached per resolved
+        provider/model. No synchronous completion wrapper or additional tracing is added.
+        Requires a construction-only ``native_llm_factory`` on the Adapter.
+        """
+        if self._native_llm_factory is None:
+            raise ValueError("native_llm requires a native_llm_factory")
+        with self._construction_lock:
+            resolved = self.llm(model)
+            identity = (resolved.provider, resolved.model)
+            if identity not in self._native_llm:
+                key = os.environ.get(_llm.API_KEY_ENV[resolved.provider])
+                if not key:
+                    raise ValueError("Native LLM factory requires the selected provider credential")
+                client = self._native_llm_factory(
+                    provider=resolved.provider, model=resolved.model,
+                    api_key=key,
+                )
+                if client is None:
+                    raise ValueError("Native LLM factory must return a client")
+                self._native_llm[identity] = client
+            return self._native_llm[identity]
+
+    def role_binding(self, name: str) -> RoleBinding:
+        """Inspect an enabled role's immutable provider/model, never its credential."""
+        if name not in self._roles:
+            raise ValueError(f"LLM role is not enabled: {name}")
+        return self._roles[name]
+
+
+    def llm_for(self, name: str) -> _llm.LLMClient:
+        """Completion client for an explicit role; primary LLM_MODEL never applies."""
+        with self._construction_lock:
+            binding = self.role_binding(name)
+            if name not in self._role_llm:
+                self._role_llm[name] = _llm.LLMClient(binding.provider, binding.model)
+            return self._role_llm[name]
+
+
+    def native_llm_for(self, name: str) -> Any:
+        """Ready native client using this role's explicit trusted construction factory.
+
+        Separate factories avoid handing a speech role to a chat-only constructor.
+        """
+        with self._construction_lock:
+            binding = self.role_binding(name)
+            factory = self._role_factories.get(name)
+            if factory is None:
+                raise ValueError(f"LLM role {name} requires a native factory")
+            if name not in self._role_native:
+                key = os.environ.get(_llm.API_KEY_ENV[binding.provider])
+                if not key:
+                    raise ValueError(f"LLM role {name} requires its provider credential")
+                client = factory(
+                    provider=binding.provider, model=binding.model, api_key=key
+                )
+                if client is None:
+                    raise ValueError("Native LLM role factory must return a client")
+                self._role_native[name] = client
+            return self._role_native[name]
+
+
     # -- readiness surface ------------------------------------------------
     def readiness(self) -> ReadinessReport:
         """Report "Langfuse write path ok / LLM client bound" without a billable LLM call
         and without leaking secret material. Both probes are best-effort: on failure the
         flag is False and only the exception *type name* is recorded (never its message)."""
         lf_ok, lf_err = self._safe(self._probe_langfuse_write)
-        llm_ok, llm_err = self._safe(self._probe_llm_bound)
+        primary_required = (
+            not self._role_capability
+            or bool({"LLM_API_KEY", "ANTHROPIC_API_KEY"} & set(self.requires_secrets))
+            or self._native_llm_factory is not None
+        )
+        llm_ok, llm_err = self._safe(self._probe_llm_bound) if primary_required else (True, None)
 
         lf_detail: dict[str, Any] = {"ok": lf_ok, "base_url": self.base_url}
         if lf_err:
             lf_detail["error"] = lf_err
         llm_detail: dict[str, Any] = {"ok": llm_ok}
-        llm_detail.update(self._llm_identity())
+        if primary_required:
+            llm_detail.update(self._llm_identity())
+        else:
+            llm_detail["required"] = False
         if llm_err:
             llm_detail["error"] = llm_err
 
@@ -268,8 +460,27 @@ class CompanionAdapter:
             # names + presence only — never a secret value.
             "secrets_present": {name: name in os.environ for name in self.requires_secrets},
         }
-        return ReadinessReport(langfuse_write_ok=lf_ok, llm_bound=llm_ok, detail=detail)
+        if self._roles:
+            role_detail = {}
+            for name, binding in self._roles.items():
 
+                def bind_role():
+                    if name in self._role_factories:
+                        self.native_llm_for(name)
+                    else:
+                        self.llm_for(name).bind()
+
+                bound, error = self._safe(bind_role)
+                role_detail[name] = {
+                    "provider": binding.provider,
+                    "model": binding.model,
+                    "ok": bound,
+                }
+                if error:
+                    role_detail[name]["error"] = error
+                llm_ok = llm_ok and bound
+            detail["roles"] = role_detail
+        return ReadinessReport(langfuse_write_ok=lf_ok, llm_bound=llm_ok, detail=detail)
     def _probe_langfuse_write(self) -> None:
         """Prove the write path with an empty OTLP export — auth + endpoint reachability,
         zero spans emitted (the seeded pool is untouched). Raises on any failure.
@@ -280,19 +491,24 @@ class CompanionAdapter:
         (portal #211, removed with the batch path in #213)."""
         from ..seed.ingest import Ingestor
 
+        if self._langfuse_factory is not None:
+            self.langfuse()
         Ingestor.from_env(self.base_url).write_ping()
 
     def _probe_llm_bound(self) -> None:
         """Prove the LLM client binds by *constructing* the provider SDK client from the
-        resolved key — NO completion is made, so no billable call and no token spend."""
-        self.llm().bind()
+        resolved key — or the configured native framework client. NO completion is made,
+        so no billable call and no token spend."""
+        if self._native_llm_factory is not None:
+            self.native_llm()
+        else:
+            self.llm().bind()
 
     def _llm_identity(self) -> dict[str, str]:
         """Non-secret provider/model ids for the readiness detail (best-effort)."""
         try:
-            provider = _llm.resolve_provider()
-            model = _llm.resolve_model(provider, self.llm_model_default)
-            return {"provider": provider, "model": model}
+            resolved = self.llm()
+            return {"provider": resolved.provider, "model": resolved.model}
         except Exception:  # noqa: BLE001 — identity is diagnostic only; never fail readiness
             return {}
 
@@ -327,6 +543,9 @@ class CompanionAdapter:
         ``server.should_exit`` (the flag uvicorn's own SIGTERM/SIGINT handlers set)."""
         import uvicorn
 
+        from .access import guarded_app
+
+        app = guarded_app(app, health_path=self.health_path)
         config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         return uvicorn.Server(config)
 

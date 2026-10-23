@@ -202,6 +202,7 @@ connection and evaluator configuration in a separate custom step before or after
 | --- | ------- |
 | `PORTAL_LIVE_INSTANCE_ID` | The live-instance identity. |
 | `LIVE_BASE_PATH` | `/live/{instance_id}` — the public path prefix. Routes stay mounted at `/` (the proxy strips the prefix); the kit uses this var **only** to render internal hrefs/redirects (`langfuse_synth_core.live.paths.local`). Never for external URLs. |
+| `PORTAL_LIVE_PUBLIC_ORIGIN` | Optional validated canonical HTTP(S) origin, without credentials, path or trailing slash. Injected from operator configuration; never inferred from request headers. `langfuse_synth_core.live.paths.public_origin()` returns it or `None`. Combine with `LIVE_BASE_PATH` only for managed-service editor/callback URLs; ordinary links remain relative. Only enabled capabilities needing absolute URLs may require it. |
 | declared `requires_secrets` | The Langfuse pair, plus the selected provider's key under its **canonical** name (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). The manifest's `LLM_API_KEY` sentinel is resolved portal-side; no container ever carries a literal `LLM_API_KEY` env. |
 | `LLM_PROVIDER` / `LLM_MODEL` | Which provider/model the deployment selected (sentinel components only). Env-only by law (LAN-173); read by `langfuse_synth_core.companion.llm`. A pinned `LLM_MODEL` outranks any per-request model choice. |
 | `ANTHROPIC_METADATA_USER_ID` | Attribution id, when the deployment has one; the kit passes it through as `metadata.user_id` on LLM calls. |
@@ -454,11 +455,36 @@ A kit's live surface (companion) is declared in `live_components[]`: `command`, 
   read seam additionally means kit code names no Langfuse endpoint, and so did not have to
   be edited when the read APIs cut over.
 - **The Companion Adapter** (`langfuse_synth_core.companion`) is the surface between the
-  portal-injected env and kit code: it owns secret intake (kit code never touches a raw
-  key — D4), Langfuse client/emitter/reader access, LLM provider resolution (pinned
+  portal-injected env and kit code: it owns secret intake (request handlers receive ready
+  clients, never raw keys — D4), Langfuse client/emitter/reader access, LLM provider resolution (pinned
   `LLM_MODEL` > per-request model > kit default > provider built-in), the readiness
   report, and serving. `CompanionAdapterContract` is the structural seam the portal's
   live runtime relies on.
+- **Native framework and custom tracing construction:** optional constructor callbacks
+  `langfuse_factory` and `native_llm_factory` let trusted SDK construction code adapt the
+  resolved connection without another credential resolver. The `LangfuseFactory` Protocol
+  receives keyword-only `host`, `public_key`, `secret_key` and returns the custom SDK
+  client. `adapter.langfuse()` caches that exact client; `adapter.emitter()` shares it
+  unless explicitly passed a client. No default client is constructed beside it. It may
+  configure a single custom tracer provider, masking and export filters.
+  The `NativeLLMFactory` Protocol receives keyword-only `provider`, `model`, `api_key`;
+  `adapter.native_llm(model=None)` returns its native object with async, streaming and tool
+  APIs intact. No LangChain or other framework dependency is added to core. Native clients
+  extend the structural seam as `NativeCompanionAdapterContract`; the base
+  `CompanionAdapterContract` stays compatible with existing fixture/custom adapters. Clients
+  cache per resolved provider/model, and construction is synchronized to avoid duplicate
+  clients on concurrent first requests. Resolution matches `adapter.llm()`: a deployment
+  `LLM_MODEL` wins; caller/kit defaults apply only to Anthropic, while a different selected
+  provider uses its own built-in default unless deployment-pinned. No provider is inferred
+  from a model name.
+  These factories are the only trusted construction callbacks receiving raw keys; never
+  log or store them in browser state, read workstation profiles, resolve credentials again,
+  or run inference/network calls during construction. Missing credentials and a factory
+  returning `None` fail explicitly; requesting `native_llm()` without its factory fails.
+  Readiness constructs configured clients and makes only the existing empty Langfuse
+  write probe, never inference; failures keep health HTTP 200 with false readiness and
+  exception type only. The kit flushes/shuts down its returned SDK client at application
+  shutdown. Existing `llm()` and no-factory construction remain supported unchanged.
 - **Run state:** read-only, via the spool mount — see "Per-run anchors". A live surface
   may be stateless instead.
 
@@ -532,3 +558,148 @@ helpers. Existing `window_start`/`sample_timestamps` retain their exclusive-as-o
 Recipes own their observation durations and must keep children within their declared
 calendar range. Inclusive dates do not promise an event at every hour or on every day of
 a sparse run. A truthful actual range is measured from emitted observation timestamps.
+
+### Protected live routes (opt-in)
+
+A `live_components` entry may declare `protected_paths`, up to 32 objects with
+`path` (an absolute segment prefix, e.g. `/apm`) and `access` (`presenter` or
+`manage`). The most restrictive matching scope wins. Depot snapshots this policy
+when creating the live instance. Presenter means the owner, an administrator, or
+an active collaborator; manage means the owner or an administrator. This applies
+also when the participant surface is public.
+
+A protected component must use the Companion Adapter server boundary. Depot
+requires `LIVE_PROXY_SIGNING_SECRET` in its API and worker, derives a separate
+proof per live instance, and injects only that proof and the immutable policy as
+`PORTAL_LIVE_PROOF` / `PORTAL_LIVE_PROTECTED_PATHS` into the component. No portal
+session or signing secret reaches a kit. The API strips caller proof headers and
+authorizes the decoded path, then forwards its own proof. Caddy requires that
+proof on the entire component, closing direct wildcard access. The Adapter checks
+it again against container-network bypass, rejects ambiguous paths, and consumes
+it before application middleware, telemetry or child-service forwarding. The
+exact GET/HEAD health path is the only direct-container exception and must return
+no secrets. It cannot be under a protected prefix. Browser links use the normal
+Depot `/live/{instance}` prefix and never contain a proof.
+
+Components without `protected_paths` retain their previous behavior. Protected
+components fail closed when configuration is missing. A change in signing key
+invalidates existing instance traffic until those instances are stopped and
+started to refresh their derived proof; a process restart alone keeps the old
+container environment. Stop/start creates a fresh isolated identity and policy.
+
+### Native runtime OTLP bridge (optional)
+
+`CompanionAdapter.forward_otel(payload: bytes) -> bytes` forwards at most 1 MiB of
+OTLP/protobuf to the Adapter's bound Langfuse `/api/public/otel/v1/traces` endpoint,
+using its resolved project credentials and the v4 ingestion header. It preserves
+producer trace/span/parent identity and timestamps; no SDK or historical Spool
+observations are created. It follows the host egress proxy and never follows a
+redirect, accepts a caller destination, exposes credentials to the child runtime,
+or retries a potentially accepted batch. A non-200 response, missing credentials,
+network failure or oversized response raises; the original protobuf partial-success
+response is returned for the native exporter to interpret. A ten-second response deadline
+closes the active connection, including a target dripping headers or body bytes, and raises
+`requests.Timeout`. Connection establishment retains its three-second timeout. No network
+worker continues after return.
+
+A consumer must restrict its collector to authenticated loopback intake, bound
+request size/concurrency/rate, validate provenance and observation eligibility,
+and filter fields before forwarding. Native operational spans must not impersonate
+application answer/evaluator subjects. Stop accepting new work before shutdown;
+flush the native producer while its local receiver is still running, then stop
+the receiver. Readiness must distinguish successful local startup from a failed
+export; health probes must not submit billable work. This method is transport only,
+not a public collector, evaluator eligibility policy or durable delivery guarantee.
+
+### Optional feature-specific LLM roles (capability version 1)
+
+The existing `llm.providers` / `llm.models`, `LLM_API_KEY` sentinel and Adapter
+`llm(model)` / `native_llm(model)` semantics remain unchanged. A live component
+may opt into independent models with `llm_roles: [judge, speech]` and:
+
+```yaml
+llm:
+  providers: [anthropic, openai]
+  roles:
+    version: 1
+    bindings:
+      judge:
+        provider: selected
+        models: {anthropic: judge-model-a, openai: judge-model-b}
+      speech:
+        provider: openai
+        models: {openai: speech-model}
+        enabled_by: features.voice
+```
+
+These example model IDs are placeholders; the kit must name available models.
+`selected` follows the deployment's primary provider but uses the role's own
+explicit model. Every possible selected provider needs an entry. An explicit
+provider may be additional to `llm.providers`. `enabled_by` names a boolean
+`config_schema.properties` key with a boolean default; validated deployment
+Configuration overrides the default. Missing switches/models/providers fail;
+there is no implicit provider or model substitution. No switch means always enabled.
+
+The pure runtime module `langfuse_synth_core.llm_roles` exposes immutable
+`RoleBinding(provider, model)`, `resolve_manifest_roles`, and the versioned
+`encode_role_bindings` / `decode_role_bindings` envelope. Depot resolves only the
+roles named by that component and enabled by Configuration, then injects the
+secret-free `LLM_ROLES_JSON` envelope. Each distinct enabled provider uses its
+canonical key environment variable. Browser input never supplies that envelope
+or credentials. Canonical seed/verify jobs still receive no provider credentials.
+
+`CompanionAdapter.role_binding(name)` exposes only provider/model identity.
+`llm_for(name)` returns the uniform completion client for that exact model;
+`LLM_MODEL` does not override it. `native_llm_for(name)` requires a constructor
+in `role_factories={name: factory}` using the existing `NativeLLMFactory`
+contract. A native factory receives the resolved provider/model/key and returns
+a ready client without network requests. Explicit factories keep speech/native
+SDK APIs separate from chat framework constructors. Disabled or unknown roles
+raise `ValueError`. The optional `RoleCompanionAdapterContract` adds these three
+methods without changing the legacy structural Protocol.
+
+A role-only surface need not declare a primary LLM secret; its readiness checks
+only its enabled roles. Legacy surfaces without the role envelope keep their
+existing primary readiness behavior.
+
+Readiness binds every enabled role without inference, reports provider/model,
+bind status and exception class only, and sets `llm_bound=false` if any role
+cannot bind. This proves client construction, not remote model availability or
+provider entitlement; actual requests must retain their real error/usage outcome.
+
+### Per-operation spending checks (optional capability, version 1)
+
+A live component may declare `spending_check: {version: 1}`. Depot must explicitly
+support and enable this capability before starting that component. Existing kits
+that omit it keep their selected-provider and readiness behavior.
+
+`SpendingCompanionAdapterContract.check_spending(provider=None)` makes a fresh,
+bounded synchronous check immediately before **each actual paid dispatch**, including
+retries, judge rows and independent speech calls. The default is the selected chat
+provider; use `adapter.role_binding(role).provider` for a role. Async handlers must
+offload the check from their event loop. Construction and readiness never check or
+perform inference. Stop scheduling when `SpendingDenied` or `SpendingUnavailable`
+is raised; both expose only a safe `reason` code. Never reuse an allowed decision
+as authorization for later calls or a whole batch.
+
+The immutable `SpendingDecision` contains `allowed`, `provider`, `source`,
+`checked_at`, `accounting='hourly-estimate'` and `scope`. `shared-company` applies
+the actual provider's shared monthly cap against current container-hour estimates;
+`external-provider` reports that the deployment owns its key and the company cap
+does not apply. This is point-in-time authorization, **not** a token-level hard
+billing ceiling, reservation, exact cost measurement or cancellation of in-flight
+provider work. Native remote evaluator queues are outside this local check.
+
+Depot injects a private, per-instance `DEPOT_OPERATION_TOKEN` plus the fixed
+`DEPOT_OPERATION_CHECK_URL` (`http://caddy:8081/api/v1/live-assets/{uuid}/operation-permit`).
+It has a separate HMAC purpose from browser/live ingress authority. The Adapter
+accepts no arbitrary destination, follows no redirects and ignores process proxy
+settings for this private bridge. The host signing secret and provider keys are
+never sent to this endpoint. The endpoint verifies active instance/deployment
+lifecycle and exactly one open usage binding for the requested provider; caller
+model/source/pricing overrides are rejected. Unavailable transport fails closed.
+
+A kit supervisor must remove both operation variables from MCP, APM, automation
+and other child process environments. Never forward the token to browsers,
+telemetry, provider clients or tools. Trusted native factories receive only their
+resolved provider credentials; operation authority stays in the owning app.
