@@ -9,7 +9,7 @@ of) consumed as a **git-pinned dependency**. Kits pin it to a tag/SHA in their o
 ```toml
 # kit's pyproject.toml
 dependencies = [
-    "langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1",
+    "langfuse-synth-core @ git+https://github.com/borismichel/langfuse-synth-core@v5.1.0",
 ]
 ```
 
@@ -41,12 +41,13 @@ dependency, and the `python:*-slim` base images don't ship it — install it fir
 
 
 ```bash
-pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v4.1.1'
+pip install 'langfuse-synth-core[authoring] @ git+https://github.com/borismichel/langfuse-synth-core@v5.1.0'
 ```
 
-`v4.1.1` is a published git tag, not a PyPI install. Keep an existing kit's agreed
-pin when working on it. Features documented on an unreleased branch require a
-local checkout (`pip install -e '.[authoring]'`) until they receive a release tag.
+These examples select the `v5.1.0` git release. Resolve its published tag before using
+it; release-preparation branches may document a tag that has not landed yet. Keep an
+existing kit's agreed pin when working on it. Features documented on an unreleased branch
+require a local checkout (`pip install -e '.[authoring]'`) until they receive a release tag.
 
 ## Bootstrap your coding agent
 
@@ -105,7 +106,7 @@ Infisical to supply it):
 RUN --mount=type=secret,id=git_token \
     GIT_TOKEN="$(cat /run/secrets/git_token)" \
     pip install --no-cache-dir \
-      "langfuse-synth-core @ git+https://x-access-token:${GIT_TOKEN}@github.com/borismichel/langfuse-synth-core@v4.1.1"
+      "langfuse-synth-core @ git+https://x-access-token:${GIT_TOKEN}@github.com/borismichel/langfuse-synth-core@v5.1.0"
 ```
 
 This path is **not needed while the repo is public** and is documented only so a future

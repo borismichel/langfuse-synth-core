@@ -155,6 +155,35 @@ def test_publish_workflow_calls_core_kit_publish_pinned_to_the_core_ref(kit):
     )
 
 
+@pytest.mark.parametrize("companion", [False, True])
+@pytest.mark.parametrize("core_ref", [None, "v5.0.0"])
+def test_new_kit_aligns_dependency_and_publish_pins_for_the_release(tmp_path, companion, core_ref):
+    import tomllib
+
+    from packaging.requirements import Requirement
+
+    from langfuse_synth_core.authoring.scaffold import scaffold_kit
+
+    options = {} if core_ref is None else {"core_ref": core_ref}
+    kit = scaffold_kit("release-pins", tmp_path / "kit", with_companion=companion, **options)
+    project = tomllib.loads((kit.dest / "pyproject.toml").read_text())["project"]
+    dependencies = [Requirement(value) for value in
+                    project["dependencies"] + project["optional-dependencies"]["dev"]]
+    expected = "v5.1.0" if core_ref is None else "v5.0.0"
+    core = [requirement for requirement in dependencies
+            if requirement.name == "langfuse-synth-core"]
+
+    assert [requirement.url for requirement in core] == [
+        f"git+https://github.com/borismichel/langfuse-synth-core@{expected}",
+        f"git+https://github.com/borismichel/langfuse-synth-core@{expected}",
+    ]
+    assert core[0].extras == ({"companion"} if companion else set())
+    assert core[1].extras == {"authoring"}
+    workflow = (kit.dest / ".github/workflows/publish.yml").read_text()
+    assert f"uses: borismichel/langfuse-synth-core/.github/workflows/kit-publish.yml@{expected}" \
+        in workflow
+
+
 def test_publish_workflow_grants_exactly_the_needed_permissions(kit):
     import yaml
 

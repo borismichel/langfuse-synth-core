@@ -64,7 +64,7 @@ def test_recipe_is_repeatable_across_process_hash_seeds(tmp_path):
         golden.assert_repeatable(spec)
         return
 
-    # Compatibility with the scaffold's default v4.1.1 pin. Use its public egress
+    # Compatibility with older v4.1.1 authoring tools. Use their public egress
     # guard and the kit-owned seed directly; that release's materialize_spool
     # always pins hash seed 0. Remove this fallback after upgrading the core pin.
     script = """

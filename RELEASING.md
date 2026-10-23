@@ -7,19 +7,19 @@ of the release, not a follow-up.
 
 ## Consuming kits (re-pin ALL of them on every version bump)
 
-Each kit pins the lib **three times** — a runtime dependency, the `[companion]` extra its
-live Surface serves through, **and** the `[authoring]` golden-gate dev pin — and all three
-**must share the same ref**. (It was two until the Companion Adapter migrations, Spec G
-G4/G5: each kit's `[playground]` extra collapsed onto `langfuse-synth-core[companion]`, so
-the web-server deps became a third core ref. Miss it and a re-pin half-lands — the kit runs
-the new core but serves through the old one.)
+Every kit's runtime, companion and `[authoring]` dependencies **must share the same ref**.
+EV and Lender carry three dependency pins because `[companion]` is a separate optional
+dependency. The other kits include `[companion]` in their runtime dependency and carry
+two pins. Each kit also pins the publish workflow, described below.
 
 | Kit repo | File | Pins to bump |
 | --- | --- | --- |
 | `langfuse-synth-ev` | `pyproject.toml` | `langfuse-synth-core @ …@<ref>` (runtime) + `langfuse-synth-core[companion] @ …@<ref>` (the `[playground]` extra) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
 | `langfuse-synth-lender` | `pyproject.toml` | same three pins |
-| `langfuse-synth-prompt` | `pyproject.toml` | runtime `langfuse-synth-core[companion]` + `[authoring]` dev pin, plus its publish workflow ref |
-| `langfuse-synth-support` | `pyproject.toml` | the runtime pin IS `langfuse-synth-core[companion] @ …@<ref>` (scaffolded with `--companion`, so the extra rides the runtime dependency) + `langfuse-synth-core[authoring] @ …@<ref>` (dev) |
+| `langfuse-synth-prompt` | `pyproject.toml` | runtime `langfuse-synth-core[companion]` + `[authoring]` dev pin |
+| `langfuse-synth-support` | `pyproject.toml` | same two pins |
+| `langfuse-synth-parceldesk` | `pyproject.toml` | same two pins |
+| `langfuse-synth-bank-assistant` | `pyproject.toml` | same two pins |
 
 > Add a row here whenever a new kit starts consuming the lib, so this table stays the
 > single source of truth for "who must be re-pinned."
@@ -28,7 +28,7 @@ the new core but serves through the old one.)
 
 Since #102, each kit's `.github/workflows/publish.yml` also pins a ref — the
 `workflow_call` reference into this repo's `kit-publish.yml` (build+GHCR-push+cosign
-sign; see `docs/CI_SIGNING.md`). That pin is **not** one of the two runtime pins above:
+sign; see `docs/CI_SIGNING.md`). That pin is separate from the dependency pins above:
 it selects CI *logic*, not library behavior, so bumping it never touches a kit's
 determinism golden and does **not** require step 4 of the checklist below. Bump it
 independently, whenever a kit wants a `kit-publish.yml` fix or policy change — no need
@@ -38,7 +38,7 @@ to wait for (or force) a coordinated runtime re-pin across every kit.
 
 A version whose whole delta is **CI logic** — `kit-publish.yml` and friends, nothing under
 `src/langfuse_synth_core/` that a kit installs at all — satisfies step 3 by bumping
-each kit's **`publish.yml` workflow pin** and leaves the three runtime pins where they
+each kit's **`publish.yml` workflow pin** and leaves the dependency pins where they
 are. (That bump is a one-line hand edit — `synth-authoring repin` deliberately moves the
 workflow pin *together* with the dependency pins, which is what a full core release wants.) A runtime re-pin would move every kit's dependency ref to a release that changes
 nothing it executes, and cost a golden re-proof (step 4) for a delta the kit cannot
@@ -46,7 +46,7 @@ observe. State in the release PR that the release is CI-only, so the next
 reader can tell a deliberate carve-out from a half-landed re-pin.
 
 **This carve-out does NOT extend to the authoring package.** A kit resolves
-`langfuse_synth_core.authoring` through its `[authoring]` dev pin — one of the three pins that
+`langfuse_synth_core.authoring` through its `[authoring]` dev pin — one of the dependency pins that
 must share a ref — so a release that changes the authoring toolchain or the scaffold templates
 reaches a kit only via the full step 3. Bumping `[authoring]` alone is precisely the
 half-landed re-pin the table above warns about. The golden re-proof in step 4 is not waste
@@ -57,24 +57,67 @@ their workflow pin to `@v1.5.0` and stayed on `@v1.4.0` for runtime. v1.10.0 (th
 `verify-version` guard: a kit tag whose `pyproject.toml` `version` disagrees now fails
 the publish before anything is built — the regression that shipped EV/Lender v0.4.0 and
 support v0.1.4 reporting the previous release's version) was cut the same way. A release
-that moves ANY runtime code takes the full step 3 — all three pins, every kit.
+that moves ANY runtime code takes the full step 3 — all dependency pins, every kit.
 
-## Pending for the next release (unreleased on `main`)
+## v5.1.0
 
-Whoever cuts the next version ships these; delete each entry when its tag lands.
+Release preparation: the tag, coordinated consumer pins and qualification are still
+required. This is a runtime and authoring release; the CI-only exemption does not apply.
+It retains Python >=3.11, Langfuse SDK >=5.0.1,<6 and Langfuse target >=4.59.0 requirements.
+Manifest schema version remains 1. The historical Spool format and deterministic
+generation are unchanged; consuming kits must prove their existing goldens byte-identical.
 
-- Add optional trusted Companion Adapter construction factories for a custom Langfuse
-  client and native async/tool-capable framework clients (Depot #367). No framework
-  dependency or extra-provider credential is added. Existing kits retain their client
-  behavior; custom factories participate in no-inference readiness and single-client
-  caching. This additive public API warrants a minor release with coordinated pins.
+### Companion APIs
 
-- Restore authoring validation for the existing Depot `pipeline[].generate` contract,
-  including its required nonempty `resumable` import command and the provider-secret
-  guard on generated commands (Depot #366). This is a backward-compatible contract
-  correction; Manifest schema version remains 1. It changes the authoring package, so
-  release it with the coordinated consuming-kit and Depot pins described above, not
-  an authoring-only pin. Deterministic Spool generation and runtime transport are unchanged.
+- `LLMClient.complete(response_schema=...)` requests structured provider output while
+  returning the original text and usage. Callers still validate the result; provider
+  errors are not retried as unconstrained requests. `provider_tracing=False` disables
+  Anthropic's built-in per-request tracing when a caller owns the generation span.
+- Trusted `langfuse_factory` and `native_llm_factory` callbacks receive the Adapter's
+  resolved connection. Custom Langfuse clients are cached and reused by `emitter()`;
+  native clients retain their async, streaming and tool APIs. Construction and readiness
+  perform no inference, and core adds no framework dependency (Depot #367).
+- Optional `llm.roles` capability version 1 binds independent feature providers/models.
+  `role_binding`, `llm_for` and `native_llm_for` expose only enabled declared roles; native
+  roles use explicit factories. Readiness binds role-only surfaces without demanding an
+  undeclared primary provider. Existing selected-provider semantics remain unchanged.
+- Optional `spending_check` capability version 1 provides a fresh, fail-closed
+  `check_spending(provider=None)` decision before each paid dispatch, including retries
+  and independent roles. Denial and unavailability expose safe reason codes. This is
+  hourly-estimate authorization, not a reservation or an exact billing ceiling.
+
+### Live transport and access
+
+- Optional `protected_paths` declares presenter/manage route policy. The Adapter validates
+  and consumes Depot's per-instance transport proof before application handlers; ambiguous
+  paths and missing protection configuration fail closed. Unprotected components retain
+  their behavior. Depot's matching ingress support is required.
+- `live.paths.public_origin()` returns the optional validated `PORTAL_LIVE_PUBLIC_ORIGIN`
+  for managed-service editor/callback URLs. Ordinary links remain relative.
+- `forward_otel(payload)` sends native-runtime OTLP only to the bound Langfuse target,
+  preserving trace/span identity, timestamps and the partial-success protobuf response.
+  It follows the host egress proxy, rejects redirects, performs no retries and caps payload
+  and response size at 1 MiB. Its ten-second response deadline closes slow header/body
+  connections without leaving network work running after return. The kit owns authenticated
+  local intake, span filtering and child-process lifecycle.
+
+### Authoring and migration
+
+- Validation supports the existing Depot `pipeline[].generate` split-seed contract,
+  requires a nonempty `resumable` import command and applies the provider-secret guard
+  to generated commands (Depot #366). Malformed role providers return schema findings
+  instead of raising an exception.
+- New scaffolds align runtime, authoring and publish references on `v5.1.0`.
+  `MIN_CORE_REF` remains `v5.0.0`: the emitted templates require no newer core APIs.
+  Explicit compatible pins remain supported.
+- Re-pin all six kits above, including the separate Support and ParcelDesk repositories,
+  and align Depot's API dependency, lockfile and sync workflow pin. Optional role,
+  protected-route and spending capabilities require corresponding Depot support before
+  deployment. Keep runtime, companion and authoring references aligned; update workflow
+  references and prove each kit's full compatibility gates before completing the release.
+
+The [Contract](CONTRACT.md#the-live-surface) defines the factory, role, access, OTLP and
+spending obligations. Release completion follows the checklist below.
 
 ## v5.0.0 candidate
 
