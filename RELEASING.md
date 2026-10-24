@@ -59,6 +59,26 @@ the publish before anything is built — the regression that shipped EV/Lender v
 support v0.1.4 reporting the previous release's version) was cut the same way. A release
 that moves ANY runtime code takes the full step 3 — all dependency pins, every kit.
 
+## v5.1.1 preparation
+
+This patch accepts native OTLP acknowledgements returned as `application/json` by
+converting them to protobuf while retaining partial-rejection counts and messages.
+Valid protobuf acknowledgements remain byte-identical. Malformed acknowledgements,
+unsupported content types and negative rejection counts fail with a body-free error;
+HTTP200 alone is not acceptance. Bound target, credentials, no retries/redirects,
+1 MiB limits and the ten-second deadline remain unchanged.
+
+Package metadata, new-kit defaults and installation examples select `v5.1.1`.
+`MIN_CORE_REF` remains `v5.0.0`; SDK/target requirements, manifest schema and historical
+Spool generation are unchanged. The tag is not available until the reviewed patch
+lands on main and the coordinator publishes that exact commit.
+
+This is a runtime patch, so the CI-only exemption does not apply. Coordinated pins
+and golden checks for all six kits above, plus Depot's dependency/lock/sync references,
+remain release-completion requirements. Banking adoption is the immediate dependency;
+other consumer updates require their separately authorized work. Preparing this PR
+or passing its tests does not complete those downstream obligations.
+
 ## v5.1.0
 
 Release preparation: the tag, coordinated consumer pins and qualification are still

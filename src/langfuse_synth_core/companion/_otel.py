@@ -111,3 +111,33 @@ def response_deadline(seconds):
             raise
         finally:
             deadline.finish()
+
+
+def protobuf_response(body: bytes, content_type: str) -> bytes:
+    """Validate the target acknowledgement and preserve rejection details in protobuf."""
+    import json
+
+    from google.protobuf.json_format import Parse, ParseError
+    from google.protobuf.message import DecodeError
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+        ExportTraceServiceResponse,
+    )
+
+    encoding = content_type.split(';', 1)[0].strip().lower()
+    try:
+        if encoding == 'application/json':
+            text = body.decode('utf-8')
+            if not isinstance(json.loads(text), dict):
+                raise ValueError()
+            report = Parse(text, ExportTraceServiceResponse())
+        elif encoding == 'application/x-protobuf':
+            report = ExportTraceServiceResponse.FromString(body)
+        else:
+            raise ValueError()
+        if report.partial_success.rejected_spans < 0:
+            raise ValueError()
+    except (ValueError, ParseError, DecodeError):
+        # Target error bodies may contain secrets or customer data. The caller only
+        # needs to know that acceptance was not confirmed; never echo that body.
+        raise ValueError('Invalid OTLP target response') from None
+    return report.SerializeToString() if encoding == 'application/json' else body

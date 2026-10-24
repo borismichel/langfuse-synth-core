@@ -324,9 +324,10 @@ class CompanionAdapter:
         The kit owns authenticated local intake, span provenance/filtering and rate
         limits. Native trace IDs/timestamps are preserved; this transport neither
         creates SDK spans nor replays a Spool. No redirects or retries are performed.
-        The original partial-success protobuf response is returned to the exporter.
+        A protobuf response is returned to the exporter. Targets returning OTLP JSON
+        are normalized without discarding partial-success rejection details.
         """
-        from ._otel import response_deadline
+        from ._otel import protobuf_response, response_deadline
         from ..ingestion import INGESTION_VERSION, INGESTION_VERSION_HEADER
 
         if not isinstance(payload, bytes) or len(payload) > 1024 * 1024:
@@ -347,7 +348,7 @@ class CompanionAdapter:
                 result.extend(chunk)
                 if len(result) > 1024 * 1024:
                     raise ValueError('OTLP target response exceeds 1 MiB')
-            return bytes(result)
+            return protobuf_response(bytes(result), response.headers.get('Content-Type', ''))
 
     # -- 6. LLM credential resolution (D6) -> ready client ----------------
     def llm(self, model: str | None = None) -> _llm.LLMClient:
