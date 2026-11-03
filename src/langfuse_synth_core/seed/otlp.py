@@ -70,6 +70,9 @@ COST_DETAILS = "langfuse.observation.cost_details"
 PROMPT_NAME = "langfuse.observation.prompt.name"
 PROMPT_VERSION = "langfuse.observation.prompt.version"
 COMPLETION_START_TIME = "langfuse.observation.completion_start_time"
+#: JSON list of ``{"name", "version"}`` objects. Set on each span that should link to a
+#: skill version; Langfuse does not inherit it from a parent span on the raw OTLP wire.
+SKILLS_AVAILABLE = "langfuse.observation.skills_available"
 
 #: The trace-level keys copied from the trace root onto every span of that trace, in this
 #: order. v4 queries observations directly, so an attribute that sits only on the root is
@@ -258,6 +261,42 @@ def generation_extra_attrs(
     if prompt_version is not None:
         extra.append(int_attr(PROMPT_VERSION, prompt_version))
     return extra
+
+
+def skills_available_attrs(skills: list[dict] | None) -> list[dict]:
+    """The skill-availability attribute, or nothing when the caller left it unset.
+
+    ``None`` returns an empty list so the builders add no attribute and an existing
+    Spool stays byte-identical. A list — including an empty one — is one string
+    attribute whose value is compact JSON: object keys sorted, list order preserved.
+    Items are ``{"name": str, "version": int}``.
+    """
+    if skills is None:
+        return []
+    return [string_attr(SKILLS_AVAILABLE, skills_available_json(skills))]
+
+
+def skills_available_json(skills: list[dict]) -> str:
+    """Compact, key-sorted JSON for ``langfuse.observation.skills_available``."""
+    if not isinstance(skills, list):
+        raise OtlpError("skills_available must be a list of {name, version} objects")
+    return json.dumps(
+        [_skill_ref(item) for item in skills],
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _skill_ref(item) -> dict:
+    if not isinstance(item, dict):
+        raise OtlpError("skills_available items must be {name, version} objects")
+    name = item.get("name")
+    version = item.get("version")
+    if not isinstance(name, str) or name == "":
+        raise OtlpError("skills_available name must be a non-empty string")
+    if type(version) is not int:
+        raise OtlpError("skills_available version must be an int")
+    return {"name": name, "version": version}
 
 
 # ---------------------------------------------------------------------------

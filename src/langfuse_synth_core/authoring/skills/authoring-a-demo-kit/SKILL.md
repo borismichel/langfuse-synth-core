@@ -110,6 +110,33 @@ walkthrough works; useful offline fixes can continue while a target is unavailab
 **Complete when:** all three beats have implementation, scenario assertions and an
 observed small walkthrough. Identify any live outcomes still pending.
 
+## Skills
+
+Use this when the demo shows Langfuse Skill Management. The project must already contain
+each skill version a trace names; publishing is a setup step, not seed. Seed stays
+model-free and only records the version the fixture names.
+
+Pass `skills_available=[{"name": "<skill>", "version": <int>}]` to `span_event`,
+`observation_event` and `generation_event`. When it is set, the span carries
+`langfuse.observation.skills_available` as compact JSON with sorted keys and the list
+order unchanged. Leave it unset and the attribute is absent, so an existing Spool stays
+byte-identical. The live seam takes the same argument on `trace`, `generation` and `tool`.
+Attach it to the tool observation as well as the generation, or the loaded version does
+not resolve.
+
+Langfuse treats a successful tool observation as a skill load when its input matches an
+available skill:
+
+| Tool | Input |
+| --- | --- |
+| `loadSkill` | `name` — the skill name; resolves the root `SKILL.md` |
+| `skill_read` | `skillName` and a relative `path` |
+
+`skill` and `Skill` use the same `name` input. `readFile` and `Read` identify an
+installed file by `path` or `file_path`. Publish the folder with
+`langfuse_synth_core.skills.publish_skill_bundle` (SDK v5 skills API, no model, not
+imported by seed) before `seed` or a live run references it.
+
 ## 4. Check offline
 
 Run the relevant local tests while editing. Before moving on, use the installed core's

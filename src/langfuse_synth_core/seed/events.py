@@ -78,11 +78,13 @@ def span_event(
     level: str | None = None,
     status_message: str | None = None,
     metadata: dict | None = None,
+    skills_available: list[dict] | None = None,
 ) -> dict:
     return otlp.observation_span(
         obs_id=obs_id, trace_id=trace_id, name=name, obs_type="span", start=start,
         end=end, parent_id=parent_id, environment=environment, input=input,
         output=output, level=level, status_message=status_message, metadata=metadata,
+        extra=otlp.skills_available_attrs(skills_available) or None,
     )
 
 
@@ -101,6 +103,7 @@ def observation_event(
     level: str | None = None,
     status_message: str | None = None,
     metadata: dict | None = None,
+    skills_available: list[dict] | None = None,
 ) -> dict:
     """A typed agent-graph observation (AGENT/TOOL/RETRIEVER/…), riding the
     ``langfuse.observation.type`` span attribute.
@@ -115,6 +118,7 @@ def observation_event(
         end=end, parent_id=parent_id, environment=environment, input=input,
         output=output, level=level, status_message=status_message,
         metadata=dict(metadata or {}),
+        extra=otlp.skills_available_attrs(skills_available) or None,
     )
 
 
@@ -139,16 +143,21 @@ def generation_event(
     prompt_name: str | None = None,
     prompt_version: int | None = None,
     model_parameters: dict | None = None,
+    skills_available: list[dict] | None = None,
 ) -> dict:
     return otlp.observation_span(
         obs_id=obs_id, trace_id=trace_id, name=name, obs_type="generation", start=start,
         end=end, parent_id=parent_id, environment=environment, input=input,
         output=output, level=level, status_message=status_message, metadata=metadata,
-        extra=otlp.generation_extra_attrs(
-            model=model, usage_details=usage_details, cost_details=cost_details,
-            completion_start=completion_start or start, model_parameters=model_parameters,
-            prompt_name=prompt_name, prompt_version=prompt_version,
-        ),
+        extra=[
+            *otlp.generation_extra_attrs(
+                model=model, usage_details=usage_details, cost_details=cost_details,
+                completion_start=completion_start or start,
+                model_parameters=model_parameters,
+                prompt_name=prompt_name, prompt_version=prompt_version,
+            ),
+            *otlp.skills_available_attrs(skills_available),
+        ],
     )
 
 

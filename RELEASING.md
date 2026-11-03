@@ -20,6 +20,7 @@ two pins. Each kit also pins the publish workflow, described below.
 | `langfuse-synth-support` | `pyproject.toml` | same two pins |
 | `langfuse-synth-parceldesk` | `pyproject.toml` | same two pins |
 | `langfuse-synth-bank-assistant` | `pyproject.toml` | same two pins |
+| `langfuse-synth-returns` | `pyproject.toml` | runtime `langfuse-synth-core[companion]` + `[authoring]` dev pin |
 
 > Add a row here whenever a new kit starts consuming the lib, so this table stays the
 > single source of truth for "who must be re-pinned."
@@ -58,6 +59,31 @@ their workflow pin to `@v1.5.0` and stayed on `@v1.4.0` for runtime. v1.10.0 (th
 the publish before anything is built — the regression that shipped EV/Lender v0.4.0 and
 support v0.1.4 reporting the previous release's version) was cut the same way. A release
 that moves ANY runtime code takes the full step 3 — all dependency pins, every kit.
+
+## v5.2.0 preparation
+
+Optional skill-management support for the returns demo kit. With the new parameters
+unset, Spool bytes are unchanged and existing kits' golden checks do not move.
+
+- `span_event`, `observation_event` and `generation_event` take optional
+  `skills_available`. When set, the span carries `langfuse.observation.skills_available`
+  as compact JSON (sorted keys, list order preserved). Unset omits the attribute.
+- The live seam accepts the same parameter on `trace`, `generation` and `tool`, and
+  passes it through the SDK's `propagate_attributes(skills_available=...)`.
+- `publish_skill_bundle` reads a skill folder and creates a version through the
+  Langfuse Python SDK v5 skills API (`client.api.skills.get`, `create_version`,
+  `set_labels`). Matching file hashes skip a new version and only repair labels.
+  It is not on the seed path and does not call a model.
+- Verified against Langfuse Python SDK **5.1.0** (`langfuse.api.skills`) and the
+  skill-management docs. Do not tag from this branch.
+
+Package metadata, new-kit defaults and installation examples select `v5.2.0`.
+`MIN_CORE_REF` remains `v5.0.0`. SDK/target requirements and the manifest schema are
+unchanged. This is a runtime change, so the CI-only exemption does not apply.
+Coordinated pins and golden checks for every kit in the table above, including
+`langfuse-synth-returns`, remain release-completion requirements. Preparing this
+note or passing its tests does not complete those downstream obligations, and it
+does not publish the tag.
 
 ## v5.1.1 preparation
 

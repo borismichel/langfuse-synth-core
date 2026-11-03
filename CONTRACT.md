@@ -298,6 +298,18 @@ event builders and the live seam both raise on a value outside the vocabulary, a
 spelling to `observation_event`, which lowercases for the wire; a live surface's `as_type`
 reaches Langfuse verbatim through the SDK and is therefore checked case and all.
 
+**Skills.** A span may name the skill versions an agent could use. The optional
+`skills_available` argument on `span_event`, `observation_event` and `generation_event`
+(and, on the live seam, `trace`, `generation` and `tool`) writes the OTel attribute
+`langfuse.observation.skills_available`: a compact JSON list of `{"name", "version"}`
+objects, keys sorted, list order preserved. Leave the argument unset and the attribute
+is absent — existing Spools stay byte-identical. Langfuse resolves a successful tool
+observation as a skill load when its input matches one of those versions. The tool names
+this depot uses are `loadSkill` (input `name`, the root `SKILL.md`) and `skill_read`
+(input `skillName` and a relative `path`). The named skill versions must already exist
+in the project before a seeded trace references them. Publishing a bundle is not part of
+`seed` and does not call a model.
+
 **Every write carries `x-langfuse-ingestion-version: 4`.** Without it a v4 target files the
 write on the legacy read path, where it is invisible to every v4 query endpoint and dashboard
 while the legacy ones answer it happily — a deploy that looks healthy and shows an empty

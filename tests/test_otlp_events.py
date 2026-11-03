@@ -19,6 +19,7 @@ import pytest
 from langfuse_synth_core.seed.events import (
     event_event,
     generation_event,
+    observation_event,
     span_event,
     trace_event,
 )
@@ -159,3 +160,65 @@ def test_the_agent_graph_types_ride_the_wire_natively():
     )
     assert attrs(typed)["langfuse.observation.type"] == "tool"
     assert "langfuse.observation.metadata.observation_type" not in attrs(typed)
+
+
+SKILL = "langfuse.observation.skills_available"
+SKILLS = [
+    {"version": 2, "name": "returns-and-refunds"},
+    {"name": "other-skill", "version": 1},
+]
+SKILLS_JSON = (
+    '[{"name":"returns-and-refunds","version":2},{"name":"other-skill","version":1}]'
+)
+
+
+def _builders():
+    """The three builders that accept ``skills_available``, called the same way a kit does."""
+    end = TS + timedelta(seconds=2)
+    return (
+        lambda **kw: span_event(obs_id=OID, trace_id=TID, name="step", start=TS, end=TS, **kw),
+        lambda **kw: observation_event(
+            obs_id=OID, trace_id=TID, name="loadSkill", obs_type="TOOL", start=TS, end=TS, **kw),
+        lambda **kw: generation_event(
+            obs_id=OID, trace_id=TID, name="decision", start=TS, end=end,
+            model="claude-sonnet-4", usage_details={"input": 120, "output": 40},
+            cost_details={"total": 0.0031}, **kw),
+    )
+
+
+def test_skills_available_is_absent_when_unset_and_byte_identical_to_omitting_it():
+    """An unset argument adds no attribute, so a kit that does not pass it keeps its Spool."""
+    for build in _builders():
+        omitted = build()
+        explicit = build(skills_available=None)
+        assert SKILL not in attrs(omitted)
+        assert json.dumps(omitted, sort_keys=True) == json.dumps(explicit, sort_keys=True)
+
+
+def test_skills_available_is_compact_json_with_sorted_keys_and_stable_list_order():
+    """Object key order in the call must not move the wire; list order must."""
+    swapped_keys = [
+        {"name": "returns-and-refunds", "version": 2},
+        {"version": 1, "name": "other-skill"},
+    ]
+    for build in _builders():
+        assert attrs(build(skills_available=SKILLS))[SKILL] == SKILLS_JSON
+        assert attrs(build(skills_available=swapped_keys))[SKILL] == SKILLS_JSON
+
+    reversed_list = list(reversed(SKILLS))
+    span = span_event(obs_id=OID, trace_id=TID, name="step", start=TS, end=TS,
+                      skills_available=reversed_list)
+    assert attrs(span)[SKILL] == (
+        '[{"name":"other-skill","version":1},{"name":"returns-and-refunds","version":2}]'
+    )
+    empty = span_event(obs_id=OID, trace_id=TID, name="step", start=TS, end=TS,
+                       skills_available=[])
+    assert attrs(empty)[SKILL] == "[]"
+
+
+def test_skills_available_rejects_a_malformed_reference():
+    from langfuse_synth_core.seed.otlp import OtlpError
+
+    with pytest.raises(OtlpError, match="version"):
+        span_event(obs_id=OID, trace_id=TID, name="step", start=TS, end=TS,
+                   skills_available=[{"name": "returns-and-refunds", "version": True}])
