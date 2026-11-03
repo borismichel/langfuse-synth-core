@@ -249,3 +249,49 @@ def test_scoring_an_observation_names_it_as_the_subject(emitter, client):
     assert obs_score["observation_id"] and obs_score["trace_id"]
     assert trace_score["name"] == "user_disagreement"
     assert "observation_id" not in trace_score
+
+
+def test_unset_skills_available_is_not_propagated(emitter, propagated):
+    with emitter.trace("returns") as trace:
+        with trace.generation("decide", model="claude"):
+            pass
+        with trace.tool("loadSkill", input={"name": "returns-and-refunds"}):
+            pass
+
+    assert propagated.seen == [{"trace_name": "returns"}]
+
+
+def test_skills_available_reaches_trace_generation_and_tool(emitter, propagated, client):
+    """The SDK v5.1.0 skills API has no per-observation argument. The seam passes the
+    list through ``propagate_attributes``, which writes
+    ``langfuse.observation.skills_available`` onto the current span."""
+    supplied = [{"version": 2, "name": "returns-and-refunds"}]
+    normalised = [{"name": "returns-and-refunds", "version": 2}]
+    with emitter.trace("returns", skills_available=supplied) as trace:
+        with trace.generation("decide", model="claude", skills_available=supplied):
+            pass
+        with trace.tool("skill_read", skills_available=[],
+                        input={"skillName": "returns-and-refunds", "path": "SKILL.md"}):
+            pass
+
+    assert [call["skills_available"] for call in propagated.seen] == [
+        normalised, normalised, [],
+    ]
+    by_name = {span.kw["name"]: span for span in client.spans}
+    assert by_name["decide"].kw["as_type"] == "generation"
+    assert "skills_available" not in by_name["decide"].kw
+    assert by_name["skill_read"].kw["as_type"] == "tool"
+    assert by_name["skill_read"].kw["input"]["path"] == "SKILL.md"
+    assert trace.id == "trace-abc"
+
+
+def test_live_skill_refs_serialize_to_the_spool_attribute():
+    """SDK 5.1.0 ``serialize_available_skills`` does not sort keys. Normalising to
+    ``name`` then ``version`` makes its compact JSON match the Spool attribute."""
+    from langfuse._client.skills import serialize_available_skills
+
+    from langfuse_synth_core.live.emit import _skill_refs
+    from langfuse_synth_core.seed.otlp import skills_available_json
+
+    supplied = [{"version": 2, "name": "returns-and-refunds"}, {"name": "other", "version": 1}]
+    assert serialize_available_skills(_skill_refs(supplied)) == skills_available_json(supplied)

@@ -120,7 +120,8 @@ class LiveEmitter:
     def trace(self, name: str, *, user_id: str | None = None, session_id: str | None = None,
               tags: Sequence[str] | None = None, environment: str | None = None,
               input: Any = None, metadata: dict | None = None,
-              version: str | None = None) -> Iterator["LiveTrace"]:
+              version: str | None = None,
+              skills_available: list[dict] | None = None) -> Iterator["LiveTrace"]:
         """Emit one wall-clock trace: a root observation with everything nested inside it.
 
         The block's exit ends the root observation and then (by default) flushes, so the
@@ -135,6 +136,10 @@ class LiveEmitter:
             "tags": list(tags) if tags else None,
             "environment": environment or self.environment,
             "metadata": metadata, "version": version,
+            # SDK v5.1.0 attaches this through propagate_attributes only. It lands on
+            # the root span (created inside this context) and on child spans as
+            # langfuse.observation.skills_available. Unset stays out of the call.
+            "skills_available": _skill_refs(skills_available),
         })
         try:
             with self.propagate(**attributes):
@@ -185,7 +190,7 @@ class LiveObservation:
     Nesting is explicit — a child is opened *on its parent*, not on whatever the SDK's
     ambient context happens to be — because a live surface is a web server: two submissions
     can be in flight in the same process, and an agent graph assembled out of ambient
-    context would interleave them. Every level answers the same four openers, so a tree of
+    context would interleave them. Every level answers the same openers, so a tree of
     any depth is written the way it reads.
     """
 
@@ -232,16 +237,49 @@ class LiveObservation:
         return self.observation(name, as_type="event", **fields)
 
     def generation(self, name: str, *, model: str | None = None, usage: dict | None = None,
-                   cost: dict | None = None, prompt: Any = None, **fields: Any):
+                   cost: dict | None = None, prompt: Any = None,
+                   skills_available: list[dict] | None = None, **fields: Any):
         """Nest a model call, with the columns the demo's cost and usage curves read.
 
         ``usage`` / ``cost`` are the SDK's ``usage_details`` / ``cost_details`` under the
         names a kit already uses for them on the Spool's builders, so the two seams read
-        alike from kit code.
+        alike from kit code. ``skills_available`` is the same optional list the Spool
+        builders take; the SDK attaches it through ``propagate_attributes`` once this
+        generation is the current span, so a nested list replaces the trace's list.
         """
-        return self.observation(name, as_type="generation", model=model,
-                                usage_details=usage, cost_details=cost, prompt=prompt,
-                                **fields)
+        return self._open(name, as_type="generation", skills_available=skills_available,
+                          model=model, usage_details=usage, cost_details=cost,
+                          prompt=prompt, **fields)
+
+    def tool(self, name: str, *, skills_available: list[dict] | None = None, **fields: Any):
+        """Nest a tool call.
+
+        Skill loads use the names Langfuse recognises (``loadSkill`` with input ``name``,
+        ``skill_read`` with ``skillName`` and ``path``). Pass ``skills_available`` here
+        as well as on the generation so the loaded version can be resolved.
+        """
+        return self._open(name, as_type="tool", skills_available=skills_available, **fields)
+
+    @contextmanager
+    def _open(self, name: str, *, as_type: str,
+              skills_available: list[dict] | None = None,
+              **fields: Any) -> Iterator["LiveObservation"]:
+        """Open a child, then attach skills to *this* span rather than its parent.
+
+        ``propagate_attributes`` writes onto the current span. Entering it before the
+        child exists would stamp the parent, so the skill list is applied only after
+        ``start_as_current_observation`` has made the child current.
+        """
+        refs = _skill_refs(skills_available)
+        with self._obs.start_as_current_observation(
+                name=name, as_type=checked_observation_type(as_type),
+                **_pruned(fields)) as obs:
+            child = LiveObservation(obs, self._emitter)
+            if refs is None:
+                yield child
+            else:
+                with self._emitter.propagate(skills_available=refs):
+                    yield child
 
     def score(self, name: str, value: float | str, **kw: Any) -> None:
         """Score this observation."""
@@ -276,3 +314,27 @@ class LiveTrace(LiveObservation):
 def _pruned(fields: dict) -> dict:
     """Drop unset values — an explicit ``None`` is a value to the SDK, not an omission."""
     return {k: v for k, v in fields.items() if v is not None}
+
+
+def _skill_refs(skills: list[dict] | None) -> list[dict] | None:
+    """``None`` stays unset. A list becomes ``{name, version}`` objects in caller order.
+
+    Key insertion order is ``name`` then ``version``, which is also sorted order, so
+    the SDK's compact JSON (it does not sort keys itself) matches the Spool attribute.
+    """
+    if skills is None:
+        return None
+    if not isinstance(skills, list):
+        raise ValueError("skills_available must be a list of {name, version} objects")
+    refs: list[dict] = []
+    for item in skills:
+        if not isinstance(item, dict):
+            raise ValueError("skills_available items must be {name, version} objects")
+        name = item.get("name")
+        version = item.get("version")
+        if not isinstance(name, str) or name == "":
+            raise ValueError("skills_available name must be a non-empty string")
+        if type(version) is not int:
+            raise ValueError("skills_available version must be an int")
+        refs.append({"name": name, "version": version})
+    return refs

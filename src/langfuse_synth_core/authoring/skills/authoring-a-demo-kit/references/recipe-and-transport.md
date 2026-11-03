@@ -41,6 +41,19 @@ Core's `observation_event` validates and normalises its `obs_type`. The live sea
 the runtime guards cover dynamically constructed values. Choosing the appropriate type
 still belongs to the `langfuse` skill.
 
+## Skills
+
+`span_event`, `observation_event` and `generation_event` take an optional
+`skills_available` list of `{"name", "version"}` objects. When set, the span attribute
+`langfuse.observation.skills_available` is compact JSON with sorted keys and the list
+order preserved. Unset omits the attribute. The live `trace`, `generation` and `tool`
+helpers take the same argument.
+
+Langfuse links a successful `loadSkill` tool (input `name`) or `skill_read` tool
+(input `skillName` and `path`) to a version in that list. The skill version has to
+exist in the project before the seeded trace references it. Publishing the bundle is
+not part of seed.
+
 ## Transport and migration detail
 
 Every observation is written as an OTLP span. A trace is represented by its root
